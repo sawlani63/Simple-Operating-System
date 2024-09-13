@@ -72,6 +72,7 @@
  * A dummy starting syscall
  */
 #define SOS_SYSCALL0 0
+#define SYSCALL_SOS_WRITE SYS_writev
 
 /* The linker will link this symbol to the start address  *
  * of an archive of attached applications.                */
@@ -106,6 +107,8 @@ static struct {
     seL4_CPtr stack;
 } user_process;
 
+struct network_console *console;
+
 /**
  * Deals with a syscall and sets the message registers before returning the
  * message info to be passed through to seL4_ReplyRecv()
@@ -123,6 +126,16 @@ seL4_MessageInfo_t handle_syscall(UNUSED seL4_Word badge, UNUSED int num_args, b
 
     /* Process system call */
     switch (syscall_number) {
+    case SYSCALL_SOS_WRITE:
+        printf("syscall: some thread made syscall 66!\n");
+        /* construct a reply message of length 1 */
+        reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+        /* Receive a byte from sos.c */
+        char receive = seL4_GetMR(1);
+        /* Set the reply message to be the return value of console_send */
+        seL4_SetMR(0, network_console_send(console, &receive, 1));
+
+        break;
     case SOS_SYSCALL0:
         ZF_LOGV("syscall: thread example made syscall 0!\n");
         /* construct a reply message of length 1 */
@@ -590,6 +603,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     /* Initialise the network hardware. */
     printf("Network init\n");
     network_init(&cspace, timer_vaddr, ntfn);
+    console = network_console_init();
 
 #ifdef CONFIG_SOS_GDB_ENABLED
     /* Initialize the debugger */

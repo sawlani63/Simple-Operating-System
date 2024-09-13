@@ -49,10 +49,16 @@ int sos_read(int file, char *buf, size_t nbyte)
 
 int sos_write(int file, const char *buf, size_t nbyte)
 {
-    /* MILESTONE 0: implement this to use your syscall and
-     * writes to the network console!
-     * Writing to files will come in later milestones.
-     */
+    /* NOTE: We only need to send one byte at a time as this is handled by
+     * __stdio_write + sys_writev where __stdio_write takes the entire buffer
+     * and continuously calls sys_writev until the entire length is written. */
+    if (file == STDOUT_FD) {
+        seL4_MessageInfo_t msg = seL4_MessageInfo_new(0, 0, 0, 2);
+        seL4_SetMR(0, SYSCALL_SOS_WRITE);
+        seL4_SetMR(1, *buf);
+        seL4_Call(SOS_IPC_EP_CAP, msg);
+        return seL4_GetMR(0);
+    }
     return sos_debug_print(buf, nbyte);
 }
 
