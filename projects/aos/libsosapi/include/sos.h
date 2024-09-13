@@ -18,6 +18,7 @@
 #include <sel4/sel4.h>
 
 /* System calls for SOS */
+#define SYSCALL_SOS_WRITE SYS_writev
 
 /* Endpoint for talking to SOS */
 #define SOS_IPC_EP_CAP     (0x1)
