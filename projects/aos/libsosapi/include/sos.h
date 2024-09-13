@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <sel4/sel4.h>
+#include <sys/syscall.h>
 
 /* System calls for SOS */
 #define SYSCALL_SOS_WRITE SYS_writev
