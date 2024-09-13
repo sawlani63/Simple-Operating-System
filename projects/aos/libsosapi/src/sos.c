@@ -17,6 +17,10 @@
 
 #include <sel4/sel4.h>
 
+#define STDIN_FD 0
+#define STDOUT_FD 1
+#define STDERR_FD 2
+
 static size_t sos_debug_print(const void *vData, size_t count)
 {
 #ifdef CONFIG_DEBUG_BUILD
