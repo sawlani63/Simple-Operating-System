@@ -17,6 +17,8 @@
  * to set registers and configure timeouts. */
 #include "device.h"
 
+#include <stdio.h>
+
 static struct {
     volatile meson_timer_reg_t *regs;
     /* Add fields as you see necessary */
@@ -24,12 +26,16 @@ static struct {
 
 int start_timer(unsigned char *timer_vaddr)
 {
-    int err = stop_timer();
-    if (err != 0) {
-        return err;
-    }
-
-    clock.regs = (meson_timer_reg_t *)(timer_vaddr + TIMER_REG_START);
+    meson_timer_reg_t temp;
+    clock.regs = &temp;
+    
+    uint32_t *register_addresses = (uint32_t *) (timer_vaddr + TIMER_REG_START);
+    clock.regs->mux = register_addresses[0];
+    clock.regs->timer_a = register_addresses[1];
+    clock.regs->timer_b = register_addresses[2];
+    clock.regs->timer_c = register_addresses[3];
+    clock.regs->timer_d = register_addresses[4];
+    printf("mux: %p, a: %p, b: %p, c: %p, d: %p\n", clock.regs->mux, register_addresses[1], register_addresses[2], register_addresses[3], register_addresses[4]);
 
     return CLOCK_R_OK;
 }
