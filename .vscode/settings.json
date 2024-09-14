@@ -1,5 +1,11 @@
 {
     "files.associations": {
-        "sel4.h": "c"
+        "sel4.h": "c",
+        "device.h": "c",
+        "stdint.h": "c",
+        "types.h": "c",
+        "objecttype.h": "c",
+        "stdlib.h": "c",
+        "timestamp.h": "c"
     }
 }

@@ -24,12 +24,26 @@ static struct {
 
 int start_timer(unsigned char *timer_vaddr)
 {
-    int err = stop_timer();
-    if (err != 0) {
-        return err;
+    /* If the driver is already initialised we stop the timer and restart.*/
+    if (stop_timer() == CLOCK_R_FAIL) {
+        return CLOCK_R_UINT;
     }
 
-    clock.regs = (meson_timer_reg_t *)(timer_vaddr + TIMER_REG_START);
+    /* Allocate memory for the clock registers, and identify the vaddr of the
+     * timer registers. Each register is 32 bits, so we index like an array.*/
+    clock.regs = malloc(sizeof(meson_timer_reg_t));
+    if (clock.regs == NULL) {
+        return CLOCK_R_UINT;
+    }
+    uint32_t *register_addresses = (uint32_t *) (timer_vaddr + TIMER_REG_START);
+
+    /* We only need 10ms precision, so the default 1us timerbase resolution
+     * is overkill and may waste system resources. We will set it to 1ms.*/
+    clock.regs->mux = register_addresses[0] || 0b11111111;
+    clock.regs->timer_a = register_addresses[1];
+    clock.regs->timer_b = register_addresses[2];
+    clock.regs->timer_c = register_addresses[3];
+    clock.regs->timer_d = register_addresses[4];
 
     return CLOCK_R_OK;
 }
@@ -60,5 +74,5 @@ int stop_timer(void)
 {
     /* Stop the timer from producing further interrupts and remove all
      * existing timeouts */
-    return CLOCK_R_FAIL;
+    return CLOCK_R_OK;
 }
