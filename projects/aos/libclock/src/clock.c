@@ -17,7 +17,7 @@
  * to set registers and configure timeouts. */
 #include "device.h"
 
-#include <stdio.h>
+#include "../../sos/src/irq.h"
 
 static struct {
     volatile meson_timer_reg_t *regs;
@@ -47,6 +47,12 @@ int start_timer(unsigned char *timer_vaddr)
     clock.regs->timer_c = register_addresses[3];
     clock.regs->timer_d = register_addresses[4];
 
+    // have irqhandler for each timer?
+    init_irq(meson_timeout_irq(MESON_TIMER_A));
+    init_irq(meson_timeout_irq(MESON_TIMER_B));
+    init_irq(meson_timeout_irq(MESON_TIMER_C));
+    init_irq(meson_timeout_irq(MESON_TIMER_D));
+
     return CLOCK_R_OK;
 }
 
@@ -60,15 +66,25 @@ int remove_timer(uint32_t id)
     return CLOCK_R_FAIL;
 }
 
+static void init_irq(
+    int irq_number
+)
+{
+    seL4_IRQHandler irq_handler = 0;
+    int init_irq_err = sos_register_irq_handler(irq_number, true, timer_irq, NULL, &irq_handler);
+    ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");
+    seL4_IRQHandler_Ack(irq_handler);
+}
+
 int timer_irq(
     void *data,
     seL4_Word irq,
     seL4_IRQHandler irq_handler
 )
 {
-    printf("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
-    /* Handle the IRQ */
-
+    //waiting for register and data struct
+    
+    seL4_IRQHandler_Ack(irq_handler);
     /* Acknowledge that the IRQ has been handled */
     return CLOCK_R_FAIL;
 }
