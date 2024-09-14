@@ -17,6 +17,8 @@
  * to set registers and configure timeouts. */
 #include "device.h"
 
+#include <stdio.h>
+
 static struct {
     volatile meson_timer_reg_t *regs;
     /* Add fields as you see necessary */
