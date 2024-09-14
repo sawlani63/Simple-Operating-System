@@ -66,6 +66,7 @@ int timer_irq(
     seL4_IRQHandler irq_handler
 )
 {
+    printf("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
     /* Handle the IRQ */
 
     /* Acknowledge that the IRQ has been handled */
