@@ -147,6 +147,8 @@ int sos_register_irq_handler(
         *irq_handler = handler_cptr;
     }
 
+    printf("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+
     ZF_LOGI("Registered IRQ #%lu with badge 0x%lX", irq, badge);
     return 0;
 }
