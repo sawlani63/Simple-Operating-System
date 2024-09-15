@@ -220,18 +220,48 @@
 /*  dim is the size of the array a                                            */
 /* !!!!!!! This data structure is NOT documented, do not use it !!!!!!!!!!    */
 
-#define SGLIB_HEAP_INIT(type, a, i) { i = 0; }
-#define SGLIB_HEAP_IS_EMPTY(type, a, i) ((i)==0)
-#define SGLIB_HEAP_IS_FULL(type, a, i, dim) ((i)==(dim))
-#define SGLIB_HEAP_FIRST_ELEMENT(type, a, i) (a[0])
-#define SGLIB_HEAP_ADD_NEXT(type, a, i, dim, comparator, elem_exchanger) {\
-  int _i_;\
-  if (SGLIB_HEAP_IS_FULL(type, a, i, dim)) assert(0 && "the heap is full");\
-  _i_ = (i)++;\
+/* USER CREATED MACROS */
+#define SGLIB_HEAP_UP(type, a, i, dim, comparator, elem_exchanger) {\
+  int _i_ = i;\
   while (_i_ > 0 && comparator(a[_i_/2], a[_i_]) < 0) {\
     elem_exchanger(type, a, (_i_/2), _i_);\
     _i_ = _i_/2;\
   }\
+}
+
+#define SGLIB_HEAP_FIND(type, a, i, comparator, element, index) {\
+  index = -1;\
+  for (int _j_ = 0; _j_ < (i); _j_++) {\
+    if (comparator(a[_j_], element) == 0) {\
+      index = _j_;\
+      break;\
+    }\
+  }\
+}
+#define SGLIB_HEAP_REMOVE(type, a, index, i, comparator, element) {\
+  if (index != -1 && index < (i)) {\
+    (i)--;\
+    if (index < (i)) {\
+      a[index] = a[(i)];\
+      if (index > 0 && comparator(a[index/2], a[index]) > 0) {\
+        SGLIB_HEAP_UP(type, a, index, i, comparator, SGLIB_ARRAY_ELEMENTS_EXCHANGER);\
+      } else {\
+        SGLIB___ARRAY_HEAP_DOWN(type, a, index, i, comparator, SGLIB_ARRAY_ELEMENTS_EXCHANGER);\
+      }\
+    }\
+  }\
+}
+
+/* PROVIDED MACROS */
+#define SGLIB_HEAP_INIT(type, a, i) { i = 0; }
+#define SGLIB_HEAP_IS_EMPTY(type, a, i) ((i)==0)
+#define SGLIB_HEAP_IS_FULL(type, a, i, dim) ((i)==(dim))
+#define SGLIB_HEAP_FIRST_ELEMENT(a) (a[0])
+#define SGLIB_HEAP_ADD_NEXT(type, a, i, dim, comparator, elem_exchanger) {\
+  int _i_;\
+  if (SGLIB_HEAP_IS_FULL(type, a, i, dim)) assert(0 && "the heap is full");\
+  SGLIB_HEAP_UP(type, a, i, dim, comparator, elem_exchanger);\
+  (i)++;\
 }
 #define SGLIB_HEAP_ADD(type, a, elem, i, dim, comparator) {\
   if (SGLIB_HEAP_IS_FULL(type, a, i, dim)) assert(0 && "the heap is full");\

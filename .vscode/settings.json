@@ -6,6 +6,16 @@
         "types.h": "c",
         "objecttype.h": "c",
         "stdlib.h": "c",
-        "timestamp.h": "c"
+        "timestamp.h": "c",
+        "hash.h": "c",
+        "array": "c",
+        "chrono": "c",
+        "compare": "c",
+        "functional": "c",
+        "ratio": "c",
+        "tuple": "c",
+        "type_traits": "c",
+        "utility": "c",
+        "random": "c"
     }
 }
