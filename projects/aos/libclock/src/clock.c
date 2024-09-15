@@ -21,7 +21,7 @@
 
 #define MAX_TIMERS 100
 #define MINHEAP_TIME_COMPARATOR(x, y) (((x.time_expired) < (y.time_expired)) - ((x.time_expired) > (y.time_expired)))
-#define MINHEAP_ID_COMPARATOR(x, y) ((y.id) - (x.id))
+#define MINHEAP_ID_COMPARATOR(x, y) (((x.id) < (y.id)) - ((x.id) > (y.id)))
 
 static struct {
     volatile meson_timer_reg_t *regs;
