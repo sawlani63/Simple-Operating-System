@@ -146,6 +146,14 @@ int stop_timer(void)
     {
         SGLIB_HEAP_DELETE(timer_node, min_heap, next_free, MAX_TIMERS, MINHEAP_ID_COMPARATOR);
     }
+    free(min_heap);
+    free(clock.regs->mux);
+    free(clock.regs->timer_a);
+    free(clock.regs->timer_e);
+    free(clock.regs->timer_e_hi);
+    free(clock.regs);
+
+    //need to check if there is any freeing/job to do here for irqhandler
 
     return CLOCK_R_OK;
 }
