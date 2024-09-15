@@ -18,6 +18,7 @@
 #include "device.h"
 
 #include "../../sos/src/irq.h"
+#include <clock/timestamp.h>
 
 #define MAX_TIMERS 32
 #define COMPARE_UNSIGNED(a, b) ((a > b) - (a < b))
@@ -75,6 +76,11 @@ int start_timer(unsigned char *timer_vaddr)
     init_irq(meson_timeout_irq(MESON_TIMER_A));
 
     return CLOCK_R_OK;
+}
+
+timestamp_t get_time(void)
+{
+    return timestamp_us(timestamp_get_freq(void));
 }
 
 uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
