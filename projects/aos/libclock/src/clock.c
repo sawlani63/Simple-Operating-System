@@ -17,7 +17,6 @@
  * to set registers and configure timeouts. */
 #include "device.h"
 
-//#include "../../sos/src/irq.h"
 #include <clock/timestamp.h>
 
 #define MAX_TIMERS 32
@@ -40,7 +39,6 @@ timer_node *min_heap;
 int next_free = 0;
 uint32_t curr_id = 0;
 
-static void init_irq(int irq_number);
 void invoke_callback();
 
 int start_timer(unsigned char *timer_vaddr)
@@ -74,9 +72,6 @@ int start_timer(unsigned char *timer_vaddr)
     if (min_heap == NULL) {
         return CLOCK_R_UINT;
     }
-
-    /* Set up the timer irq */
-    //init_irq(meson_timeout_irq(MESON_TIMER_A));
 
     return CLOCK_R_OK;
 }
@@ -132,8 +127,11 @@ int timer_irq(
     invoke_callback();
     /* Remove the invoked callback from the heap and rebalance */
     SGLIB_HEAP_DELETE(timer_node, min_heap, next_free, MAX_TIMERS, MINHEAP_TIME_COMPARATOR);
+
+    // have to reset timer_a?
+
     /* Acknowledge that the IRQ has been handled */
-    //seL4_IRQHandler_Ack(irq_handler);
+    seL4_IRQHandler_Ack(irq_handler);
     return CLOCK_R_OK;
 }
 
@@ -147,18 +145,14 @@ int stop_timer(void)
         SGLIB_HEAP_DELETE(timer_node, min_heap, next_free, MAX_TIMERS, MINHEAP_ID_COMPARATOR);
     }
     free(min_heap);
-    free(clock.regs->mux);
-    free(clock.regs->timer_a);
-    free(clock.regs->timer_e);
-    free(clock.regs->timer_e_hi);
-    free(clock.regs);
+    free((void *)clock.regs);
 
     //need to check if there is any freeing/job to do here for irqhandler
 
     return CLOCK_R_OK;
 }
 
-static void init_irq(
+/*static void init_irq(
     int irq_number
 )
 {
@@ -166,7 +160,7 @@ static void init_irq(
     int init_irq_err = sos_register_irq_handler(irq_number, true, timer_irq, NULL, &irq_handler);
     ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");
     seL4_IRQHandler_Ack(irq_handler);
-}
+}*/
 
 void invoke_callback()
 {
