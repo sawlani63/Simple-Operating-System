@@ -60,7 +60,6 @@ int start_timer(unsigned char *timer_vaddr)
     clock.regs->timer_a = register_addresses[1];
     clock.regs->timer_e = register_addresses[5];
     clock.regs->timer_e_hi = register_addresses[6];
-    register_timer(0, NULL, NULL);
 
     return CLOCK_R_OK;
 }
