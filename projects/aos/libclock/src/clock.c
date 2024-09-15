@@ -19,10 +19,24 @@
 
 #include <stdio.h>
 
+#define MAX_TIMERS 100
+#define MINHEAP_TIME_COMPARATOR(x, y) ((x.time_expired) - (y.time_expired))
+#define MINHEAP_ID_COMPARATOR(x, y) ((x.id) - (y.id))
+
 static struct {
     volatile meson_timer_reg_t *regs;
     /* Add fields as you see necessary */
 } clock;
+
+typedef struct {
+    uint32_t id;
+    uint64_t time_expired;
+    timer_callback_t callback;
+} timer_node;
+
+timer_node min_heap[MAX_TIMERS];
+int next_free = 0;
+uint32_t id = 0;
 
 int start_timer(unsigned char *timer_vaddr)
 {
@@ -41,23 +55,40 @@ int start_timer(unsigned char *timer_vaddr)
 
     /* We only need 10ms precision, so the default 1us timerbase resolution
      * is overkill and may waste system resources. We will set it to 1ms.*/
-    clock.regs->mux = register_addresses[0] || 0b11111111;
+    clock.regs->mux = register_addresses[0] | 0b10000000011;
     clock.regs->timer_a = register_addresses[1];
-    clock.regs->timer_b = register_addresses[2];
-    clock.regs->timer_c = register_addresses[3];
-    clock.regs->timer_d = register_addresses[4];
+    clock.regs->timer_e = register_addresses[5];
+    clock.regs->timer_e_hi = register_addresses[6];
+    register_timer(0, NULL, NULL);
 
     return CLOCK_R_OK;
 }
 
 uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
 {
-    return 0;
+    /* Combine the e_hi and e_lo registers then add the delay and put it in minheap.*/
+    uint64_t expiry_time = (uint64_t) clock.regs->timer_e_hi << 32 || clock.regs->timer_e;
+    if (SGLIB_HEAP_IS_FULL(timer_node, min_heap, next_free, MAX_TIMERS)) {
+        return 0;
+    }
+    /* NOTE: IDs are currently just incremented per register. Likely needs to change later.*/
+    timer_node node = {++id, expiry_time, callback};
+    SGLIB_HEAP_ADD(timer_node, min_heap, node, next_free, MAX_TIMERS, MINHEAP_TIME_COMPARATOR);
+    /* NOTE: Timer A is 16 bit whereas delay is 64 bit. May need to be changed later.*/
+    write_timeout(clock.regs, MESON_TIMER_A, delay);
+    return id;
 }
 
 int remove_timer(uint32_t id)
 {
-    return CLOCK_R_FAIL;
+    int index;
+    timer_node node = {id, 0, NULL};
+    SGLIB_HEAP_FIND(timer_node, min_heap, next_free, MINHEAP_ID_COMPARATOR, node, index);
+    if (index == -1) {
+        return CLOCK_R_FAIL;
+    }
+    SGLIB_HEAP_REMOVE(timer_node, min_heap, index, next_free, MINHEAP_TIME_COMPARATOR, node);
+    return CLOCK_R_OK;
 }
 
 int timer_irq(
