@@ -71,6 +71,9 @@ int start_timer(unsigned char *timer_vaddr)
         return CLOCK_R_UINT;
     }
 
+    /* Set up the timer irq */
+    init_irq(meson_timeout_irq(MESON_TIMER_A));
+
     return CLOCK_R_OK;
 }
 
@@ -110,6 +113,28 @@ int remove_timer(uint32_t id)
     return CLOCK_R_OK;
 }
 
+int timer_irq(
+    void *data,
+    seL4_Word irq,
+    seL4_IRQHandler irq_handler
+)
+{
+    /* Invoke the callback to wake up the relevant thread */
+    invoke_callback();
+    /* Remove the invoked callback from the heap and rebalance */
+    SGLIB_HEAP_DELETE(timer_node, min_heap, next_free, MAX_TIMERS, MINHEAP_TIME_COMPARATOR);
+    /* Acknowledge that the IRQ has been handled */
+    seL4_IRQHandler_Ack(irq_handler);
+    return CLOCK_R_OK;
+}
+
+int stop_timer(void)
+{
+    /* Stop the timer from producing further interrupts and remove all
+     * existing timeouts */
+    return CLOCK_R_OK;
+}
+
 static void init_irq(
     int irq_number
 )
@@ -120,22 +145,8 @@ static void init_irq(
     seL4_IRQHandler_Ack(irq_handler);
 }
 
-int timer_irq(
-    void *data,
-    seL4_Word irq,
-    seL4_IRQHandler irq_handler
-)
+void invoke_callback()
 {
-    //waiting for register and data struct
-    
-    seL4_IRQHandler_Ack(irq_handler);
-    /* Acknowledge that the IRQ has been handled */
-    return CLOCK_R_FAIL;
-}
-
-int stop_timer(void)
-{
-    /* Stop the timer from producing further interrupts and remove all
-     * existing timeouts */
-    return CLOCK_R_OK;
+    timer_node first_elem = SGLIB_HEAP_FIRST_ELEMENT(min_heap);
+    first_elem.callback(first_elem.id, first_elem.data);
 }
