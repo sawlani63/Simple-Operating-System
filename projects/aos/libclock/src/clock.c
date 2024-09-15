@@ -17,7 +17,7 @@
  * to set registers and configure timeouts. */
 #include "device.h"
 
-#include "../../sos/src/irq.h"
+//#include "../../sos/src/irq.h"
 #include <clock/timestamp.h>
 
 #define MAX_TIMERS 32
@@ -39,6 +39,9 @@ typedef struct {
 timer_node *min_heap;
 int next_free = 0;
 uint32_t curr_id = 0;
+
+static void init_irq(int irq_number);
+void invoke_callback();
 
 int start_timer(unsigned char *timer_vaddr)
 {
@@ -73,14 +76,14 @@ int start_timer(unsigned char *timer_vaddr)
     }
 
     /* Set up the timer irq */
-    init_irq(meson_timeout_irq(MESON_TIMER_A));
+    //init_irq(meson_timeout_irq(MESON_TIMER_A));
 
     return CLOCK_R_OK;
 }
 
 timestamp_t get_time(void)
 {
-    return timestamp_us(timestamp_get_freq(void));
+    return timestamp_us(timestamp_get_freq());
 }
 
 uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
@@ -130,7 +133,7 @@ int timer_irq(
     /* Remove the invoked callback from the heap and rebalance */
     SGLIB_HEAP_DELETE(timer_node, min_heap, next_free, MAX_TIMERS, MINHEAP_TIME_COMPARATOR);
     /* Acknowledge that the IRQ has been handled */
-    seL4_IRQHandler_Ack(irq_handler);
+    //seL4_IRQHandler_Ack(irq_handler);
     return CLOCK_R_OK;
 }
 
@@ -138,6 +141,12 @@ int stop_timer(void)
 {
     /* Stop the timer from producing further interrupts and remove all
      * existing timeouts */
+
+    while (!SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, next_free))
+    {
+        SGLIB_HEAP_DELETE(timer_node, min_heap, next_free, MAX_TIMERS, MINHEAP_ID_COMPARATOR);
+    }
+
     return CLOCK_R_OK;
 }
 
