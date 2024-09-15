@@ -19,7 +19,7 @@
 
 #include <stdio.h>
 
-#define MAX_TIMERS 100
+#define MAX_TIMERS 32
 #define COMPARE_UNSIGNED(a, b) ((a > b) - (a < b))
 #define MINHEAP_TIME_COMPARATOR(x, y) COMPARE_UNSIGNED(y.time_expired, x.time_expired)
 #define MINHEAP_ID_COMPARATOR(x, y) COMPARE_UNSIGNED(y.id, x.id)
@@ -37,7 +37,7 @@ typedef struct {
 
 timer_node *min_heap;
 int next_free = 0;
-uint32_t id = 0;
+uint32_t curr_id = 0;
 
 int start_timer(unsigned char *timer_vaddr)
 {
@@ -85,9 +85,9 @@ uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
     /* Combine the e_hi and e_lo registers then add the delay and put it in minheap.*/
     uint64_t expiry_time = (uint64_t) clock.regs->timer_e_hi << 32 || clock.regs->timer_e;
     /* NOTE: IDs are currently just incremented per register. Likely needs to change later.*/
-    timer_node node = {++id, expiry_time, callback, data};
+    timer_node node = {++curr_id, expiry_time, callback, data};
     SGLIB_HEAP_ADD(timer_node, min_heap, node, next_free, MAX_TIMERS, MINHEAP_TIME_COMPARATOR);
-    return id;
+    return curr_id;
 }
 
 int remove_timer(uint32_t id)
