@@ -25,7 +25,6 @@
 
 static struct {
     volatile meson_timer_reg_t *regs;
-    /* Add fields as you see necessary */
 } clock;
 
 typedef struct {
@@ -54,12 +53,16 @@ int start_timer(unsigned char *timer_vaddr)
     }
     uint32_t *register_addresses = (uint32_t *) (timer_vaddr + TIMER_REG_START);
 
-    /* We only need 10ms precision, so the default 1us timerbase resolution
-     * is overkill and may waste system resources. We will set it to 1ms.*/
-    clock.regs->mux = register_addresses[0] | 0b10000000011;
+    /* Set the registers. */
+    clock.regs->mux = register_addresses[0];
     clock.regs->timer_a = register_addresses[1];
     clock.regs->timer_e = register_addresses[5];
     clock.regs->timer_e_hi = register_addresses[6];
+
+    /* We only need 10ms precision, so the default 1us timerbase resolution
+     * is overkill and may waste system resources. We will set it to 1ms.*/
+    configure_timeout(clock.regs, MESON_TIMER_A, true, false, TIMEOUT_TIMEBASE_1_MS, 0);
+    configure_timestamp(clock.regs, TIMEOUT_TIMEBASE_1_MS);
 
     return CLOCK_R_OK;
 }
@@ -81,6 +84,10 @@ uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
 
 int remove_timer(uint32_t id)
 {
+    if (SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, next_free)) {
+        return -1;
+    }
+
     int index;
     timer_node node = {id, 0, NULL, NULL};
     SGLIB_HEAP_FIND(timer_node, min_heap, next_free, MINHEAP_ID_COMPARATOR, node, index);
@@ -88,6 +95,9 @@ int remove_timer(uint32_t id)
         return CLOCK_R_FAIL;
     }
     SGLIB_HEAP_REMOVE(timer_node, min_heap, index, next_free, MINHEAP_TIME_COMPARATOR, node);
+    if (index == 0 && next_free > 0) {
+        write_timeout(clock.regs, MESON_TIMER_A, SGLIB_HEAP_FIRST_ELEMENT(min_heap).id);
+    }
     return CLOCK_R_OK;
 }
 
