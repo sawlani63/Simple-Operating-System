@@ -615,11 +615,10 @@ NORETURN void *main_continued(UNUSED void *arg)
     printf("Timer init\n");
     start_timer(timer_vaddr);
     /* Sets up the timer irq */
-    /*seL4_IRQHandler irq_handler = 0;
+    seL4_IRQHandler irq_handler = 0;
     int init_irq_err = sos_register_irq_handler(meson_timeout_irq(MESON_TIMER_A), true, timer_irq, NULL, &irq_handler);
     ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");
-    seL4_IRQHandler_Ack(irq_handler);*/
-    // Either above or call init_irq in timer and pass sos_register as a function (probs not good design)
+    seL4_IRQHandler_Ack(irq_handler);
 
     /* Start the user application */
     printf("Start first process\n");
