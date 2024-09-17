@@ -16,6 +16,9 @@
         "tuple": "c",
         "type_traits": "c",
         "utility": "c",
-        "random": "c"
+        "random": "c",
+        "watchdog.h": "c",
+        "cspace.h": "c",
+        "irq.h": "c"
     }
 }

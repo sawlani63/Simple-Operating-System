@@ -17,7 +17,7 @@
  * to set registers and configure timeouts. */
 #include "device.h"
 
-#include "../../sos/src/irq.h"
+#include <clock/timestamp.h>
 
 #define MAX_TIMERS 32
 #define COMPARE_UNSIGNED(a, b) ((a > b) - (a < b))
@@ -38,6 +38,9 @@ typedef struct {
 timer_node *min_heap;
 int next_free = 0;
 uint32_t curr_id = 0;
+
+void reset_timer_a();
+void invoke_callback();
 
 int start_timer(unsigned char *timer_vaddr)
 {
@@ -71,10 +74,12 @@ int start_timer(unsigned char *timer_vaddr)
         return CLOCK_R_UINT;
     }
 
-    /* Set up the timer irq */
-    init_irq(meson_timeout_irq(MESON_TIMER_A));
-
     return CLOCK_R_OK;
+}
+
+timestamp_t get_time(void)
+{
+    return read_timestamp(clock.regs);
 }
 
 uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
@@ -106,9 +111,8 @@ int remove_timer(uint32_t id)
         return CLOCK_R_FAIL;
     }
     SGLIB_HEAP_REMOVE(timer_node, min_heap, index, next_free, MINHEAP_TIME_COMPARATOR, node);
-    if (index == 0 && next_free > 0) {
-        uint64_t new_delay = SGLIB_HEAP_FIRST_ELEMENT(min_heap).time_expired - read_timestamp(clock.regs);
-        write_timeout(clock.regs, MESON_TIMER_A, new_delay);
+    if (index == 0) {
+        reset_timer_a();
     }
     return CLOCK_R_OK;
 }
@@ -123,6 +127,8 @@ int timer_irq(
     invoke_callback();
     /* Remove the invoked callback from the heap and rebalance */
     SGLIB_HEAP_DELETE(timer_node, min_heap, next_free, MAX_TIMERS, MINHEAP_TIME_COMPARATOR);
+    /* Reset timer a */
+    reset_timer_a();
     /* Acknowledge that the IRQ has been handled */
     seL4_IRQHandler_Ack(irq_handler);
     return CLOCK_R_OK;
@@ -132,17 +138,23 @@ int stop_timer(void)
 {
     /* Stop the timer from producing further interrupts and remove all
      * existing timeouts */
+    free(min_heap);
+    clock.regs->mux = 0;
+    clock.regs->timer_a = 0;
+    clock.regs->timer_e = 0;
+    clock.regs->timer_e_hi = 0;
+    free((void *)clock.regs);
+
     return CLOCK_R_OK;
 }
 
-static void init_irq(
-    int irq_number
-)
+void reset_timer_a()
 {
-    seL4_IRQHandler irq_handler = 0;
-    int init_irq_err = sos_register_irq_handler(irq_number, true, timer_irq, NULL, &irq_handler);
-    ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");
-    seL4_IRQHandler_Ack(irq_handler);
+    if (!SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, next_free))
+    {
+        uint64_t new_delay = SGLIB_HEAP_FIRST_ELEMENT(min_heap).time_expired - read_timestamp(clock.regs);
+        write_timeout(clock.regs, MESON_TIMER_A, new_delay);
+    } // else write to 0?
 }
 
 void invoke_callback()
