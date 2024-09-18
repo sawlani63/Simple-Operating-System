@@ -20,6 +20,10 @@
         "watchdog.h": "c",
         "cspace.h": "c",
         "irq.h": "c",
-        "malloc.h": "c"
+        "malloc.h": "c",
+        "string_view": "cpp",
+        "initializer_list": "cpp",
+        "string": "cpp",
+        "vector": "cpp"
     }
 }
