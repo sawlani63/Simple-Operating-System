@@ -12,12 +12,12 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <clock/clock.h>
+#include <clock/timestamp.h>
+#include <clock/idstack.h>
 
 /* The functions in src/device.h should help you interact with the timer
  * to set registers and configure timeouts. */
 #include "device.h"
-
-#include <clock/timestamp.h>
 
 #define MAX_TIMEOUT 65535
 #define COMPARE_UNSIGNED(a, b) ((a > b) - (a < b))
@@ -38,9 +38,8 @@ typedef struct {
 int max_timers = 32;
 timer_node *min_heap;
 int first_free = 0;
-uint32_t curr_id = 0;
 
-static int remove_from_heap(int index);
+static int remove_from_heap(int index, uint32_t id);
 static void reset_timer_a();
 static int invoke_callbacks();
 
@@ -101,9 +100,10 @@ uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
         write_timeout(clock.regs, MESON_TIMER_A, delay / 1000);
     }
     /* NOTE: IDs are currently just incremented per register. Likely needs to change later.*/
-    timer_node node = {++curr_id, (read_timestamp(clock.regs) + delay) / 1000, callback, data};
+    uint32_t id = new_id();
+    timer_node node = {id, (read_timestamp(clock.regs) + delay) / 1000, callback, data};
     SGLIB_HEAP_ADD(timer_node, min_heap, node, first_free, max_timers, MINHEAP_TIME_COMPARATOR);
-    return curr_id;
+    return id;
 }
 
 int remove_timer(uint32_t id)
@@ -111,7 +111,7 @@ int remove_timer(uint32_t id)
     int index;
     timer_node node = {id, 0, NULL, NULL};
     SGLIB_HEAP_FIND(timer_node, min_heap, first_free, MINHEAP_ID_COMPARATOR, node, index);
-    if (index == -1 || remove_from_heap(index)) {
+    if (index == -1 || remove_from_heap(index, id)) {
         return CLOCK_R_FAIL;
     } else if (index == 0) {
         reset_timer_a();
@@ -143,7 +143,8 @@ int stop_timer(void)
     return CLOCK_R_OK;
 }
 
-static int remove_from_heap(int index) {
+static int remove_from_heap(int index, uint32_t id) {
+    push(id);
     if (index == 0) {
         SGLIB_HEAP_DELETE(timer_node, min_heap, first_free, max_timers, MINHEAP_TIME_COMPARATOR);
     } else {
@@ -175,7 +176,7 @@ static int invoke_callbacks()
     do {
         first_elem = SGLIB_HEAP_GET_MIN(min_heap);
         first_elem.callback(first_elem.id, first_elem.data);
-        if (remove_from_heap(0)) {
+        if (remove_from_heap(0, first_elem.id)) {
             return 1;
         }
     } while (first_elem.time_expired == SGLIB_HEAP_GET_MIN(min_heap).time_expired);
