@@ -133,12 +133,10 @@ int timer_irq(void *data, seL4_Word irq, seL4_IRQHandler irq_handler)
 int stop_timer(void)
 {
     /* Stop the timer from producing further interrupts and remove all existing timeouts. */
-    free(min_heap);
-    clock.regs->mux = 0;
     configure_timeout(clock.regs, MESON_TIMER_A, false, false, TIMEOUT_TIMEBASE_1_MS, 0);
-    clock.regs->timer_e = 0;
-    clock.regs->timer_e_hi = 0;
     free((void *)clock.regs);
+    free(min_heap);
+    free_stack();
 
     return CLOCK_R_OK;
 }
