@@ -20,6 +20,7 @@
 #include <clock/timestamp.h>
 
 #define MAX_TIMERS 32
+#define MAX_TIMEOUT 65535
 #define COMPARE_UNSIGNED(a, b) ((a > b) - (a < b))
 #define MINHEAP_TIME_COMPARATOR(x, y) COMPARE_UNSIGNED(y.time_expired, x.time_expired)
 #define MINHEAP_ID_COMPARATOR(x, y) COMPARE_UNSIGNED(y.id, x.id)
@@ -36,11 +37,11 @@ typedef struct {
 } timer_node;
 
 timer_node *min_heap;
-int next_free = 0;
+int first_free = 0;
 uint32_t curr_id = 0;
 
-void reset_timer_a();
-void invoke_callback();
+static void reset_timer_a();
+static void invoke_callbacks();
 
 int start_timer(unsigned char *timer_vaddr)
 {
@@ -66,7 +67,7 @@ int start_timer(unsigned char *timer_vaddr)
     /* We only need 10ms precision, so the default 1us timerbase resolution
      * is overkill and may waste system resources. We will set it to 1ms.*/
     configure_timeout(clock.regs, MESON_TIMER_A, true, false, TIMEOUT_TIMEBASE_1_MS, 0);
-    configure_timestamp(clock.regs, TIMEOUT_TIMEBASE_1_MS);
+    configure_timestamp(clock.regs, TIMEOUT_TIMEBASE_1_US);
 
     /* Allocate the min heap for keeping track of timers. */
     min_heap = malloc(sizeof(timer_node) * MAX_TIMERS);
@@ -84,33 +85,31 @@ timestamp_t get_time(void)
 
 uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
 {
-    if (SGLIB_HEAP_IS_FULL(timer_node, min_heap, next_free, MAX_TIMERS)) {
+    if (SGLIB_HEAP_IS_FULL(timer_node, min_heap, first_free, MAX_TIMERS)) {
         return 0;
-    } else if (SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, next_free)) {
-        /* NOTE: Timer A is 16 bit whereas delay is 64 bit. May need to be changed later.*/
-        write_timeout(clock.regs, MESON_TIMER_A, delay);
+    } else if (delay > MAX_TIMEOUT) {
+        delay = MAX_TIMEOUT;
     }
-    /* Combine the e_hi and e_lo registers then add the delay and put it in minheap.*/
-    uint64_t expiry_time = (uint64_t) clock.regs->timer_e_hi << 32 || clock.regs->timer_e;
+    
+    if (SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)) {
+        /* NOTE: Timer A is 16 bit whereas delay is 64 bit. May need to be changed later.*/
+        write_timeout(clock.regs, MESON_TIMER_A, delay / 1000);
+    }
     /* NOTE: IDs are currently just incremented per register. Likely needs to change later.*/
-    timer_node node = {++curr_id, expiry_time, callback, data};
-    SGLIB_HEAP_ADD(timer_node, min_heap, node, next_free, MAX_TIMERS, MINHEAP_TIME_COMPARATOR);
+    timer_node node = {++curr_id, (read_timestamp(clock.regs) + delay) / 1000, callback, data};
+    SGLIB_HEAP_ADD(timer_node, min_heap, node, first_free, MAX_TIMERS, MINHEAP_TIME_COMPARATOR);
     return curr_id;
 }
 
 int remove_timer(uint32_t id)
 {
-    if (SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, next_free)) {
-        return -1;
-    }
-
     int index;
     timer_node node = {id, 0, NULL, NULL};
-    SGLIB_HEAP_FIND(timer_node, min_heap, next_free, MINHEAP_ID_COMPARATOR, node, index);
+    SGLIB_HEAP_FIND(timer_node, min_heap, first_free, MINHEAP_ID_COMPARATOR, node, index);
     if (index == -1) {
         return CLOCK_R_FAIL;
     }
-    SGLIB_HEAP_REMOVE(timer_node, min_heap, index, next_free, MINHEAP_TIME_COMPARATOR, node);
+    SGLIB_HEAP_REMOVE(timer_node, min_heap, index, first_free, MINHEAP_TIME_COMPARATOR, node);
     if (index == 0) {
         reset_timer_a();
     }
@@ -123,24 +122,19 @@ int timer_irq(
     seL4_IRQHandler irq_handler
 )
 {
-    /* Invoke the callback to wake up the relevant thread */
-    invoke_callback();
-    /* Remove the invoked callback from the heap and rebalance */
-    SGLIB_HEAP_DELETE(timer_node, min_heap, next_free, MAX_TIMERS, MINHEAP_TIME_COMPARATOR);
-    /* Reset timer a */
+    invoke_callbacks();
     reset_timer_a();
-    /* Acknowledge that the IRQ has been handled */
+    /* Acknowledge that the IRQ has been handled. */
     seL4_IRQHandler_Ack(irq_handler);
     return CLOCK_R_OK;
 }
 
 int stop_timer(void)
 {
-    /* Stop the timer from producing further interrupts and remove all
-     * existing timeouts */
+    /* Stop the timer from producing further interrupts and remove all existing timeouts. */
     free(min_heap);
     clock.regs->mux = 0;
-    clock.regs->timer_a = 0;
+    configure_timeout(clock.regs, MESON_TIMER_A, false, false, TIMEOUT_TIMEBASE_1_MS, 0);
     clock.regs->timer_e = 0;
     clock.regs->timer_e_hi = 0;
     free((void *)clock.regs);
@@ -148,17 +142,20 @@ int stop_timer(void)
     return CLOCK_R_OK;
 }
 
-void reset_timer_a()
+static void reset_timer_a()
 {
-    if (!SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, next_free))
-    {
-        uint64_t new_delay = SGLIB_HEAP_FIRST_ELEMENT(min_heap).time_expired - read_timestamp(clock.regs);
-        write_timeout(clock.regs, MESON_TIMER_A, new_delay);
-    } // else write to 0?
+    if (!SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)) {
+        uint64_t new = SGLIB_HEAP_GET_MIN(min_heap).time_expired - read_timestamp(clock.regs) / 1000;
+        write_timeout(clock.regs, MESON_TIMER_A, new);
+    }
 }
 
-void invoke_callback()
+static void invoke_callbacks()
 {
-    timer_node first_elem = SGLIB_HEAP_FIRST_ELEMENT(min_heap);
-    first_elem.callback(first_elem.id, first_elem.data);
+    timer_node first_elem;
+    do {
+        first_elem = SGLIB_HEAP_GET_MIN(min_heap);
+        first_elem.callback(first_elem.id, first_elem.data);
+        SGLIB_HEAP_DELETE(timer_node, min_heap, first_free, MAX_TIMERS, MINHEAP_TIME_COMPARATOR);
+    } while (first_elem.time_expired == SGLIB_HEAP_GET_MIN(min_heap).time_expired);
 }
