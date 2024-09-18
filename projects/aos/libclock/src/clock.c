@@ -50,17 +50,7 @@ int start_timer(unsigned char *timer_vaddr)
 
     /* Allocate memory for the clock registers, and identify the vaddr of the
      * timer registers. Each register is 32 bits, so we index like an array.*/
-    clock.regs = malloc(sizeof(meson_timer_reg_t));
-    if (clock.regs == NULL) {
-        return CLOCK_R_UINT;
-    }
-    uint32_t *register_addresses = (uint32_t *) (timer_vaddr + TIMER_REG_START);
-
-    /* Set the registers. */
-    clock.regs->mux = register_addresses[0];
-    clock.regs->timer_a = register_addresses[1];
-    clock.regs->timer_e = register_addresses[5];
-    clock.regs->timer_e_hi = register_addresses[6];
+    clock.regs = (meson_timer_reg_t *) (timer_vaddr + TIMER_REG_START);
 
     /* We only need 10ms precision, so the default 1us timerbase resolution
      * is overkill and may waste system resources. We will set it to 1ms.*/
@@ -98,6 +88,7 @@ uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
     } else if (SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)
         || SGLIB_HEAP_GET_MIN(min_heap).time_expired > time_expired) {
             write_timeout(clock.regs, MESON_TIMER_A, delay / 1000);
+        printf("DADWADAWDAWDAW: %lu\n", delay / 1000);
     }
     
     timer_node node = {new_id(), time_expired / 1000, callback, data};
@@ -138,7 +129,6 @@ int stop_timer(void)
     }
     /* Stop the timer from producing further interrupts and remove all existing timeouts. */
     configure_timeout(clock.regs, MESON_TIMER_A, false, false, TIMEOUT_TIMEBASE_1_MS, 0);
-    free((void *)clock.regs);
     free(min_heap);
     free_stack();
 
