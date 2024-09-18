@@ -19,7 +19,7 @@
  * to set registers and configure timeouts. */
 #include "device.h"
 
-#define MAX_TIMEOUT 65535
+#define MAX_TIMEOUT 65535 * 1000
 #define COMPARE_UNSIGNED(a, b) ((a > b) - (a < b))
 #define MINHEAP_TIME_COMPARATOR(x, y) COMPARE_UNSIGNED(y.time_expired, x.time_expired)
 #define MINHEAP_ID_COMPARATOR(x, y) COMPARE_UNSIGNED(y.id, x.id)
@@ -36,7 +36,7 @@ typedef struct {
 } timer_node;
 
 int max_timers = 32;
-timer_node *min_heap;
+timer_node *min_heap = NULL;
 int first_free = 0;
 
 static int remove_from_heap(int index, uint32_t id);
@@ -46,9 +46,7 @@ static int invoke_callbacks();
 int start_timer(unsigned char *timer_vaddr)
 {
     /* If the driver is already initialised we stop the timer and restart.*/
-    if (stop_timer() == CLOCK_R_FAIL) {
-        return CLOCK_R_UINT;
-    }
+    stop_timer();
 
     /* Allocate memory for the clock registers, and identify the vaddr of the
      * timer registers. Each register is 32 bits, so we index like an array.*/
@@ -99,7 +97,7 @@ uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
         min_heap = new_min_heap;
     } else if (SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)
         || SGLIB_HEAP_GET_MIN(min_heap).time_expired > time_expired) {
-        write_timeout(clock.regs, MESON_TIMER_A, delay / 1000);
+            write_timeout(clock.regs, MESON_TIMER_A, delay / 1000);
     }
     
     timer_node node = {new_id(), time_expired / 1000, callback, data};
@@ -122,6 +120,7 @@ int remove_timer(uint32_t id)
 
 int timer_irq(void *data, seL4_Word irq, seL4_IRQHandler irq_handler)
 {
+    printf("HIOHIAS");
     if (invoke_callbacks()) {
         return CLOCK_R_FAIL;
     }
@@ -133,6 +132,10 @@ int timer_irq(void *data, seL4_Word irq, seL4_IRQHandler irq_handler)
 
 int stop_timer(void)
 {
+    /* If the driver is not initialized, return an error */
+    if (min_heap == NULL) {
+        return CLOCK_R_FAIL;
+    }
     /* Stop the timer from producing further interrupts and remove all existing timeouts. */
     configure_timeout(clock.regs, MESON_TIMER_A, false, false, TIMEOUT_TIMEBASE_1_MS, 0);
     free((void *)clock.regs);

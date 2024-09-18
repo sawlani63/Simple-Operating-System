@@ -111,18 +111,18 @@ struct network_console *console;
 
 void callback1()
 {
-    printf("%lu", get_time());
+    printf("%lu\n", get_time());
 }
 
 void callback2()
 {
-    printf("OOOOOOOOOOOOOOORAAAAAAAAAAAAAAAAAAAAAAAAAHHHHHHHHHHHHH");
+    printf("OOOOOOOOOOOOOOORAAAAAAAAAAAAAAAAAAAAAAAAAHHHHHHHHHHHHH\n");
 }
 
 void set_up_timer_test()
 {
-    uint32_t id1 = register_timer(100000, callback1, NULL);
-    uint32_t id2 = register_timer(3000000, callback2, NULL);
+    uint32_t id1 = register_timer(1000, callback1, NULL);
+    uint32_t id2 = register_timer(30000, callback2, NULL);
 }
 
 /**
@@ -633,6 +633,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     /* Sets up the timer irq */
     seL4_IRQHandler irq_handler = 0;
     int init_irq_err = sos_register_irq_handler(meson_timeout_irq(MESON_TIMER_A), true, timer_irq, NULL, &irq_handler);
+    printf("%d\n", init_irq_err);
     ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");
     seL4_IRQHandler_Ack(irq_handler);
 
