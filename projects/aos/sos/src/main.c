@@ -111,7 +111,7 @@ struct network_console *console;
 
 void callback1()
 {
-    printf("%u", get_time());
+    printf("%lu", get_time());
 }
 
 void callback2()
@@ -121,8 +121,8 @@ void callback2()
 
 void set_up_timer_test()
 {
-    uint32_t id1 = register_timer(100, callback1, NULL);
-    uint32_t id2 = register_timer(3000, callback2, NULL);
+    uint32_t id1 = register_timer(100000, callback1, NULL);
+    uint32_t id2 = register_timer(3000000, callback2, NULL);
 }
 
 /**
