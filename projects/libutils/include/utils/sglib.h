@@ -238,7 +238,7 @@
     }\
   }\
 }
-#define SGLIB_HEAP_REMOVE(type, a, index, i, comparator, element) {\
+#define SGLIB_HEAP_REMOVE(type, a, index, i, comparator) {\
   if (index != -1 && index < (i)) {\
     (i)--;\
     if (index < (i)) {\
@@ -255,16 +255,16 @@
 /* PROVIDED MACROS */
 #define SGLIB_HEAP_INIT(type, a, i) { i = 0; }
 #define SGLIB_HEAP_IS_EMPTY(type, a, i) ((i)==0)
-#define SGLIB_HEAP_IS_FULL(type, a, i, dim) ((i)==(dim))
+#define SGLIB_HEAP_IS_FULL(i, dim) ((i)==(dim))
 #define SGLIB_HEAP_GET_MIN(a) (a[0])
 #define SGLIB_HEAP_ADD_NEXT(type, a, i, dim, comparator, elem_exchanger) {\
   int _i_;\
-  if (SGLIB_HEAP_IS_FULL(type, a, i, dim)) assert(0 && "the heap is full");\
+  if (SGLIB_HEAP_IS_FULL(i, dim)) assert(0 && "the heap is full");\
   SGLIB_HEAP_UP(type, a, i, dim, comparator, elem_exchanger);\
   (i)++;\
 }
 #define SGLIB_HEAP_ADD(type, a, elem, i, dim, comparator) {\
-  if (SGLIB_HEAP_IS_FULL(type, a, i, dim)) assert(0 && "the heap is full");\
+  if (SGLIB_HEAP_IS_FULL(i, dim)) assert(0 && "the heap is full");\
   a[i] = (elem);\
   SGLIB_HEAP_ADD_NEXT(type, a, i, dim, comparator, SGLIB_ARRAY_ELEMENTS_EXCHANGER);\
 }

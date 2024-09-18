@@ -19,7 +19,6 @@
 
 #include <clock/timestamp.h>
 
-#define MAX_TIMERS 32
 #define MAX_TIMEOUT 65535
 #define COMPARE_UNSIGNED(a, b) ((a > b) - (a < b))
 #define MINHEAP_TIME_COMPARATOR(x, y) COMPARE_UNSIGNED(y.time_expired, x.time_expired)
@@ -36,12 +35,14 @@ typedef struct {
     void *data;
 } timer_node;
 
+int max_timers = 32;
 timer_node *min_heap;
 int first_free = 0;
 uint32_t curr_id = 0;
 
+static int remove_from_heap(int index);
 static void reset_timer_a();
-static void invoke_callbacks();
+static int invoke_callbacks();
 
 int start_timer(unsigned char *timer_vaddr)
 {
@@ -70,7 +71,7 @@ int start_timer(unsigned char *timer_vaddr)
     configure_timestamp(clock.regs, TIMEOUT_TIMEBASE_1_US);
 
     /* Allocate the min heap for keeping track of timers. */
-    min_heap = malloc(sizeof(timer_node) * MAX_TIMERS);
+    min_heap = malloc(sizeof(timer_node) * max_timers);
     if (min_heap == NULL) {
         return CLOCK_R_UINT;
     }
@@ -85,19 +86,23 @@ timestamp_t get_time(void)
 
 uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
 {
-    if (SGLIB_HEAP_IS_FULL(timer_node, min_heap, first_free, MAX_TIMERS)) {
-        return 0;
-    } else if (delay > MAX_TIMEOUT) {
+    if (delay > MAX_TIMEOUT) {
         delay = MAX_TIMEOUT;
     }
-    
-    if (SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)) {
+    if (SGLIB_HEAP_IS_FULL(first_free, max_timers)) {
+        timer_node *new_min_heap = realloc(min_heap, sizeof(timer_node) * max_timers * 2);
+        if (new_min_heap == NULL) {
+            return 0;
+        }
+        max_timers *= 2;
+        min_heap = new_min_heap;
+    } else if (SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)) {
         /* NOTE: Timer A is 16 bit whereas delay is 64 bit. May need to be changed later.*/
         write_timeout(clock.regs, MESON_TIMER_A, delay / 1000);
     }
     /* NOTE: IDs are currently just incremented per register. Likely needs to change later.*/
     timer_node node = {++curr_id, (read_timestamp(clock.regs) + delay) / 1000, callback, data};
-    SGLIB_HEAP_ADD(timer_node, min_heap, node, first_free, MAX_TIMERS, MINHEAP_TIME_COMPARATOR);
+    SGLIB_HEAP_ADD(timer_node, min_heap, node, first_free, max_timers, MINHEAP_TIME_COMPARATOR);
     return curr_id;
 }
 
@@ -106,23 +111,19 @@ int remove_timer(uint32_t id)
     int index;
     timer_node node = {id, 0, NULL, NULL};
     SGLIB_HEAP_FIND(timer_node, min_heap, first_free, MINHEAP_ID_COMPARATOR, node, index);
-    if (index == -1) {
+    if (index == -1 || remove_from_heap(index)) {
         return CLOCK_R_FAIL;
-    }
-    SGLIB_HEAP_REMOVE(timer_node, min_heap, index, first_free, MINHEAP_TIME_COMPARATOR, node);
-    if (index == 0) {
+    } else if (index == 0) {
         reset_timer_a();
     }
     return CLOCK_R_OK;
 }
 
-int timer_irq(
-    void *data,
-    seL4_Word irq,
-    seL4_IRQHandler irq_handler
-)
+int timer_irq(void *data, seL4_Word irq, seL4_IRQHandler irq_handler)
 {
-    invoke_callbacks();
+    if (invoke_callbacks()) {
+        return CLOCK_R_FAIL;
+    }
     reset_timer_a();
     /* Acknowledge that the IRQ has been handled. */
     seL4_IRQHandler_Ack(irq_handler);
@@ -142,6 +143,24 @@ int stop_timer(void)
     return CLOCK_R_OK;
 }
 
+static int remove_from_heap(int index) {
+    if (index == 0) {
+        SGLIB_HEAP_DELETE(timer_node, min_heap, first_free, max_timers, MINHEAP_TIME_COMPARATOR);
+    } else {
+        SGLIB_HEAP_REMOVE(timer_node, min_heap, index, first_free, MINHEAP_TIME_COMPARATOR);
+    }
+    
+    if (first_free < max_timers / 2) {
+        timer_node *new_min_heap = realloc(min_heap, sizeof(timer_node) * max_timers / 2);
+        if (new_min_heap == NULL) {
+            return 1;
+        }
+        max_timers /= 2;
+        min_heap = new_min_heap;
+    }
+    return 0;
+}
+
 static void reset_timer_a()
 {
     if (!SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)) {
@@ -150,12 +169,15 @@ static void reset_timer_a()
     }
 }
 
-static void invoke_callbacks()
+static int invoke_callbacks()
 {
     timer_node first_elem;
     do {
         first_elem = SGLIB_HEAP_GET_MIN(min_heap);
         first_elem.callback(first_elem.id, first_elem.data);
-        SGLIB_HEAP_DELETE(timer_node, min_heap, first_free, MAX_TIMERS, MINHEAP_TIME_COMPARATOR);
+        if (remove_from_heap(0)) {
+            return 1;
+        }
     } while (first_elem.time_expired == SGLIB_HEAP_GET_MIN(min_heap).time_expired);
+    return 0;
 }

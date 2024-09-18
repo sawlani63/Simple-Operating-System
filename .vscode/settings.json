@@ -19,6 +19,7 @@
         "random": "c",
         "watchdog.h": "c",
         "cspace.h": "c",
-        "irq.h": "c"
+        "irq.h": "c",
+        "malloc.h": "c"
     }
 }
