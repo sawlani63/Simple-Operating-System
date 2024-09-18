@@ -109,6 +109,22 @@ static struct {
 
 struct network_console *console;
 
+void callback1()
+{
+    printf("%u", get_time());
+}
+
+void callback2()
+{
+    printf("OOOOOOOOOOOOOOORAAAAAAAAAAAAAAAAAAAAAAAAAHHHHHHHHHHHHH");
+}
+
+void set_up_timer_test()
+{
+    uint32_t id1 = register_timer(100, callback1, NULL);
+    uint32_t id2 = register_timer(3000, callback2, NULL);
+}
+
 /**
  * Deals with a syscall and sets the message registers before returning the
  * message info to be passed through to seL4_ReplyRecv()
@@ -619,6 +635,8 @@ NORETURN void *main_continued(UNUSED void *arg)
     int init_irq_err = sos_register_irq_handler(meson_timeout_irq(MESON_TIMER_A), true, timer_irq, NULL, &irq_handler);
     ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");
     seL4_IRQHandler_Ack(irq_handler);
+
+    set_up_timer_test();
 
     /* Start the user application */
     printf("Start first process\n");

@@ -69,11 +69,12 @@ int start_timer(unsigned char *timer_vaddr)
     configure_timeout(clock.regs, MESON_TIMER_A, true, false, TIMEOUT_TIMEBASE_1_MS, 0);
     configure_timestamp(clock.regs, TIMEOUT_TIMEBASE_1_US);
 
-    /* Allocate the min heap for keeping track of timers. */
+    /* Allocate the min heap and stack for keeping track of timers and ids. */
     min_heap = malloc(sizeof(timer_node) * max_timers);
     if (min_heap == NULL) {
         return CLOCK_R_UINT;
     }
+    create_stack();
 
     return CLOCK_R_OK;
 }
