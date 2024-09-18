@@ -54,7 +54,7 @@ int start_timer(unsigned char *timer_vaddr)
 
     /* Allocate the min heap for keeping track of timers. */
     min_heap = malloc(sizeof(timer_node) * max_timers);
-    
+
     return min_heap == NULL ? CLOCK_R_UINT : CLOCK_R_OK;
 }
 
@@ -65,11 +65,13 @@ timestamp_t get_time(void)
 
 uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
 {
+    /* Clamp timer A in case a user specifies too large a value for uint16_t. */
     if (delay > MAX_TIMEOUT) {
         delay = MAX_TIMEOUT;
     }
     uint64_t time_expired = (read_timestamp(clock.regs) + delay) / 1000;
     if (SGLIB_HEAP_IS_FULL(first_free, max_timers)) {
+        /* Reallocate memory for the heap, doubling its size. */
         timer_node *new_min_heap = realloc(min_heap, sizeof(timer_node) * max_timers * 2);
         if (new_min_heap == NULL) {
             return 0;
@@ -81,6 +83,7 @@ uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
         configure_timeout(clock.regs, MESON_TIMER_A, true, false, TIMEOUT_TIMEBASE_1_MS, delay / 1000);
     }
     
+    /* Create a new timer node with the specified fields and add it to the heap. */
     timer_node node = {++curr_id, time_expired, callback, data};
     SGLIB_HEAP_ADD(timer_node, min_heap, node, first_free, max_timers, MINHEAP_TIME_COMPARATOR);
     return curr_id;
@@ -88,9 +91,11 @@ uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
 
 int remove_timer(uint32_t id)
 {
+    /* Create a dud sample node with the id we are searching for to find the real node's index. */
     int index;
     timer_node node = {id, 0, NULL, NULL};
     SGLIB_HEAP_FIND(timer_node, min_heap, first_free, MINHEAP_ID_COMPARATOR, node, index);
+    /* If we found the node, remove it from the heap. If the node was at the head, reset timer A. */
     if (index == -1 || remove_from_heap(index, id)) {
         return CLOCK_R_FAIL;
     } else if (index == 0) {
@@ -101,11 +106,11 @@ int remove_timer(uint32_t id)
 
 int timer_irq(void *data, seL4_Word irq, seL4_IRQHandler irq_handler)
 {
+    /* Run the necessary callbacks, reset timer A, and acknowledge that the IRQ has been handled. */
     if (invoke_callbacks()) {
         return CLOCK_R_FAIL;
     }
     reset_timer_a();
-    /* Acknowledge that the IRQ has been handled. */
     seL4_IRQHandler_Ack(irq_handler);
     return CLOCK_R_OK;
 }
@@ -116,7 +121,7 @@ int stop_timer(void)
     if (min_heap == NULL) {
         return CLOCK_R_FAIL;
     }
-    /* Stop the timer from producing further interrupts and remove all existing timeouts. */
+    /* Stop the timer from producing further interrupts and free the min heap. */
     configure_timeout(clock.regs, MESON_TIMER_A, false, false, TIMEOUT_TIMEBASE_1_MS, 0);
     free(min_heap);
 
@@ -124,12 +129,14 @@ int stop_timer(void)
 }
 
 static int remove_from_heap(int index, uint32_t id) {
+    /* This is purely for optimisation since REMOVE does work that isn't necessary for popping. */
     if (index == 0) {
         SGLIB_HEAP_DELETE(timer_node, min_heap, first_free, max_timers, MINHEAP_TIME_COMPARATOR);
     } else {
         SGLIB_HEAP_REMOVE(timer_node, min_heap, index, first_free, MINHEAP_TIME_COMPARATOR);
     }
     
+    /* If after removing our heap is mostly empty, realloc its size to shrink it in half. */
     if (first_free < max_timers / 2) {
         timer_node *new_min_heap = realloc(min_heap, sizeof(timer_node) * max_timers / 2);
         if (new_min_heap == NULL) {
@@ -143,6 +150,7 @@ static int remove_from_heap(int index, uint32_t id) {
 
 static void reset_timer_a()
 {
+    /* If the heap isn't empty, set timer A to the next node's delay. Otherwise disable timer A. */
     if (!SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)) {
         uint64_t new = SGLIB_HEAP_GET_MIN(min_heap).time_expired - read_timestamp(clock.regs) / 1000;
         write_timeout(clock.regs, MESON_TIMER_A, new);
@@ -153,6 +161,7 @@ static void reset_timer_a()
 
 static int invoke_callbacks()
 {
+    /* Keep popping from the heap all timers that have expired and run their callback functions. */
     timer_node first_elem;
     do {
         first_elem = SGLIB_HEAP_GET_MIN(min_heap);
