@@ -111,14 +111,17 @@ struct network_console *console;
 
 void timer_callback(uint32_t id, void *data)
 {
-    printf("Output of get_time in ms, %lu\n", get_time()/1000);
-    printf("Output of timestamp_ms in ms, %lu\n", timestamp_ms(timestamp_get_freq()));
+    int i = 0;
+    do {
+        printf("Output of get_time in ms, %lu\n", get_time()/1000);
+        printf("Output of timestamp_ms in ms, %lu\n", timestamp_ms(timestamp_get_freq()));
+        uint32_t id2 = register_timer(100000, timer_callback, NULL);
+        i++;
+    } while (i < 5);
 }
 
 void set_up_timer_test()
 {
-    printf("Delay of %d ms\n", 100000/1000);
-    printf("Output of timestamp_ms in ms, %lu\n", timestamp_ms(timestamp_get_freq()));
     uint32_t id2 = register_timer(100000, timer_callback, NULL);
 }
 
