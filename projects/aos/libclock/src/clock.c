@@ -100,10 +100,9 @@ uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
         write_timeout(clock.regs, MESON_TIMER_A, delay / 1000);
     }
     /* NOTE: IDs are currently just incremented per register. Likely needs to change later.*/
-    uint32_t id = new_id();
-    timer_node node = {id, (read_timestamp(clock.regs) + delay) / 1000, callback, data};
+    timer_node node = {new_id(), (read_timestamp(clock.regs) + delay) / 1000, callback, data};
     SGLIB_HEAP_ADD(timer_node, min_heap, node, first_free, max_timers, MINHEAP_TIME_COMPARATOR);
-    return id;
+    return node.id;
 }
 
 int remove_timer(uint32_t id)
