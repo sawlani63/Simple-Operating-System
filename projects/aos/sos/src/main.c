@@ -109,19 +109,14 @@ static struct {
 
 struct network_console *console;
 
-void timer_callback1(uint32_t id, void *data)
+void timer_callback(uint32_t id, void *data)
 {
     printf("%lu", get_time());
 }
 
-void timer_callback2(uint32_t id, void *data)
-{
-    printf("OOOOOOOOOOOOOOORAAAAAAAAAAAAAAAAAAAAAAAAAHHHHHHHHHHHHH");
-}
-
 void set_up_timer_test()
 {
-    uint32_t id2 = register_timer(3000000, timer_callback2, NULL);
+    uint32_t id2 = register_timer(3000000, timer_callback, NULL);
 }
 
 /**

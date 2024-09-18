@@ -88,7 +88,6 @@ uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
     } else if (SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)
         || SGLIB_HEAP_GET_MIN(min_heap).time_expired > time_expired) {
             write_timeout(clock.regs, MESON_TIMER_A, delay / 1000);
-        printf("DADWADAWDAWDAW: %lu\n", delay / 1000);
     }
     
     timer_node node = {new_id(), time_expired / 1000, callback, data};
@@ -111,7 +110,6 @@ int remove_timer(uint32_t id)
 
 int timer_irq(void *data, seL4_Word irq, seL4_IRQHandler irq_handler)
 {
-    printf("HIOHIAS");
     if (invoke_callbacks()) {
         return CLOCK_R_FAIL;
     }
@@ -171,6 +169,7 @@ static int invoke_callbacks()
         if (remove_from_heap(0, first_elem.id)) {
             return 1;
         }
-    } while (first_elem.time_expired == SGLIB_HEAP_GET_MIN(min_heap).time_expired);
+    } while (!SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)
+             && first_elem.time_expired == SGLIB_HEAP_GET_MIN(min_heap).time_expired);
     return 0;
 }
