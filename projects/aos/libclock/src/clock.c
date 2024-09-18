@@ -18,6 +18,7 @@
  * to set registers and configure timeouts. */
 #include "device.h"
 
+#define MIN_HEAP_SIZE 32
 #define MAX_TIMEOUT 65535 * 1000
 #define COMPARE_UNSIGNED(a, b) ((a > b) - (a < b))
 #define MINHEAP_TIME_COMPARATOR(x, y) COMPARE_UNSIGNED(y.time_expired, x.time_expired)
@@ -34,7 +35,7 @@ typedef struct {
     void *data;
 } timer_node;
 
-int max_timers = 32;
+int max_timers = MIN_HEAP_SIZE;
 timer_node *min_heap = NULL;
 int first_free = 0;
 uint32_t curr_id = 0;
@@ -50,7 +51,6 @@ int start_timer(unsigned char *timer_vaddr)
 
     /* Set the clock registers to the base + reg offset and start timer E. */
     clock.regs = (meson_timer_reg_t *) (timer_vaddr + TIMER_REG_START);
-    configure_timestamp(clock.regs, TIMEOUT_TIMEBASE_1_US);
 
     /* Allocate the min heap for keeping track of timers. */
     min_heap = malloc(sizeof(timer_node) * max_timers);
@@ -137,7 +137,7 @@ static int remove_from_heap(int index, uint32_t id) {
     }
     
     /* If after removing our heap is mostly empty, realloc its size to shrink it in half. */
-    if (first_free < max_timers / 2) {
+    if (max_timers > MIN_HEAP_SIZE && first_free < max_timers / 2) {
         timer_node *new_min_heap = realloc(min_heap, sizeof(timer_node) * max_timers / 2);
         if (new_min_heap == NULL) {
             return 1;
