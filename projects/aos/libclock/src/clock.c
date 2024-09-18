@@ -48,13 +48,8 @@ int start_timer(unsigned char *timer_vaddr)
     /* If the driver is already initialised we stop the timer and restart.*/
     stop_timer();
 
-    /* Allocate memory for the clock registers, and identify the vaddr of the
-     * timer registers. Each register is 32 bits, so we index like an array.*/
+    /* Set the clock registers to the base + reg offset and start timer E. */
     clock.regs = (meson_timer_reg_t *) (timer_vaddr + TIMER_REG_START);
-
-    /* We only need 10ms precision, so the default 1us timerbase resolution
-     * is overkill and may waste system resources. We will set it to 1ms.*/
-    configure_timeout(clock.regs, MESON_TIMER_A, true, false, TIMEOUT_TIMEBASE_1_MS, 0);
     configure_timestamp(clock.regs, TIMEOUT_TIMEBASE_1_US);
 
     /* Allocate the min heap and stack for keeping track of timers and ids. */
@@ -87,10 +82,10 @@ uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
         min_heap = new_min_heap;
     } else if (SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)
         || SGLIB_HEAP_GET_MIN(min_heap).time_expired > time_expired) {
-            write_timeout(clock.regs, MESON_TIMER_A, delay / 1000);
+        configure_timeout(clock.regs, MESON_TIMER_A, true, false, TIMEOUT_TIMEBASE_1_MS, delay / 1000);
     }
     
-    timer_node node = {new_id(), time_expired / 1000, callback, data};
+    timer_node node = {new_id(), time_expired, callback, data};
     SGLIB_HEAP_ADD(timer_node, min_heap, node, first_free, max_timers, MINHEAP_TIME_COMPARATOR);
     return node.id;
 }
@@ -157,6 +152,8 @@ static void reset_timer_a()
     if (!SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)) {
         uint64_t new = SGLIB_HEAP_GET_MIN(min_heap).time_expired - read_timestamp(clock.regs) / 1000;
         write_timeout(clock.regs, MESON_TIMER_A, new);
+    } else {
+        configure_timeout(clock.regs, MESON_TIMER_A, false, false, TIMEOUT_TIMEBASE_1_MS, 0);
     }
 }
 
