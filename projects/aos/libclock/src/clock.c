@@ -13,7 +13,6 @@
 #include <stdint.h>
 #include <clock/clock.h>
 #include <clock/timestamp.h>
-#include <clock/idstack.h>
 
 /* The functions in src/device.h should help you interact with the timer
  * to set registers and configure timeouts. */
@@ -38,6 +37,7 @@ typedef struct {
 int max_timers = 32;
 timer_node *min_heap = NULL;
 int first_free = 0;
+uint32_t curr_id = 0;
 
 static int remove_from_heap(int index, uint32_t id);
 static void reset_timer_a();
@@ -52,14 +52,10 @@ int start_timer(unsigned char *timer_vaddr)
     clock.regs = (meson_timer_reg_t *) (timer_vaddr + TIMER_REG_START);
     configure_timestamp(clock.regs, TIMEOUT_TIMEBASE_1_US);
 
-    /* Allocate the min heap and stack for keeping track of timers and ids. */
+    /* Allocate the min heap for keeping track of timers. */
     min_heap = malloc(sizeof(timer_node) * max_timers);
-    if (min_heap == NULL) {
-        return CLOCK_R_UINT;
-    }
-    create_stack();
-
-    return CLOCK_R_OK;
+    
+    return min_heap == NULL ? CLOCK_R_UINT : CLOCK_R_OK;
 }
 
 timestamp_t get_time(void)
@@ -85,9 +81,9 @@ uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
         configure_timeout(clock.regs, MESON_TIMER_A, true, false, TIMEOUT_TIMEBASE_1_MS, delay / 1000);
     }
     
-    timer_node node = {new_id(), time_expired, callback, data};
+    timer_node node = {++curr_id, time_expired, callback, data};
     SGLIB_HEAP_ADD(timer_node, min_heap, node, first_free, max_timers, MINHEAP_TIME_COMPARATOR);
-    return node.id;
+    return curr_id;
 }
 
 int remove_timer(uint32_t id)
@@ -123,13 +119,11 @@ int stop_timer(void)
     /* Stop the timer from producing further interrupts and remove all existing timeouts. */
     configure_timeout(clock.regs, MESON_TIMER_A, false, false, TIMEOUT_TIMEBASE_1_MS, 0);
     free(min_heap);
-    free_stack();
 
     return CLOCK_R_OK;
 }
 
 static int remove_from_heap(int index, uint32_t id) {
-    push(id);
     if (index == 0) {
         SGLIB_HEAP_DELETE(timer_node, min_heap, first_free, max_timers, MINHEAP_TIME_COMPARATOR);
     } else {
