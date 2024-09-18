@@ -88,6 +88,7 @@ uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
     if (delay > MAX_TIMEOUT) {
         delay = MAX_TIMEOUT;
     }
+    uint64_t time_expired = (read_timestamp(clock.regs) + delay) / 1000;
     if (SGLIB_HEAP_IS_FULL(first_free, max_timers)) {
         timer_node *new_min_heap = realloc(min_heap, sizeof(timer_node) * max_timers * 2);
         if (new_min_heap == NULL) {
@@ -95,12 +96,12 @@ uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
         }
         max_timers *= 2;
         min_heap = new_min_heap;
-    } else if (SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)) {
-        /* NOTE: Timer A is 16 bit whereas delay is 64 bit. May need to be changed later.*/
+    } else if (SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)
+        || SGLIB_HEAP_GET_MIN(min_heap).time_expired > time_expired) {
         write_timeout(clock.regs, MESON_TIMER_A, delay / 1000);
     }
-    /* NOTE: IDs are currently just incremented per register. Likely needs to change later.*/
-    timer_node node = {new_id(), (read_timestamp(clock.regs) + delay) / 1000, callback, data};
+    
+    timer_node node = {new_id(), time_expired / 1000, callback, data};
     SGLIB_HEAP_ADD(timer_node, min_heap, node, first_free, max_timers, MINHEAP_TIME_COMPARATOR);
     return node.id;
 }
