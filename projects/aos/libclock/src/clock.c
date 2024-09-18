@@ -169,6 +169,7 @@ static int invoke_callbacks()
         if (remove_from_heap(0, first_elem.id)) {
             return 1;
         }
-    } while (first_elem.time_expired == SGLIB_HEAP_GET_MIN(min_heap).time_expired);
+    } while (!SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)
+             && first_elem.time_expired == SGLIB_HEAP_GET_MIN(min_heap).time_expired);
     return 0;
 }
