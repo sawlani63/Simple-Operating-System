@@ -118,6 +118,7 @@ void timer_callback(uint32_t id, void *data)
 void set_up_timer_test()
 {
     printf("Delay of %d ms\n", 100000/1000);
+    printf("Output of timestamp_ms in ms, %lu\n", timestamp_ms(timestamp_get_freq()));
     uint32_t id2 = register_timer(100000, timer_callback, NULL);
 }
 
