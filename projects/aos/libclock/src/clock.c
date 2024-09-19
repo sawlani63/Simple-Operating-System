@@ -52,8 +52,9 @@ int start_timer(unsigned char *timer_vaddr)
     /* Set the clock registers to the base + reg offset and start timer E. */
     clock.regs = (meson_timer_reg_t *) (timer_vaddr + TIMER_REG_START);
 
-    /* Allocate the min heap for keeping track of timers. */
+    /* Allocate the min heap for keeping track of timers and configure timer A. */
     min_heap = malloc(sizeof(timer_node) * max_timers);
+    configure_timeout(clock.regs, MESON_TIMER_A, true, false, TIMEOUT_TIMEBASE_1_MS, 0);
 
     return min_heap == NULL ? CLOCK_R_UINT : CLOCK_R_OK;
 }
@@ -80,7 +81,7 @@ uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
         min_heap = new_min_heap;
     } else if (SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)
         || SGLIB_HEAP_GET_MIN(min_heap).time_expired > time_expired) {
-        configure_timeout(clock.regs, MESON_TIMER_A, true, false, TIMEOUT_TIMEBASE_1_MS, delay / 1000);
+        write_timeout(clock.regs, MESON_TIMER_A, delay / 1000);
     }
     
     /* Create a new timer node with the specified fields and add it to the heap. */
@@ -150,12 +151,10 @@ static int remove_from_heap(int index, uint32_t id) {
 
 static void reset_timer_a()
 {
-    /* If the heap isn't empty, set timer A to the next node's delay. Otherwise disable timer A. */
+    /* If the heap isn't empty, set timer A to the next node's delay. */
     if (!SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)) {
         uint64_t new = SGLIB_HEAP_GET_MIN(min_heap).time_expired - read_timestamp(clock.regs) / 1000;
         write_timeout(clock.regs, MESON_TIMER_A, new);
-    } else {
-        configure_timeout(clock.regs, MESON_TIMER_A, false, false, TIMEOUT_TIMEBASE_1_MS, 0);
     }
 }
 

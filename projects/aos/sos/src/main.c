@@ -117,8 +117,12 @@ void timer_callback(uint32_t id, void *data)
 void set_up_timer_test()
 {
     register_timer(1000000, timer_callback, NULL);
+    register_timer(1500000, timer_callback, NULL);
     register_timer(2000000, timer_callback, NULL);
+    uint32_t id = register_timer(2500000, timer_callback, NULL);
     register_timer(3000000, timer_callback, NULL);
+    register_timer(1800000, timer_callback, NULL);
+    remove_timer(id);
 }
 
 /**
