@@ -108,20 +108,34 @@ static struct {
 } user_process;
 
 struct network_console *console;
-int i = 0;
+int i = 0, j = 0;
 
-void timer_callback(uint32_t id, void *data)
+void timer_callback1(uint32_t id, void *data)
 {
-    printf("Current time: %lu ms\n", get_time() / 1000);
+    printf("Callback1 %d: Current time: %lu ms\n", id, get_time() / 1000);
     if (i < 5) {
-        register_timer(100000, timer_callback, NULL);
+        register_timer(100000, timer_callback1, NULL);
         i++;
+    }
+}
+
+void timer_callback2(uint32_t id, void *data)
+{
+    printf("Callback2 %d: Current time: %lu ms\n", id, get_time() / 1000);
+    if (j < 5) {
+        register_timer(110000, timer_callback2, NULL);
+        j++;
+    } else if (i == 5) {
+        stop_timer();
     }
 }
 
 void set_up_timer_test()
 {
-    register_timer(100000, timer_callback, NULL);
+    register_timer(100000, timer_callback1, NULL);
+    register_timer(110000, timer_callback2, NULL);
+    uint32_t id = register_timer(2000000, timer_callback2, NULL);
+    remove_timer(id);
 }
 
 /**
