@@ -117,6 +117,7 @@ void sos_usleep(int msec)
 
 int64_t sos_time_stamp(void)
 {
-    assert(!"You need to implement this");
-    return -1;
+    seL4_SetMR(0, SYSCALL_SOS_TIME_STAMP);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
+    return seL4_GetMR(0);
 }

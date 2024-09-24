@@ -20,6 +20,7 @@
 
 /* System calls for SOS */
 #define SYSCALL_SOS_WRITE SYS_writev
+#define SYSCALL_SOS_TIME_STAMP SYS_clock_gettime
 
 /* Endpoint for talking to SOS */
 #define SOS_IPC_EP_CAP     (0x1)

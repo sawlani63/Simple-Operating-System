@@ -73,6 +73,7 @@
  */
 #define SOS_SYSCALL0 0
 #define SYSCALL_SOS_WRITE SYS_writev
+#define SYSCALL_SOS_TIME_STAMP SYS_clock_gettime
 
 /* The linker will link this symbol to the start address  *
  * of an archive of attached applications.                */
@@ -110,7 +111,7 @@ static struct {
 struct network_console *console;
 int i = 0, j = 0;
 
-void timer_callback1(uint32_t id, void *data)
+void timer_callback1(uint32_t id, UNUSED void *data)
 {
     printf("Callback1 %d: Current time: %lu ms\n", id, get_time() / 1000);
     if (i < 5) {
@@ -119,7 +120,7 @@ void timer_callback1(uint32_t id, void *data)
     }
 }
 
-void timer_callback2(uint32_t id, void *data)
+void timer_callback2(uint32_t id, UNUSED void *data)
 {
     printf("Callback2 %d: Current time: %lu ms\n", id, get_time() / 1000);
     if (j < 5) {
@@ -164,6 +165,10 @@ seL4_MessageInfo_t handle_syscall(UNUSED seL4_Word badge, UNUSED int num_args, b
         /* Set the reply message to be the return value of console_send */
         seL4_SetMR(0, network_console_send(console, &receive, 1));
 
+        break;
+    case SYSCALL_SOS_TIME_STAMP:
+        ZF_LOGV("syscall: some thread made syscall 113!\n");
+        seL4_SetMR(0, timestamp_us(timestamp_get_freq()));
         break;
     case SOS_SYSCALL0:
         ZF_LOGV("syscall: thread example made syscall 0!\n");
