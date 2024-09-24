@@ -15,7 +15,7 @@
 #         --features ssl
 
 AUTH_TOKEN_FILE="$HOME/.aos_auth_token"
-AOS_DOMAIN="aos-2.cse.unsw.edu.au"
+AOS_DOMAIN="aos.cse.unsw.edu.au"
 AOS_HTTP_URL="https://${AOS_DOMAIN}"
 AOS_WS_URL="wss://${AOS_DOMAIN}"
 
