@@ -43,7 +43,6 @@ uint32_t curr_id = 0;
 static int remove_from_heap(int index, uint32_t id);
 static void reset_timer_a();
 static int invoke_callbacks();
-static void wakeup(uint32_t id, void* data);
 
 int start_timer(unsigned char *timer_vaddr)
 {
@@ -87,32 +86,6 @@ uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
     
     /* Create a new timer node with the specified fields and add it to the heap. */
     timer_node node = {++curr_id, time_expired, callback, data};
-    SGLIB_HEAP_ADD(timer_node, min_heap, node, first_free, max_timers, MINHEAP_TIME_COMPARATOR);
-    return curr_id;
-}
-
-uint32_t register_timer_block(uint64_t delay, void *data)
-{
-    /* Clamp timer A in case a user specifies too large a value for uint16_t. */
-    if (delay > MAX_TIMEOUT) {
-        delay = MAX_TIMEOUT;
-    }
-    uint64_t time_expired = (read_timestamp(clock.regs) + delay) / 100;
-    if (SGLIB_HEAP_IS_FULL(first_free, max_timers)) {
-        /* Reallocate memory for the heap, doubling its size. */
-        timer_node *new_min_heap = realloc(min_heap, sizeof(timer_node) * max_timers * 2);
-        if (new_min_heap == NULL) {
-            return 0;
-        }
-        max_timers *= 2;
-        min_heap = new_min_heap;
-    } else if (SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)
-        || SGLIB_HEAP_GET_MIN(min_heap).time_expired > time_expired) {
-        write_timeout(clock.regs, MESON_TIMER_A, delay / 100);
-    }
-    
-    /* Create a new timer node with the specified fields and add it to the heap. */
-    timer_node node = {++curr_id, time_expired, wakeup, data};
     SGLIB_HEAP_ADD(timer_node, min_heap, node, first_free, max_timers, MINHEAP_TIME_COMPARATOR);
     return curr_id;
 }
@@ -200,7 +173,7 @@ static int invoke_callbacks()
     return 0;
 }
 
-static void wakeup(uint32_t id, void* data)
+void wakeup(uint32_t id, void* data)
 {
     seL4_NBSend((seL4_CPtr) data, seL4_MessageInfo_new(0, 0, 0, 1));
 }

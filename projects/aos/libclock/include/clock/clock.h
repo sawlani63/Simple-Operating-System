@@ -75,3 +75,5 @@ int timer_irq(
     seL4_Word irq,
     seL4_IRQHandler irq_handler
 );
+
+void wakeup(uint32_t id, void* data);

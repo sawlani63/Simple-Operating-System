@@ -172,7 +172,7 @@ seL4_MessageInfo_t handle_syscall(UNUSED seL4_Word badge, UNUSED int num_args, b
         break;
     case SYSCALL_SOS_USLEEP:
         ZF_LOGV("syscall: some thread made syscall 101!\n");
-        register_timer_block(seL4_GetMR(1), ep);
+        register_timer(seL4_GetMR(1), wakeup, (void*) ep);
         *have_reply = false;
         break;
     case SYSCALL_SOS_TIME_STAMP:
