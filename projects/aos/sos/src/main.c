@@ -168,6 +168,9 @@ seL4_MessageInfo_t handle_syscall(UNUSED seL4_Word badge, UNUSED int num_args, b
         break;
     case SYSCALL_SOS_TIME_STAMP:
         ZF_LOGV("syscall: some thread made syscall 113!\n");
+        /* construct a reply message of length 1 */
+        reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+        /* Set the reply message to be the timestamp since booting in microseconds */
         seL4_SetMR(0, timestamp_us(timestamp_get_freq()));
         break;
     case SOS_SYSCALL0:

@@ -117,7 +117,11 @@ void sos_usleep(int msec)
 
 int64_t sos_time_stamp(void)
 {
+    // need to badge EP
+    /* Set the first message register to the sos_time_stamp syscall number */
     seL4_SetMR(0, SYSCALL_SOS_TIME_STAMP);
+    /* Invokes the SOS endpoint for the IPC protocol to request a response and block until one is received */
     seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
+    /* Return the response received from SOS */
     return seL4_GetMR(0);
 }
