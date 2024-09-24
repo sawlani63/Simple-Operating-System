@@ -72,7 +72,11 @@
  * A dummy starting syscall
  */
 #define SOS_SYSCALL0 0
+#define SYSCALL_SOS_OPEN SYS_openat //little unsure if this is right
+#define SYSCALL_SOS_CLOSE SYS_close
+#define SYSCALL_SOS_READ SYS_readv
 #define SYSCALL_SOS_WRITE SYS_writev
+#define SYSCALL_SOS_USLEEP SYS_nanosleep
 #define SYSCALL_SOS_TIME_STAMP SYS_clock_gettime
 
 /* The linker will link this symbol to the start address  *
@@ -143,7 +147,7 @@ void set_up_timer_test()
  * Deals with a syscall and sets the message registers before returning the
  * message info to be passed through to seL4_ReplyRecv()
  */
-seL4_MessageInfo_t handle_syscall(UNUSED seL4_Word badge, UNUSED int num_args, bool *have_reply)
+seL4_MessageInfo_t handle_syscall(UNUSED seL4_Word badge, UNUSED int num_args, bool *have_reply, seL4_CPtr ep)
 {
     seL4_MessageInfo_t reply_msg;
 
@@ -165,6 +169,11 @@ seL4_MessageInfo_t handle_syscall(UNUSED seL4_Word badge, UNUSED int num_args, b
         /* Set the reply message to be the return value of console_send */
         seL4_SetMR(0, network_console_send(console, &receive, 1));
 
+        break;
+    case SYSCALL_SOS_USLEEP:
+        ZF_LOGV("syscall: some thread made syscall 101!\n");
+        register_timer_block(seL4_GetMR(1), ep);
+        *have_reply = false;
         break;
     case SYSCALL_SOS_TIME_STAMP:
         ZF_LOGV("syscall: some thread made syscall 113!\n");
@@ -228,7 +237,7 @@ NORETURN void syscall_loop(seL4_CPtr ep)
 
             /* It's not a fault or an interrupt, it must be an IPC
              * message from console_test! */
-            reply_msg = handle_syscall(badge, seL4_MessageInfo_get_length(message) - 1, &have_reply);
+            reply_msg = handle_syscall(badge, seL4_MessageInfo_get_length(message) - 1, &have_reply, ep);
         } else {
             /* some kind of fault */
             debug_print_fault(message, APP_NAME);
