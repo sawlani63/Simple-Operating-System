@@ -24,6 +24,12 @@
         "string_view": "cpp",
         "initializer_list": "cpp",
         "string": "cpp",
-        "vector": "cpp"
+        "vector": "cpp",
+        "assert.h": "c",
+        "stdarg.h": "c",
+        "string.h": "c",
+        "sos.h": "c",
+        "syscalls.h": "c",
+        "clock.h": "c"
     }
 }

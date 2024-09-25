@@ -172,3 +172,8 @@ static int invoke_callbacks()
              && first_elem.time_expired == SGLIB_HEAP_GET_MIN(min_heap).time_expired);
     return 0;
 }
+
+void wakeup(uint32_t id, void* data)
+{
+    seL4_NBSend((seL4_CPtr) data, seL4_MessageInfo_new(0, 0, 0, 1));
+}
