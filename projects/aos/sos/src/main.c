@@ -625,7 +625,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     start_timer(timer_vaddr);
     /* Sets up the timer irq */
     seL4_IRQHandler irq_handler;
-    int init_irq_err = sos_register_irq_handler(meson_timeout_irq(MESON_TIMER_A), true, NULL, NULL, &irq_handler);
+    int init_irq_err = sos_register_irq_handler(meson_timeout_irq(MESON_TIMER_A), true, timer_irq, NULL, &irq_handler);
     ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");
     seL4_IRQHandler_Ack(irq_handler);
 
