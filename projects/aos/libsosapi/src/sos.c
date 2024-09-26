@@ -35,8 +35,19 @@ static size_t sos_debug_print(const void *vData, size_t count)
 
 int sos_open(const char *path, fmode_t mode)
 {
-    assert(!"You need to implement this");
-    return -1;
+    int len = strlen(path);
+    if (len + 3 > seL4_MsgMaxLength) {
+        len = seL4_MsgMaxLength - 3;
+    }
+
+    seL4_SetMR(0, SYSCALL_SOS_OPEN);
+    seL4_SetMR(1, mode);
+    seL4_SetMR(2, len);
+    for (int i = 0; i < len; i++) {
+        seL4_SetMR(i + 3, path[i]);
+    }
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, len + 3));
+    return seL4_GetMR(0);
 }
 
 int sos_close(int file)
@@ -47,8 +58,17 @@ int sos_close(int file)
 
 int sos_read(int file, char *buf, size_t nbyte)
 {
-    assert(!"You need to implement this");
-    return -1;
+    for (int i = 0; i < nbyte; i++) {
+        seL4_SetMR(0, SYSCALL_SOS_READ);
+        seL4_SetMR(1, file);
+        seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
+        char recv = seL4_GetMR(0);
+        if (recv == -1) {
+            return -1;
+        }
+        buf[i] = recv;
+    }
+    return nbyte;
 }
 
 int sos_write(int file, const char *buf, size_t nbyte)
@@ -56,14 +76,16 @@ int sos_write(int file, const char *buf, size_t nbyte)
     /* NOTE: We only need to send one byte at a time as this is handled by
      * __stdio_write + sys_writev where __stdio_write takes the entire buffer
      * and continuously calls sys_writev until the entire length is written. */
-    if (file == STDOUT_FD) {
-        seL4_MessageInfo_t msg = seL4_MessageInfo_new(0, 0, 0, 2);
+    for (int i = 0; i < nbyte; i++) {
         seL4_SetMR(0, SYSCALL_SOS_WRITE);
-        seL4_SetMR(1, *buf);
-        seL4_Call(SOS_IPC_EP_CAP, msg);
-        return seL4_GetMR(0);
+        seL4_SetMR(1, file);
+        seL4_SetMR(2, buf[i]);
+        seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 3));
+        if (seL4_GetMR(0) == -1) {
+            return -1;
+        }
     }
-    return sos_debug_print(buf, nbyte);
+    return nbyte;
 }
 
 int sos_getdirent(int pos, char *name, size_t nbyte)
@@ -112,7 +134,6 @@ pid_t sos_process_wait(pid_t pid)
 
 void sos_usleep(int msec)
 {
-    // need to badge EP
     seL4_SetMR(0, SYSCALL_SOS_USLEEP);
     seL4_SetMR(1, msec);
     seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 2));
@@ -120,7 +141,6 @@ void sos_usleep(int msec)
 
 int64_t sos_time_stamp(void)
 {
-    // need to badge EP
     /* Set the first message register to the sos_time_stamp syscall number */
     seL4_SetMR(0, SYSCALL_SOS_TIME_STAMP);
     /* Invokes the SOS endpoint for the IPC protocol to request a response and block until one is received */

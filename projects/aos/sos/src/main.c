@@ -47,6 +47,7 @@
 #endif /* CONFIG_SOS_GDB_ENABLED */
 
 #include <aos/vsyscall.h>
+#include "fs.h"
 
 /*
  * To differentiate between signals from notification objects and and IPC messages,
@@ -79,7 +80,9 @@
 #define SYSCALL_SOS_USLEEP SYS_nanosleep
 #define SYSCALL_SOS_TIME_STAMP SYS_clock_gettime
 
+static void syscall_sos_open(seL4_MessageInfo_t *reply_msg);
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg);
+static void syscall_sos_read(seL4_MessageInfo_t *reply_msg);
 static void syscall_sos_usleep(bool *have_reply, seL4_CPtr reply);
 static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg);
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, bool *have_repl, seL4_Word syscall_number);
@@ -118,35 +121,6 @@ static struct {
 } user_process;
 
 struct network_console *console;
-int i = 0, j = 0;
-
-void timer_callback1(uint32_t id, UNUSED void *data)
-{
-    printf("Callback1 %d: Current time: %lu ms\n", id, get_time() / 1000);
-    if (i < 5) {
-        register_timer(100000, timer_callback1, NULL);
-        i++;
-    }
-}
-
-void timer_callback2(uint32_t id, UNUSED void *data)
-{
-    printf("Callback2 %d: Current time: %lu ms\n", id, get_time() / 1000);
-    if (j < 5) {
-        register_timer(110000, timer_callback2, NULL);
-        j++;
-    } else if (i == 5) {
-        stop_timer();
-    }
-}
-
-void set_up_timer_test()
-{
-    register_timer(100000, timer_callback1, NULL);
-    register_timer(110000, timer_callback2, NULL);
-    uint32_t id = register_timer(2000000, timer_callback2, NULL);
-    remove_timer(id);
-}
 
 /**
  * Deals with a syscall and sets the message registers before returning the
@@ -165,8 +139,14 @@ seL4_MessageInfo_t handle_syscall(UNUSED seL4_Word badge, UNUSED int num_args, b
 
     /* Process system call */
     switch (syscall_number) {
+    case SYSCALL_SOS_OPEN:
+        syscall_sos_open(&reply_msg);
+        break;
     case SYSCALL_SOS_WRITE:
         syscall_sos_write(&reply_msg);
+        break;
+    case SYSCALL_SOS_READ:
+        syscall_sos_read(&reply_msg);
         break;
     case SYSCALL_SOS_USLEEP:
         syscall_sos_usleep(have_reply, reply);
@@ -631,6 +611,8 @@ NORETURN void *main_continued(UNUSED void *arg)
     printf("Network init\n");
     network_init(&cspace, timer_vaddr, ntfn);
     console = network_console_init();
+    network_console_register_handler(console, enqueue);
+    push_new_file(2, network_console_byte_send, deque);
 
 #ifdef CONFIG_SOS_GDB_ENABLED
     /* Initialize the debugger */
@@ -643,11 +625,9 @@ NORETURN void *main_continued(UNUSED void *arg)
     start_timer(timer_vaddr);
     /* Sets up the timer irq */
     seL4_IRQHandler irq_handler;
-    int init_irq_err = sos_register_irq_handler(meson_timeout_irq(MESON_TIMER_A), true, timer_irq, NULL, &irq_handler);
+    int init_irq_err = sos_register_irq_handler(meson_timeout_irq(MESON_TIMER_A), true, NULL, NULL, &irq_handler);
     ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");
     seL4_IRQHandler_Ack(irq_handler);
-
-    set_up_timer_test();
 
     /* Start the user application */
     printf("Start first process\n");
@@ -711,15 +691,59 @@ int main(void)
     UNREACHABLE();
 }
 
-static void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
-{
-    printf("syscall: some thread made syscall 66!\n");
+static void syscall_sos_open(seL4_MessageInfo_t *reply_msg) {
+    ZF_LOGV("syscall: thread example made syscall 0!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    int mode = seL4_GetMR(1);
+    int len = seL4_GetMR(2);
+
+    char *string = malloc(len);
+    for (int i = 0; i < len; i++) {
+        string[i] = seL4_GetMR(i + 3);
+    }
+    
+    int fd;
+    if (!strcmp(string, "console")) {
+        fd = push_new_file(mode, network_console_byte_send, deque);
+    }
+    seL4_SetMR(0, fd);
+}
+
+static void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
+{
+    // printf("syscall: some thread made syscall 66!\n");
+    /* construct a reply message of length 1 */
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    /* Receive a fd from sos.c */
+    int write_fd = seL4_GetMR(1);
     /* Receive a byte from sos.c */
-    char receive = seL4_GetMR(1);
-    /* Set the reply message to be the return value of console_send */
-    seL4_SetMR(0, network_console_send(console, &receive, 1));
+    char receive = seL4_GetMR(2);
+
+    struct file *found = find_file(write_fd);
+    if (found == NULL) {
+        /* Set the reply message to be an error value */
+        seL4_SetMR(0, -1);
+    } else {
+        /* Set the reply message to be the return value of the write_handler */
+        seL4_SetMR(0, found->write_handler(enqueue, receive));
+    }
+}
+
+static void syscall_sos_read(seL4_MessageInfo_t *reply_msg) {
+    /* construct a reply message of length 1 */
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    /* Receive a fd from sos.c */
+    int read_fd = seL4_GetMR(1);
+
+    struct file *found = find_file(read_fd);
+    if (found == NULL) {
+        /* Set the reply message to be an error value */
+        seL4_SetMR(0, -1);
+    } else {
+        /* Set the reply message to be the return value of the read_handler */
+        seL4_SetMR(0, found->read_handler());
+    }
 }
 
 static void syscall_sos_usleep(bool *have_reply, seL4_CPtr reply)
