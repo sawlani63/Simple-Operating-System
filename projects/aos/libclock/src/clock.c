@@ -107,6 +107,11 @@ int remove_timer(uint32_t id)
 
 int timer_irq(void *data, seL4_Word irq, seL4_IRQHandler irq_handler)
 {
+    /* May want to change later, not sure if CLOCK_R_OK is best to return here. */
+    if (SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)) {
+        return CLOCK_R_OK;
+    }
+
     /* Run the necessary callbacks, reset timer A, and acknowledge that the IRQ has been handled. */
     if (invoke_callbacks()) {
         return CLOCK_R_FAIL;
@@ -162,14 +167,14 @@ static int invoke_callbacks()
 {
     /* Keep popping from the heap all timers that have expired and run their callback functions. */
     timer_node first_elem;
-    while (!SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)
-            && first_elem.time_expired == SGLIB_HEAP_GET_MIN(min_heap).time_expired) {
+    do {
         first_elem = SGLIB_HEAP_GET_MIN(min_heap);
         first_elem.callback(first_elem.id, first_elem.data);
         if (remove_from_heap(0, first_elem.id)) {
             return 1;
         }
-    }
+    } while (!SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)
+            && first_elem.time_expired == SGLIB_HEAP_GET_MIN(min_heap).time_expired);
     return 0;
 }
 

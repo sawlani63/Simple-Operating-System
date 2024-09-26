@@ -74,6 +74,7 @@ struct file *find_file(int fd) {
         if (curr->fd == fd) {
             return curr;
         }
+        curr = curr->next;
     }
     return NULL;
 }

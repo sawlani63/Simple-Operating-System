@@ -42,8 +42,8 @@ static void thread_block(void)
 int main(void)
 {
     do {
-        //fputs("task:\tHello world, I'm\tconsole_test!\n", stdout);
-        //thread_block();
+        fputs("task:\tHello world, I'm\tconsole_test!\n", stdout);
+        thread_block();
         // sleep(1);    // Implement this as a syscall in the future
     } while (1);
 
