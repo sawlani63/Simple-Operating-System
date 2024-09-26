@@ -80,7 +80,7 @@
 #define SYSCALL_SOS_TIME_STAMP SYS_clock_gettime
 
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg);
-static void syscall_sos_usleep(bool *have_reply, seL4_CPtr ep);
+static void syscall_sos_usleep(bool *have_reply, seL4_CPtr reply);
 static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg);
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, bool *have_repl, seL4_Word syscall_number);
 
@@ -152,7 +152,7 @@ void set_up_timer_test()
  * Deals with a syscall and sets the message registers before returning the
  * message info to be passed through to seL4_ReplyRecv()
  */
-seL4_MessageInfo_t handle_syscall(UNUSED seL4_Word badge, UNUSED int num_args, bool *have_reply, seL4_CPtr ep)
+seL4_MessageInfo_t handle_syscall(UNUSED seL4_Word badge, UNUSED int num_args, bool *have_reply, seL4_CPtr reply)
 {
     seL4_MessageInfo_t reply_msg;
 
@@ -169,18 +169,10 @@ seL4_MessageInfo_t handle_syscall(UNUSED seL4_Word badge, UNUSED int num_args, b
         syscall_sos_write(&reply_msg);
         break;
     case SYSCALL_SOS_USLEEP:
-        syscall_sos_usleep(have_reply, ep);
+        syscall_sos_usleep(have_reply, reply);
         break;
     case SYSCALL_SOS_TIME_STAMP:
         syscall_sos_time_stamp(&reply_msg);
-        break;
-    case SOS_SYSCALL0:
-        ZF_LOGV("syscall: thread example made syscall 0!\n");
-        /* construct a reply message of length 1 */
-        reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-        /* Set the first (and only) word in the message to 0 */
-        seL4_SetMR(0, 0);
-
         break;
     default:
         syscall_unknown_syscall(&reply_msg, have_reply, syscall_number);
@@ -226,7 +218,7 @@ NORETURN void syscall_loop(seL4_CPtr ep)
 
             /* It's not a fault or an interrupt, it must be an IPC
              * message from console_test! */
-            reply_msg = handle_syscall(badge, seL4_MessageInfo_get_length(message) - 1, &have_reply, ep);
+            reply_msg = handle_syscall(badge, seL4_MessageInfo_get_length(message) - 1, &have_reply, reply);
         } else {
             /* some kind of fault */
             debug_print_fault(message, APP_NAME);
@@ -730,10 +722,10 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
     seL4_SetMR(0, network_console_send(console, &receive, 1));
 }
 
-static void syscall_sos_usleep(bool *have_reply, seL4_CPtr ep)
+static void syscall_sos_usleep(bool *have_reply, seL4_CPtr reply)
 {
     ZF_LOGV("syscall: some thread made syscall 101!\n");
-    register_timer(seL4_GetMR(1), wakeup, (void*) ep);
+    register_timer(seL4_GetMR(1), wakeup, (void*) reply);
     *have_reply = false;
 }
 
