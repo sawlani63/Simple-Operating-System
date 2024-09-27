@@ -61,7 +61,7 @@ int sos_read(int file, char *buf, size_t nbyte)
     for (int i = 0; i < nbyte; i++) {
         seL4_SetMR(0, SYSCALL_SOS_READ);
         seL4_SetMR(1, file);
-        seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
+        seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 2));
         char recv = seL4_GetMR(0);
         if (recv == -1) {
             return -1;
