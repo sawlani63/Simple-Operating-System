@@ -14,7 +14,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sos.h>
-#include <semaphore.h>
 
 #include <sel4/sel4.h>
 
