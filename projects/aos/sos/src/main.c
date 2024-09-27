@@ -48,6 +48,7 @@
 
 #include <aos/vsyscall.h>
 #include "fs.h"
+#include <sync/sem.h>
 
 /*
  * To differentiate between signals from notification objects and and IPC messages,
@@ -121,6 +122,7 @@ static struct {
 } user_process;
 
 struct network_console *console;
+sync_sem_t *sem;
 
 /**
  * Deals with a syscall and sets the message registers before returning the
