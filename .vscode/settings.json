@@ -30,6 +30,7 @@
         "string.h": "c",
         "sos.h": "c",
         "syscalls.h": "c",
-        "clock.h": "c"
+        "clock.h": "c",
+        "semaphore.h": "c"
     }
 }

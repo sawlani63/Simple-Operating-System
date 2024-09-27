@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sos.h>
+#include <semaphore.h>
 
 #include <sel4/sel4.h>
 
@@ -87,44 +88,44 @@ int sos_write(int file, const char *buf, size_t nbyte)
 
 int sos_getdirent(int pos, char *name, size_t nbyte)
 {
-    assert(!"You need to implement this");
+    seL4_DebugPutString("system call not implemented");
     return -1;
 }
 
 int sos_stat(const char *path, sos_stat_t *buf)
 {
-    assert(!"You need to implement this");
+    seL4_DebugPutString("system call not implemented");
     return -1;
 }
 
 pid_t sos_process_create(const char *path)
 {
-    assert(!"You need to implement this");
+    seL4_DebugPutString("system call not implemented");
     return -1;
 }
 
 int sos_process_delete(pid_t pid)
 {
-    assert(!"You need to implement this");
+    seL4_DebugPutString("system call not implemented");
     return -1;
 }
 
 pid_t sos_my_id(void)
 {
-    assert(!"You need to implement this");
+    seL4_DebugPutString("system call not implemented");
     return -1;
 
 }
 
 int sos_process_status(sos_process_t *processes, unsigned max)
 {
-    assert(!"You need to implement this");
+    seL4_DebugPutString("system call not implemented");
     return -1;
 }
 
 pid_t sos_process_wait(pid_t pid)
 {
-    assert(!"You need to implement this");
+    seL4_DebugPutString("system call not implemented");
     return -1;
 
 }
