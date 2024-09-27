@@ -73,9 +73,6 @@ int sos_read(int file, char *buf, size_t nbyte)
 
 int sos_write(int file, const char *buf, size_t nbyte)
 {
-    /* NOTE: We only need to send one byte at a time as this is handled by
-     * __stdio_write + sys_writev where __stdio_write takes the entire buffer
-     * and continuously calls sys_writev until the entire length is written. */
     for (int i = 0; i < nbyte; i++) {
         seL4_SetMR(0, SYSCALL_SOS_WRITE);
         seL4_SetMR(1, file);
@@ -134,8 +131,11 @@ pid_t sos_process_wait(pid_t pid)
 
 void sos_usleep(int msec)
 {
+    /* Set the first message register to the sos_usleep syscall number */
     seL4_SetMR(0, SYSCALL_SOS_USLEEP);
+    /* Set the second message register to the amount of time to sleep for */
     seL4_SetMR(1, msec);
+    /* Invokes the SOS endpoint to request a response (SOS only responds after the given delay has passed so thread remains blocked for that time) */
     seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 2));
 }
 

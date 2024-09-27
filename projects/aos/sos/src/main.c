@@ -83,7 +83,7 @@
 static void syscall_sos_open(seL4_MessageInfo_t *reply_msg);
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg);
 static void syscall_sos_read(seL4_MessageInfo_t *reply_msg);
-static void syscall_sos_usleep(bool *have_reply, seL4_CPtr reply);
+static void syscall_sos_usleep(bool *have_reply, seL4_CPtr *reply);
 static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg);
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, bool *have_repl, seL4_Word syscall_number);
 
@@ -126,7 +126,7 @@ struct network_console *console;
  * Deals with a syscall and sets the message registers before returning the
  * message info to be passed through to seL4_ReplyRecv()
  */
-seL4_MessageInfo_t handle_syscall(UNUSED seL4_Word badge, UNUSED int num_args, bool *have_reply, seL4_CPtr reply)
+seL4_MessageInfo_t handle_syscall(UNUSED seL4_Word badge, UNUSED int num_args, bool *have_reply, seL4_CPtr *reply)
 {
     seL4_MessageInfo_t reply_msg;
 
@@ -170,6 +170,7 @@ NORETURN void syscall_loop(seL4_CPtr ep)
     if (reply_ut == NULL) {
         ZF_LOGF("Failed to alloc reply object ut");
     }
+    printf("start of syscall loop: %lu\n", reply);
 
     bool have_reply = false;
     seL4_MessageInfo_t reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
@@ -198,7 +199,7 @@ NORETURN void syscall_loop(seL4_CPtr ep)
 
             /* It's not a fault or an interrupt, it must be an IPC
              * message from console_test! */
-            reply_msg = handle_syscall(badge, seL4_MessageInfo_get_length(message) - 1, &have_reply, reply);
+            reply_msg = handle_syscall(badge, seL4_MessageInfo_get_length(message) - 1, &have_reply, &reply);
         } else {
             /* some kind of fault */
             debug_print_fault(message, APP_NAME);
@@ -691,8 +692,9 @@ int main(void)
     UNREACHABLE();
 }
 
-static void syscall_sos_open(seL4_MessageInfo_t *reply_msg) {
-    ZF_LOGV("syscall: thread example made syscall 0!\n");
+static void syscall_sos_open(seL4_MessageInfo_t *reply_msg) 
+{
+    ZF_LOGE("syscall: thread example made syscall 56!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     int mode = seL4_GetMR(1);
@@ -712,7 +714,7 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg) {
 
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
 {
-    // printf("syscall: some thread made syscall 66!\n");
+    //ZF_LOGE("syscall: some thread made syscall 66!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */
@@ -730,7 +732,9 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
     }
 }
 
-static void syscall_sos_read(seL4_MessageInfo_t *reply_msg) {
+static void syscall_sos_read(seL4_MessageInfo_t *reply_msg) 
+{
+    ZF_LOGE("syscall: some thread made syscall 65!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */
@@ -746,16 +750,25 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg) {
     }
 }
 
-static void syscall_sos_usleep(bool *have_reply, seL4_CPtr reply)
+static void syscall_sos_usleep(bool *have_reply, seL4_CPtr *reply)
 {
-    ZF_LOGV("syscall: some thread made syscall 101!\n");
-    register_timer(seL4_GetMR(1), wakeup, (void*) reply);
+    ZF_LOGE("syscall: some thread made syscall 101!\n");
+    seL4_CPtr sender;
+    sender = *reply;
+    register_timer(seL4_GetMR(1), wakeup, (void*) sender);
     *have_reply = false;
+
+    seL4_CPtr new_reply;
+    ut_t *reply_ut = alloc_retype(&new_reply, seL4_ReplyObject, seL4_ReplyBits);
+    if (reply_ut == NULL) {
+        ZF_LOGF("Failed to alloc reply object ut");
+    }
+    *reply = new_reply;
 }
 
 static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
 {
-    ZF_LOGV("syscall: some thread made syscall 113!\n");
+    ZF_LOGE("syscall: some thread made syscall 113!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Set the reply message to be the timestamp since booting in microseconds */
