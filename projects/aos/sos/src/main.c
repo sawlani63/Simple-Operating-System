@@ -61,7 +61,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "console_test"
+#define APP_NAME             "sosh"
 #define APP_PRIORITY         (0)
 #define APP_EP_BADGE         (101)
 
@@ -726,7 +726,7 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
         seL4_SetMR(0, -1);
     } else {
         /* Set the reply message to be the return value of the write_handler */
-        seL4_SetMR(0, found->write_handler(enqueue, receive));
+        seL4_SetMR(0, found->write_handler(receive));
     }
 }
 

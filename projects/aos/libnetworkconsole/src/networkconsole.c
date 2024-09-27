@@ -110,13 +110,9 @@ int network_console_send(struct network_console *network_console, char *data, in
     return len;
 }
 
-int network_console_byte_send(void (*enqueue)(struct network_console *network_console, char c), char c)
+int network_console_byte_send(char c)
 {
-    int len = network_console_send(&network_console, &c, 1);
-    if (len && network_console.handler) {
-        enqueue(&network_console, c);
-    }
-    return len;
+    return network_console_send(&network_console, &c, 1);
 }
 
 int network_console_register_handler(struct network_console *network_console,
