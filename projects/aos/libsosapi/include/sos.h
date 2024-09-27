@@ -19,7 +19,7 @@
 #include <sys/syscall.h>
 
 /* System calls for SOS */
-#define SYSCALL_SOS_OPEN SYS_openat //little unsure if this is right
+#define SYSCALL_SOS_OPEN SYS_openat
 #define SYSCALL_SOS_CLOSE SYS_close
 #define SYSCALL_SOS_READ SYS_readv
 #define SYSCALL_SOS_WRITE SYS_writev

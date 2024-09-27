@@ -53,8 +53,9 @@ int sos_open(const char *path, fmode_t mode)
 
 int sos_close(int file)
 {
-    assert(!"You need to implement this");
-    return -1;
+    seL4_SetMR(0, 0);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
+    return seL4_GetMR(0);
 }
 
 int sos_read(int file, char *buf, size_t nbyte)
@@ -88,46 +89,52 @@ int sos_write(int file, const char *buf, size_t nbyte)
 
 int sos_getdirent(int pos, char *name, size_t nbyte)
 {
-    seL4_DebugPutString("system call not implemented");
-    return -1;
+    seL4_SetMR(0, 0);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
+    return seL4_GetMR(0);
 }
 
 int sos_stat(const char *path, sos_stat_t *buf)
 {
-    seL4_DebugPutString("system call not implemented");
-    return -1;
+    seL4_SetMR(0, 0);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
+    return seL4_GetMR(0);
 }
 
 pid_t sos_process_create(const char *path)
 {
-    seL4_DebugPutString("system call not implemented");
-    return -1;
+    seL4_SetMR(0, 0);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
+    return seL4_GetMR(0);
 }
 
 int sos_process_delete(pid_t pid)
 {
-    seL4_DebugPutString("system call not implemented");
-    return -1;
+    seL4_SetMR(0, 0);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
+    return seL4_GetMR(0);
 }
 
 pid_t sos_my_id(void)
 {
-    seL4_DebugPutString("system call not implemented");
-    return -1;
+    seL4_SetMR(0, 0);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
+    return seL4_GetMR(0);
 
 }
 
 int sos_process_status(sos_process_t *processes, unsigned max)
 {
-    seL4_DebugPutString("system call not implemented");
-    return -1;
+    seL4_SetMR(0, 0);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
+    return seL4_GetMR(0);
 }
 
 pid_t sos_process_wait(pid_t pid)
 {
-    seL4_DebugPutString("system call not implemented");
-    return -1;
-
+    seL4_SetMR(0, 0);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
+    return seL4_GetMR(0);
 }
 
 void sos_usleep(int msec)

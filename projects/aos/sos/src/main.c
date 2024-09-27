@@ -61,7 +61,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "sosh"
+#define APP_NAME             "console_test"
 #define APP_PRIORITY         (0)
 #define APP_EP_BADGE         (101)
 
@@ -69,11 +69,7 @@
  * process */
 #define INITIAL_PROCESS_EXTRA_STACK_PAGES 4
 
-/*
- * A dummy starting syscall
- */
-#define SOS_SYSCALL0 0
-#define SYSCALL_SOS_OPEN SYS_openat //little unsure if this is right
+#define SYSCALL_SOS_OPEN SYS_openat
 #define SYSCALL_SOS_CLOSE SYS_close
 #define SYSCALL_SOS_READ SYS_readv
 #define SYSCALL_SOS_WRITE SYS_writev
@@ -85,7 +81,7 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg);
 static void syscall_sos_read(seL4_MessageInfo_t *reply_msg);
 static void syscall_sos_usleep(bool *have_reply, seL4_CPtr *reply);
 static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg);
-static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, bool *have_repl, seL4_Word syscall_number);
+static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
 
 /* The linker will link this symbol to the start address  *
  * of an archive of attached applications.                */
@@ -155,7 +151,7 @@ seL4_MessageInfo_t handle_syscall(UNUSED seL4_Word badge, UNUSED int num_args, b
         syscall_sos_time_stamp(&reply_msg);
         break;
     default:
-        syscall_unknown_syscall(&reply_msg, have_reply, syscall_number);
+        syscall_unknown_syscall(&reply_msg, syscall_number);
     }
 
     return reply_msg;
@@ -775,12 +771,12 @@ static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
     seL4_SetMR(0, timestamp_us(timestamp_get_freq()));
 }
 
-static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, bool *have_reply, seL4_Word syscall_number)
+static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number)
 {
-    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
-    ZF_LOGE("Unknown syscall %lu\n", syscall_number);
-    /* Don't reply to an unknown syscall */
-    *have_reply = false;
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    ZF_LOGE("System call %lu not implemented\n", syscall_number);
+    /* Reply -1 to an unimplemented syscall */
+    seL4_SetMR(1, -1);
 }
 
 
