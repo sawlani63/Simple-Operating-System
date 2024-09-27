@@ -36,7 +36,7 @@ typedef int fmode_t;
 struct file {
     int fd;
     fmode_t mode;
-    int (*write_handler)(void (*enqueue)(struct network_console *network_console, char c), char data);
+    int (*write_handler)(char c);
     char (*read_handler)(void);
     struct file *next;
 };
@@ -44,7 +44,7 @@ struct file {
 struct file *file_stack = NULL;
 int id = 1;
 
-static struct file *create_file(fmode_t mode, int (*write_handler)(void (*enqueue)(struct network_console *network_console, char c), char data), char (*read_handler)(void)) {
+static struct file *create_file(fmode_t mode, int (*write_handler)(char c), char (*read_handler)(void)) {
     struct file *new_file = malloc(sizeof(struct file));
     new_file->fd = id++;
     new_file->mode = mode;
@@ -59,7 +59,7 @@ static void push_file(struct file *file) {
     file_stack = file;
 }
 
-int push_new_file(fmode_t mode, int (*write_handler)(void (*enqueue)(struct network_console *network_console, char c), char data), char (*read_handler)(void)) {
+int push_new_file(fmode_t mode, int (*write_handler)(char c), char (*read_handler)(void)) {
     if (id == 2) {
         id += 2;
     }
