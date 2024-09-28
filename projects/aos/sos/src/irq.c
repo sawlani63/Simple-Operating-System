@@ -175,9 +175,6 @@ int sos_handle_irq_notification(seL4_Word *badge, bool *have_reply)
         unchecked_bits &= *badge;
     };
 
-    /* Currently we just don't reply after handling all IRQs */
-    *have_reply = false;
-
     return 0;
 }
 

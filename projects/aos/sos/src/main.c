@@ -124,21 +124,22 @@ static struct {
 struct network_console *console;
 seL4_CPtr sem_cptr;
 sync_bin_sem_t *syscall_sem = NULL;
-
 /**
  * Deals with a syscall and sets the message registers before returning the
  * message info to be passed through to seL4_ReplyRecv()
  */
-seL4_MessageInfo_t handle_syscall(UNUSED seL4_Word badge, UNUSED int num_args, bool *have_reply, seL4_CPtr reply)
+void handle_syscall(void *arg)
 {
-    seL4_MessageInfo_t reply_msg;
+    seL4_CPtr *reply = (seL4_CPtr *) arg;
+    seL4_MessageInfo_t reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
 
     /* get the first word of the message, which in the SOS protocol is the number
      * of the SOS "syscall". */
-    seL4_Word syscall_number = seL4_GetMR(0);
+    seL4_Word syscall_number = current_thread->msg[0];
+    printf("syscall: %lu\n", syscall_number);
 
     /* Set the reply flag */
-    *have_reply = true;
+    bool have_reply = true;
 
     /* Process system call */
     switch (syscall_number) {
@@ -152,16 +153,19 @@ seL4_MessageInfo_t handle_syscall(UNUSED seL4_Word badge, UNUSED int num_args, b
         syscall_sos_read(&reply_msg);
         break;
     case SYSCALL_SOS_USLEEP:
-        syscall_sos_usleep(have_reply, reply);
+        syscall_sos_usleep(&have_reply, reply);
         break;
     case SYSCALL_SOS_TIME_STAMP:
         syscall_sos_time_stamp(&reply_msg);
         break;
     default:
-        syscall_unknown_syscall(&reply_msg, have_reply, syscall_number);
+        syscall_unknown_syscall(&reply_msg, &have_reply, syscall_number);
     }
 
-    return reply_msg;
+    if (have_reply) {
+        seL4_NBSend(reply, reply_msg);
+        printf("msg: %d\n", seL4_GetMR(0));
+    }
 }
 
 NORETURN void syscall_loop(seL4_CPtr ep)
@@ -174,41 +178,29 @@ NORETURN void syscall_loop(seL4_CPtr ep)
         ZF_LOGF("Failed to alloc reply object ut");
     }
 
-    bool have_reply = false;
-    seL4_MessageInfo_t reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
-
     while (1) {
         seL4_Word badge = 0;
-        seL4_MessageInfo_t message;
-
-        /* Reply (if there is a reply) and block on ep, waiting for an IPC
-         * sent over ep, or a notification from our bound notification object */
-        if (have_reply) {
-            message = seL4_ReplyRecv(ep, reply_msg, &badge, reply);
-        } else {
-            message = seL4_Recv(ep, &badge, reply);
-        }
+        seL4_MessageInfo_t message = seL4_Recv(ep, &badge, reply);
 
         /* Awake! We got a message - check the label and badge to
-         * see what the message is about */
+        * see what the message is about */
         seL4_Word label = seL4_MessageInfo_get_label(message);
 
         if (badge & IRQ_EP_BADGE) {
             /* It's a notification from our bound notification
-             * object! */
-            sos_handle_irq_notification(&badge, &have_reply);
+                * object! */
+            sos_handle_irq_notification(&badge, false);
         } else if (label == seL4_Fault_NullFault) {
-
-            /* It's not a fault or an interrupt, it must be an IPC
-             * message from console_test! */
-            reply_msg = handle_syscall(badge, seL4_MessageInfo_get_length(message) - 1, &have_reply, reply);
+            seL4_Word msg[4] = {seL4_GetMR(0), seL4_GetMR(1), seL4_GetMR(2), seL4_GetMR(3)};
+            printf("reply: %lu\n", reply);
+            sos_thread_t *new_thread = thread_create(handle_syscall, (void *) &reply, 0, false, seL4_MaxPrio, seL4_CapNull, true);
+            memcpy(new_thread->msg, msg, sizeof(seL4_Word) * 4);
+            thread_resume(new_thread);
         } else {
             /* some kind of fault */
             debug_print_fault(message, APP_NAME);
             /* dump registers too */
             debug_dump_registers(user_process.tcb);
-            /* Don't reply and recv on nothing */
-            have_reply = false;
 
             ZF_LOGF("The SOS skeleton does not know how to handle faults!");
         }
@@ -703,8 +695,8 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg) {
     ZF_LOGV("syscall: thread example made syscall 0!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    int mode = seL4_GetMR(1);
-    int len = seL4_GetMR(2);
+    int mode = current_thread->msg[1];
+    int len = current_thread->msg[2];
 
     char *string = malloc(len);
     for (int i = 0; i < len; i++) {
@@ -726,9 +718,9 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */
-    int write_fd = seL4_GetMR(1);
+    int write_fd = current_thread->msg[1];
     /* Receive a byte from sos.c */
-    char receive = seL4_GetMR(2);
+    char receive = current_thread->msg[2];
 
     sync_bin_sem_wait(syscall_sem);
     struct file *found = find_file(write_fd);
@@ -746,7 +738,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg) {
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */
-    int read_fd = seL4_GetMR(1);
+    int read_fd = current_thread->msg[1];
 
     sync_bin_sem_wait(syscall_sem);
     struct file *found = find_file(read_fd);
