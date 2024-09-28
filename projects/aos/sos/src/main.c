@@ -48,7 +48,7 @@
 
 #include <aos/vsyscall.h>
 #include "fs.h"
-#include <sync/sem.h>
+#include <sync/bin_sem.h>
 
 /*
  * To differentiate between signals from notification objects and and IPC messages,
@@ -62,7 +62,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "sosh"
+#define APP_NAME             "console_test"
 #define APP_PRIORITY         (0)
 #define APP_EP_BADGE         (101)
 
@@ -122,7 +122,8 @@ static struct {
 } user_process;
 
 struct network_console *console;
-sync_sem_t *sem;
+seL4_CPtr sem_cptr;
+sync_bin_sem_t *syscall_sem = NULL;
 
 /**
  * Deals with a syscall and sets the message registers before returning the
@@ -636,6 +637,11 @@ NORETURN void *main_continued(UNUSED void *arg)
     bool success = start_first_process(APP_NAME, ipc_ep);
     ZF_LOGF_IF(!success, "Failed to start first process");
 
+    syscall_sem = malloc(sizeof(sync_bin_sem_t));
+    ut_t *sem_ut = alloc_retype(&sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!sem_ut, "No memory for notification");
+    sync_bin_sem_init(syscall_sem, sem_cptr, 1);
+
     printf("\nSOS entering syscall loop\n");
     syscall_loop(ipc_ep);
 }
@@ -706,9 +712,11 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg) {
     }
     
     int fd;
+    sync_bin_sem_wait(syscall_sem);
     if (!strcmp(string, "console")) {
         fd = push_new_file(mode, network_console_byte_send, deque);
     }
+    sync_bin_sem_post(syscall_sem);
     seL4_SetMR(0, fd);
 }
 
@@ -722,6 +730,7 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
     /* Receive a byte from sos.c */
     char receive = seL4_GetMR(2);
 
+    sync_bin_sem_wait(syscall_sem);
     struct file *found = find_file(write_fd);
     if (found == NULL) {
         /* Set the reply message to be an error value */
@@ -730,6 +739,7 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
         /* Set the reply message to be the return value of the write_handler */
         seL4_SetMR(0, found->write_handler(receive));
     }
+    sync_bin_sem_post(syscall_sem);
 }
 
 static void syscall_sos_read(seL4_MessageInfo_t *reply_msg) {
@@ -738,6 +748,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg) {
     /* Receive a fd from sos.c */
     int read_fd = seL4_GetMR(1);
 
+    sync_bin_sem_wait(syscall_sem);
     struct file *found = find_file(read_fd);
     if (found == NULL) {
         /* Set the reply message to be an error value */
@@ -746,6 +757,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg) {
         /* Set the reply message to be the return value of the read_handler */
         seL4_SetMR(0, found->read_handler());
     }
+    sync_bin_sem_post(syscall_sem);
 }
 
 static void syscall_sos_usleep(bool *have_reply, seL4_CPtr reply)

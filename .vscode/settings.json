@@ -30,6 +30,10 @@
         "string.h": "c",
         "sos.h": "c",
         "syscalls.h": "c",
-        "clock.h": "c"
+        "clock.h": "c",
+        "thread": "c",
+        "optional": "c",
+        "system_error": "c",
+        "variant": "c"
     }
 }
