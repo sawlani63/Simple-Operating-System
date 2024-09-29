@@ -130,13 +130,12 @@ sync_bin_sem_t *syscall_sem = NULL;
  */
 void handle_syscall(void *arg)
 {
-    seL4_CPtr *reply = (seL4_CPtr *) arg;
+    seL4_CPtr reply = (seL4_CPtr) arg;
     seL4_MessageInfo_t reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
 
     /* get the first word of the message, which in the SOS protocol is the number
      * of the SOS "syscall". */
     seL4_Word syscall_number = current_thread->msg[0];
-    printf("syscall: %lu\n", syscall_number);
 
     /* Set the reply flag */
     bool have_reply = true;
@@ -164,7 +163,6 @@ void handle_syscall(void *arg)
 
     if (have_reply) {
         seL4_NBSend(reply, reply_msg);
-        printf("msg: %d\n", seL4_GetMR(0));
     }
 }
 
@@ -191,9 +189,16 @@ NORETURN void syscall_loop(seL4_CPtr ep)
                 * object! */
             sos_handle_irq_notification(&badge, false);
         } else if (label == seL4_Fault_NullFault) {
+            seL4_CPtr sender = reply;
+
+            seL4_CPtr new_reply;
+            ut_t *reply_ut = alloc_retype(&new_reply, seL4_ReplyObject, seL4_ReplyBits);
+            if (reply_ut == NULL) {
+                ZF_LOGF("Failed to alloc reply object ut");
+            }
+            reply = new_reply;
             seL4_Word msg[4] = {seL4_GetMR(0), seL4_GetMR(1), seL4_GetMR(2), seL4_GetMR(3)};
-            printf("reply: %lu\n", reply);
-            sos_thread_t *new_thread = thread_create(handle_syscall, (void *) &reply, 0, false, seL4_MaxPrio, seL4_CapNull, true);
+            sos_thread_t *new_thread = thread_create(handle_syscall, (void *) sender, 0, false, seL4_MaxPrio, seL4_CapNull, true);
             memcpy(new_thread->msg, msg, sizeof(seL4_Word) * 4);
             thread_resume(new_thread);
         } else {

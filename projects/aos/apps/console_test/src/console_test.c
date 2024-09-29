@@ -43,7 +43,7 @@ static void thread_block(void)
 }
 
 #define SMALL_BUF_SZ 2
-#define MEDIUM_BUF_SZ 256
+#define MEDIUM_BUF_SZ 5
 
 char test_str[] = "Basic test string for read/write\n";
 char small_buf[SMALL_BUF_SZ];
@@ -53,21 +53,21 @@ int test_buffers(int console_fd) {
    int result = sos_write(console_fd, test_str, strlen(test_str));
    assert(result == strlen(test_str));
 
-//    /* test reading to a small buffer */
-//    result = sos_read(console_fd, small_buf, SMALL_BUF_SZ);
-//    /* make sure you type in at least SMALL_BUF_SZ */
-//    assert(result == SMALL_BUF_SZ);
+   /* test reading to a small buffer */
+   result = sos_read(console_fd, small_buf, SMALL_BUF_SZ);
+   /* make sure you type in at least SMALL_BUF_SZ */
+   assert(result == SMALL_BUF_SZ);
 
-//    /* test reading into a large on-stack buffer */
-//    char stack_buf[MEDIUM_BUF_SZ];
-//    /* for this test you'll need to paste a lot of data into
-//       the console, without newlines */
+   /* test reading into a large on-stack buffer */
+   char stack_buf[MEDIUM_BUF_SZ];
+   /* for this test you'll need to paste a lot of data into
+      the console, without newlines */
 
-//    result = sos_read(console_fd, &stack_buf, MEDIUM_BUF_SZ);
-//    assert(result == MEDIUM_BUF_SZ);
+   result = sos_read(console_fd, stack_buf, MEDIUM_BUF_SZ);
+   assert(result == MEDIUM_BUF_SZ);
 
-//    result = sos_write(console_fd, &stack_buf, MEDIUM_BUF_SZ);
-//    assert(result == MEDIUM_BUF_SZ);
+   result = sos_write(console_fd, stack_buf, MEDIUM_BUF_SZ);
+   assert(result == MEDIUM_BUF_SZ);
 
 //    /* try sleeping */
 //    for (int i = 0; i < 5; i++) {
