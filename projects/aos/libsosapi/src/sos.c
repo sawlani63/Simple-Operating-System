@@ -52,8 +52,9 @@ int sos_open(const char *path, fmode_t mode)
 
 int sos_close(int file)
 {
-    seL4_SetMR(0, 0);
-    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
+    seL4_SetMR(0, SYSCALL_SOS_CLOSE);
+    seL4_SetMR(1, file);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 2));
     return seL4_GetMR(0);
 }
 

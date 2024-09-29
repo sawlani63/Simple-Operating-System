@@ -165,8 +165,8 @@ void handle_syscall(void *arg)
     }
 
     if (have_reply) {
-        seL4_NBSend((seL4_CPtr) args->reply, reply_msg);
-        //free_untype(reply, (ut_t *) args->reply_ut);
+        seL4_NBSend(args->reply, reply_msg);
+        free_untype(&args->reply, args->reply_ut);
     }
 }
 
@@ -179,7 +179,6 @@ NORETURN void syscall_loop(seL4_CPtr ep)
     if (reply_ut == NULL) {
         ZF_LOGF("Failed to alloc reply object ut");
     }
-    printf("start of syscall loop: %lu\n", reply);
 
     while (1) {
         seL4_Word badge = 0;
@@ -801,5 +800,5 @@ static void wakeup(UNUSED uint32_t id, void* data)
 {
     struct arg_struct *args = (struct arg_struct *) data;
     seL4_NBSend(args->reply, seL4_MessageInfo_new(0, 0, 0, 1));
-    free_untype(args->reply, (ut_t *) args->reply_ut);
+    free_untype(&args->reply, args->reply_ut);
 }
