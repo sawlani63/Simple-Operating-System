@@ -190,7 +190,7 @@ void handle_syscall(void *arg)
 
     if (have_reply) {
         seL4_NBSend(curr_task->reply, reply_msg);
-        // free_untype(&curr_task->reply, curr_task->reply_ut);
+        free_untype(&curr_task->reply, curr_task->reply_ut);
     }
 }
 
@@ -244,22 +244,21 @@ NORETURN void syscall_loop(seL4_CPtr ep)
                 * object! */
             sos_handle_irq_notification(&badge, false);
         } else if (label == seL4_Fault_NullFault) {
-            seL4_CPtr sender = reply;
-
-            seL4_CPtr new_reply;
-            ut_t *reply_ut = alloc_retype(&new_reply, seL4_ReplyObject, seL4_ReplyBits);
-            if (reply_ut == NULL) {
-                ZF_LOGF("Failed to alloc reply object ut");
-            }
-            reply = new_reply;
             seL4_Word msg[5] = {seL4_GetMR(0), seL4_GetMR(1), seL4_GetMR(2),
                                 seL4_GetMR(3), seL4_GetMR(4)};
             
             struct task task;
             task.reply_ut = reply_ut;
-            task.reply = sender;
+            task.reply = reply;
             memcpy(task.msg, msg, sizeof(seL4_Word) * 5);
             submit_task(task);
+            
+            seL4_CPtr new_reply;
+            reply_ut = alloc_retype(&new_reply, seL4_ReplyObject, seL4_ReplyBits);
+            if (reply_ut == NULL) {
+                ZF_LOGF("Failed to alloc reply object ut");
+            }
+            reply = new_reply;
         } else {
             /* some kind of fault */
             debug_print_fault(message, APP_NAME);
@@ -711,7 +710,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     console_sem = malloc(sizeof(sync_bin_sem_t));
     sem_ut = alloc_retype(&console_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!sem_ut, "No memory for notification");
-    sync_bin_sem_init(console_sem, console_sem_cptr, 0);
+    sync_bin_sem_init(console_sem, console_sem_cptr, 1);
 
     signal_cv = malloc(sizeof(sync_cv_t));
     sem_ut = alloc_retype(&signal_cv_cptr, seL4_NotificationObject, seL4_NotificationBits);
@@ -889,5 +888,5 @@ static void wakeup(UNUSED uint32_t id, void* data)
 {
     struct task *args = (struct task *) data;
     seL4_NBSend(args->reply, seL4_MessageInfo_new(0, 0, 0, 1));
-    // free_untype(&args->reply, args->reply_ut);
+    free_untype(&args->reply, args->reply_ut);
 }

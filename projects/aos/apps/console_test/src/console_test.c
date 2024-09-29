@@ -27,6 +27,12 @@
 #include <sel4/sel4.h>
 #include <sos.h>
 
+#define SMALL_BUF_SZ 2
+#define MEDIUM_BUF_SZ 5
+
+char test_str[] = "Basic test string for read/write\n";
+char small_buf[SMALL_BUF_SZ];
+
 static void thread_block(void)
 {
 
@@ -37,12 +43,6 @@ static void thread_block(void)
     seL4_Call(SOS_IPC_EP_CAP, tag);
 
 }
-
-#define SMALL_BUF_SZ 2
-#define MEDIUM_BUF_SZ 5
-
-char test_str[] = "Basic test string for read/write\n";
-char small_buf[SMALL_BUF_SZ];
 
 int test_buffers(int console_fd) {
    /* test a small string from the code segment */
@@ -64,24 +64,20 @@ int test_buffers(int console_fd) {
    result = sos_write(console_fd, stack_buf, MEDIUM_BUF_SZ);
    assert(result == MEDIUM_BUF_SZ);
 
-//    /* try sleeping */
-//    for (int i = 0; i < 5; i++) {
-//        time_t prev_seconds = time(NULL);
-//        second_sleep(1);
-//        time_t next_seconds = time(NULL);
-//        assert(next_seconds > prev_seconds);
-//        printf("Tick\n");
-//    }
+   /* try sleeping */
+   for (int i = 0; i < 5; i++) {
+       int64_t prev_seconds = sos_time_stamp();
+       sos_usleep(1000000);
+       int64_t next_seconds = sos_time_stamp();
+       assert(next_seconds > prev_seconds);
+       printf("Tick, diff: %lu (%lu, %lu)\n", next_seconds - prev_seconds, prev_seconds, next_seconds);
+   }
 }
 
 int main(void)
 {
     do {
         int fd = sos_open("console", 2);
-        int fail = sos_open("console", 2);
-        printf("Should fail: %d\n", fail);
-        fail = sos_open("console", 0);
-        printf("Should fail: %d\n", fail);
         test_buffers(fd);
         fputs("task:\tHello world, I'm\tconsole_test!\n", stdout);
         thread_block();
