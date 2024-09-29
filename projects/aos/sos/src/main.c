@@ -48,6 +48,7 @@
 
 #include <aos/vsyscall.h>
 #include "fs.h"
+#include <sync/bin_sem.h>
 
 /*
  * To differentiate between signals from notification objects and and IPC messages,
@@ -117,21 +118,23 @@ static struct {
 } user_process;
 
 struct network_console *console;
-
+seL4_CPtr sem_cptr;
+sync_bin_sem_t *syscall_sem = NULL;
 /**
  * Deals with a syscall and sets the message registers before returning the
  * message info to be passed through to seL4_ReplyRecv()
  */
-seL4_MessageInfo_t handle_syscall(UNUSED seL4_Word badge, UNUSED int num_args, bool *have_reply, seL4_CPtr *reply)
+void handle_syscall(void *arg)
 {
-    seL4_MessageInfo_t reply_msg;
+    seL4_CPtr reply = (seL4_CPtr) arg;
+    seL4_MessageInfo_t reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
 
     /* get the first word of the message, which in the SOS protocol is the number
      * of the SOS "syscall". */
-    seL4_Word syscall_number = seL4_GetMR(0);
+    seL4_Word syscall_number = current_thread->msg[0];
 
     /* Set the reply flag */
-    *have_reply = true;
+    bool have_reply = true;
 
     /* Process system call */
     switch (syscall_number) {
@@ -145,16 +148,18 @@ seL4_MessageInfo_t handle_syscall(UNUSED seL4_Word badge, UNUSED int num_args, b
         syscall_sos_read(&reply_msg);
         break;
     case SYSCALL_SOS_USLEEP:
-        syscall_sos_usleep(have_reply, reply);
+        syscall_sos_usleep(&have_reply, reply);
         break;
     case SYSCALL_SOS_TIME_STAMP:
         syscall_sos_time_stamp(&reply_msg);
         break;
     default:
-        syscall_unknown_syscall(&reply_msg, syscall_number);
+        syscall_unknown_syscall(&reply_msg, &have_reply, syscall_number);
     }
 
-    return reply_msg;
+    if (have_reply) {
+        seL4_NBSend(reply, reply_msg);
+    }
 }
 
 NORETURN void syscall_loop(seL4_CPtr ep)
@@ -168,41 +173,36 @@ NORETURN void syscall_loop(seL4_CPtr ep)
     }
     printf("start of syscall loop: %lu\n", reply);
 
-    bool have_reply = false;
-    seL4_MessageInfo_t reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
-
     while (1) {
         seL4_Word badge = 0;
-        seL4_MessageInfo_t message;
-
-        /* Reply (if there is a reply) and block on ep, waiting for an IPC
-         * sent over ep, or a notification from our bound notification object */
-        if (have_reply) {
-            message = seL4_ReplyRecv(ep, reply_msg, &badge, reply);
-        } else {
-            message = seL4_Recv(ep, &badge, reply);
-        }
+        seL4_MessageInfo_t message = seL4_Recv(ep, &badge, reply);
 
         /* Awake! We got a message - check the label and badge to
-         * see what the message is about */
+        * see what the message is about */
         seL4_Word label = seL4_MessageInfo_get_label(message);
 
         if (badge & IRQ_EP_BADGE) {
             /* It's a notification from our bound notification
-             * object! */
-            sos_handle_irq_notification(&badge, &have_reply);
+                * object! */
+            sos_handle_irq_notification(&badge, false);
         } else if (label == seL4_Fault_NullFault) {
+            seL4_CPtr sender = reply;
 
-            /* It's not a fault or an interrupt, it must be an IPC
-             * message from console_test! */
-            reply_msg = handle_syscall(badge, seL4_MessageInfo_get_length(message) - 1, &have_reply, &reply);
+            seL4_CPtr new_reply;
+            ut_t *reply_ut = alloc_retype(&new_reply, seL4_ReplyObject, seL4_ReplyBits);
+            if (reply_ut == NULL) {
+                ZF_LOGF("Failed to alloc reply object ut");
+            }
+            reply = new_reply;
+            seL4_Word msg[4] = {seL4_GetMR(0), seL4_GetMR(1), seL4_GetMR(2), seL4_GetMR(3)};
+            sos_thread_t *new_thread = thread_create(handle_syscall, (void *) sender, 0, false, seL4_MaxPrio, seL4_CapNull, true);
+            memcpy(new_thread->msg, msg, sizeof(seL4_Word) * 4);
+            thread_resume(new_thread);
         } else {
             /* some kind of fault */
             debug_print_fault(message, APP_NAME);
             /* dump registers too */
             debug_dump_registers(user_process.tcb);
-            /* Don't reply and recv on nothing */
-            have_reply = false;
 
             ZF_LOGF("The SOS skeleton does not know how to handle faults!");
         }
@@ -631,6 +631,11 @@ NORETURN void *main_continued(UNUSED void *arg)
     bool success = start_first_process(APP_NAME, ipc_ep);
     ZF_LOGF_IF(!success, "Failed to start first process");
 
+    syscall_sem = malloc(sizeof(sync_bin_sem_t));
+    ut_t *sem_ut = alloc_retype(&sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!sem_ut, "No memory for notification");
+    sync_bin_sem_init(syscall_sem, sem_cptr, 1);
+
     printf("\nSOS entering syscall loop\n");
     syscall_loop(ipc_ep);
 }
@@ -693,8 +698,8 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg)
     ZF_LOGE("syscall: thread example made syscall 56!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    int mode = seL4_GetMR(1);
-    int len = seL4_GetMR(2);
+    int mode = current_thread->msg[1];
+    int len = current_thread->msg[2];
 
     char *string = malloc(len);
     for (int i = 0; i < len; i++) {
@@ -702,9 +707,11 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg)
     }
     
     int fd;
+    sync_bin_sem_wait(syscall_sem);
     if (!strcmp(string, "console")) {
         fd = push_new_file(mode, network_console_byte_send, deque);
     }
+    sync_bin_sem_post(syscall_sem);
     seL4_SetMR(0, fd);
 }
 
@@ -714,10 +721,11 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */
-    int write_fd = seL4_GetMR(1);
+    int write_fd = current_thread->msg[1];
     /* Receive a byte from sos.c */
-    char receive = seL4_GetMR(2);
+    char receive = current_thread->msg[2];
 
+    sync_bin_sem_wait(syscall_sem);
     struct file *found = find_file(write_fd);
     if (found == NULL) {
         /* Set the reply message to be an error value */
@@ -726,6 +734,7 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
         /* Set the reply message to be the return value of the write_handler */
         seL4_SetMR(0, found->write_handler(receive));
     }
+    sync_bin_sem_post(syscall_sem);
 }
 
 static void syscall_sos_read(seL4_MessageInfo_t *reply_msg) 
@@ -734,8 +743,9 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg)
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */
-    int read_fd = seL4_GetMR(1);
+    int read_fd = current_thread->msg[1];
 
+    sync_bin_sem_wait(syscall_sem);
     struct file *found = find_file(read_fd);
     if (found == NULL) {
         /* Set the reply message to be an error value */
@@ -744,6 +754,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg)
         /* Set the reply message to be the return value of the read_handler */
         seL4_SetMR(0, found->read_handler());
     }
+    sync_bin_sem_post(syscall_sem);
 }
 
 static void syscall_sos_usleep(bool *have_reply, seL4_CPtr *reply)

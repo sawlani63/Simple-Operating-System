@@ -31,7 +31,9 @@
         "sos.h": "c",
         "syscalls.h": "c",
         "clock.h": "c",
-        "semaphore.h": "c",
-        "stddef.h": "c"
+        "thread": "c",
+        "optional": "c",
+        "system_error": "c",
+        "variant": "c"
     }
 }
