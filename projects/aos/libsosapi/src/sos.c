@@ -35,19 +35,32 @@ static size_t sos_debug_print(const void *vData, size_t count)
 
 int sos_open(const char *path, fmode_t mode)
 {
+    if (path == NULL) {
+        return -1;
+    }
     int len = strlen(path);
-    if (len + 3 > seL4_MsgMaxLength) {
-        len = seL4_MsgMaxLength - 3;
+    if (len > MAX_IO_BUF) {
+        return -1;
     }
 
     seL4_SetMR(0, SYSCALL_SOS_OPEN);
-    seL4_SetMR(1, mode);
-    seL4_SetMR(2, len);
-    for (int i = 0; i < len; i++) {
-        seL4_SetMR(i + 3, path[i]);
+    seL4_SetMR(1, 1);
+    seL4_SetMR(2, path[0]);
+    seL4_SetMR(3, len);
+    seL4_SetMR(4, mode);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 5));
+    int recv = seL4_GetMR(0);
+    for (int i = 1; i < len; i++) {
+        if (recv == -2) {
+            return -1;
+        }
+        seL4_SetMR(0, SYSCALL_SOS_OPEN);
+        seL4_SetMR(1, 0);
+        seL4_SetMR(2, path[i]);
+        seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 3));
+        recv = seL4_GetMR(0);
     }
-    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, len + 3));
-    return seL4_GetMR(0);
+    return recv == -2 ? -1 : recv;
 }
 
 int sos_close(int file)
@@ -59,6 +72,10 @@ int sos_close(int file)
 
 int sos_read(int file, char *buf, size_t nbyte)
 {
+    if (buf == NULL) {
+        return -1;
+    }
+
     for (int i = 0; i < nbyte; i++) {
         seL4_SetMR(0, SYSCALL_SOS_READ);
         seL4_SetMR(1, file);
@@ -74,6 +91,11 @@ int sos_read(int file, char *buf, size_t nbyte)
 
 int sos_write(int file, const char *buf, size_t nbyte)
 {
+    if (buf == NULL) {
+        return -1;
+    }
+
+
     for (int i = 0; i < nbyte; i++) {
         seL4_SetMR(0, SYSCALL_SOS_WRITE);
         seL4_SetMR(1, file);
