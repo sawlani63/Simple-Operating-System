@@ -143,8 +143,8 @@ sync_cv_t *signal_cv = NULL;
 
 static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
 static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
-static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
 static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
+static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
 static void syscall_sos_usleep(bool *have_reply, struct task *curr_task);
 static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg);
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
@@ -819,6 +819,26 @@ static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_t
     ZF_LOGE("syscall: some thread made syscall 57!\n");
 }
 
+static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_task) 
+{
+    ZF_LOGE("syscall: some thread made syscall 65!\n");
+    /* construct a reply message of length 1 */
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    /* Receive a fd from sos.c */
+    int read_fd = curr_task->msg[1];
+
+    sync_bin_sem_wait(syscall_sem);
+    struct file *found = find_file(read_fd);
+    if (found == NULL) {
+        /* Set the reply message to be an error value */
+        seL4_SetMR(0, -1);
+    } else {
+        /* Set the reply message to be the return value of the read_handler */
+        seL4_SetMR(0, found->read_handler());
+    }
+    sync_bin_sem_post(syscall_sem);
+}
+
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 {
     // ZF_LOGE("syscall: some thread made syscall 66!\n");
@@ -837,26 +857,6 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
     } else {
         /* Set the reply message to be the return value of the write_handler */
         seL4_SetMR(0, found->write_handler(receive));
-    }
-    sync_bin_sem_post(syscall_sem);
-}
-
-static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_task) 
-{
-    ZF_LOGE("syscall: some thread made syscall 65!\n");
-    /* construct a reply message of length 1 */
-    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    /* Receive a fd from sos.c */
-    int read_fd = curr_task->msg[1];
-
-    sync_bin_sem_wait(syscall_sem);
-    struct file *found = find_file(read_fd);
-    if (found == NULL) {
-        /* Set the reply message to be an error value */
-        seL4_SetMR(0, -1);
-    } else {
-        /* Set the reply message to be the return value of the read_handler */
-        seL4_SetMR(0, found->read_handler());
     }
     sync_bin_sem_post(syscall_sem);
 }
