@@ -49,6 +49,7 @@
 #include <aos/vsyscall.h>
 #include "fs.h"
 #include <sync/bin_sem.h>
+#include <sync/condition_var.h>
 
 /*
  * To differentiate between signals from notification objects and and IPC messages,
@@ -76,13 +77,6 @@
 #define SYSCALL_SOS_WRITE SYS_writev
 #define SYSCALL_SOS_USLEEP SYS_nanosleep
 #define SYSCALL_SOS_TIME_STAMP SYS_clock_gettime
-
-static void syscall_sos_open(seL4_MessageInfo_t *reply_msg);
-static void syscall_sos_write(seL4_MessageInfo_t *reply_msg);
-static void syscall_sos_read(seL4_MessageInfo_t *reply_msg);
-static void syscall_sos_usleep(bool *have_reply, seL4_CPtr *reply);
-static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg);
-static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
 
 /* The linker will link this symbol to the start address  *
  * of an archive of attached applications.                */
@@ -123,22 +117,48 @@ static struct {
 } user_process;
 
 struct network_console *console;
-bool console_open_for_read = false;
+
+struct task {
+    ut_t *reply_ut;
+    seL4_CPtr reply;
+    seL4_Word msg[4];
+};
+struct task task_queue[4];
+int task_count = 0;
 
 seL4_CPtr sem_cptr;
 sync_bin_sem_t *syscall_sem = NULL;
+
+seL4_CPtr tpool_sem_cptr;
+sync_bin_sem_t *tpool_sem = NULL;
+
+seL4_CPtr signal_sem_cptr;
+sync_bin_sem_t *signal_sem = NULL;
+
+seL4_CPtr signal_cv_cptr;
+sync_cv_t *signal_cv = NULL;
+
+static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
+static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
+static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
+static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
+static void syscall_sos_usleep(bool *have_reply, struct task *curr_task);
+static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
+static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
+static void wakeup(uint32_t id, void *data);
+
 /**
  * Deals with a syscall and sets the message registers before returning the
  * message info to be passed through to seL4_ReplyRecv()
  */
 void handle_syscall(void *arg)
 {
-    seL4_CPtr reply = (seL4_CPtr) arg;
+    struct task *curr_task = (struct task *) arg;
     seL4_MessageInfo_t reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
 
     /* get the first word of the message, which in the SOS protocol is the number
      * of the SOS "syscall". */
-    seL4_Word syscall_number = current_thread->msg[0];
+    seL4_Word syscall_number = curr_task->msg[0];
 
     /* Set the reply flag */
     bool have_reply = true;
@@ -146,19 +166,19 @@ void handle_syscall(void *arg)
     /* Process system call */
     switch (syscall_number) {
     case SYSCALL_SOS_OPEN:
-        syscall_sos_open(&reply_msg);
+        syscall_sos_open(&reply_msg, curr_task);
         break;
     case SYSCALL_SOS_WRITE:
-        syscall_sos_write(&reply_msg);
+        syscall_sos_write(&reply_msg, curr_task);
         break;
     case SYSCALL_SOS_READ:
-        syscall_sos_read(&reply_msg);
+        syscall_sos_read(&reply_msg, curr_task);
         break;
     case SYSCALL_SOS_USLEEP:
-        syscall_sos_usleep(&have_reply, &reply);
+        syscall_sos_usleep(&have_reply, curr_task);
         break;
     case SYSCALL_SOS_TIME_STAMP:
-        syscall_sos_time_stamp(&reply_msg);
+        syscall_sos_time_stamp(&reply_msg, curr_task);
         break;
     default:
         syscall_unknown_syscall(&reply_msg, syscall_number);
@@ -166,7 +186,35 @@ void handle_syscall(void *arg)
     }
 
     if (have_reply) {
-        seL4_NBSend(reply, reply_msg);
+        seL4_NBSend(curr_task->reply, reply_msg);
+        // free_untype(&curr_task->reply, curr_task->reply_ut);
+    }
+}
+
+static void submit_task(struct task task) {
+    sync_bin_sem_wait(tpool_sem);
+    task_queue[task_count++] = task;
+    sync_bin_sem_post(tpool_sem);
+    sync_cv_signal(signal_cv);
+}
+
+static void start_sos_worker_thread(UNUSED void *arg) {
+    while (1) {
+        struct task task;
+
+        sync_bin_sem_wait(tpool_sem);
+        while (task_count == 0) {
+            sync_cv_wait(tpool_sem, signal_cv);
+        }
+
+        task = task_queue[0];
+        int i;
+        for (i = 0; i < task_count - 1; i++) {
+            task_queue[i] = task_queue[i + 1];
+        }
+        task_count--;
+        sync_bin_sem_post(tpool_sem);
+        handle_syscall(&task);
     }
 }
 
@@ -179,7 +227,6 @@ NORETURN void syscall_loop(seL4_CPtr ep)
     if (reply_ut == NULL) {
         ZF_LOGF("Failed to alloc reply object ut");
     }
-    printf("start of syscall loop: %lu\n", reply);
 
     while (1) {
         seL4_Word badge = 0;
@@ -202,11 +249,13 @@ NORETURN void syscall_loop(seL4_CPtr ep)
                 ZF_LOGF("Failed to alloc reply object ut");
             }
             reply = new_reply;
-            seL4_Word msg[5] = {seL4_GetMR(0), seL4_GetMR(1), seL4_GetMR(2),
-                                seL4_GetMR(3), seL4_GetMR(4)};
-            sos_thread_t *new_thread = thread_create(handle_syscall, (void *) sender, 0, false, seL4_MaxPrio, seL4_CapNull, true);
-            memcpy(new_thread->msg, msg, sizeof(seL4_Word) * 4);
-            thread_resume(new_thread);
+            seL4_Word msg[4] = {seL4_GetMR(0), seL4_GetMR(1), seL4_GetMR(2), seL4_GetMR(3)};
+
+            struct task task;
+            task.reply_ut = reply_ut;
+            task.reply = sender;
+            memcpy(task.msg, msg, sizeof(seL4_Word) * 4);
+            submit_task(task);
         } else {
             /* some kind of fault */
             debug_print_fault(message, APP_NAME);
@@ -645,6 +694,26 @@ NORETURN void *main_continued(UNUSED void *arg)
     ZF_LOGF_IF(!sem_ut, "No memory for notification");
     sync_bin_sem_init(syscall_sem, sem_cptr, 1);
 
+    tpool_sem = malloc(sizeof(sync_bin_sem_t));
+    sem_ut = alloc_retype(&tpool_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!sem_ut, "No memory for notification");
+    sync_bin_sem_init(tpool_sem, tpool_sem_cptr, 1);
+
+    signal_sem = malloc(sizeof(sync_bin_sem_t));
+    sem_ut = alloc_retype(&signal_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!sem_ut, "No memory for notification");
+    sync_bin_sem_init(signal_sem, signal_sem_cptr, 0);
+
+    signal_cv = malloc(sizeof(sync_cv_t));
+    sem_ut = alloc_retype(&signal_cv_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!sem_ut, "No memory for notification");
+    sync_cv_init(signal_cv, signal_cv_cptr);
+
+    /* Creating thread pool */
+    for (int i = 0; i < 4; i++) {
+        spawn(start_sos_worker_thread, NULL, 0, true);
+    }
+
     printf("\nSOS entering syscall loop\n");
     syscall_loop(ipc_ep);
 }
@@ -702,11 +771,13 @@ int main(void)
     UNREACHABLE();
 }
 
-static void syscall_sos_open(seL4_MessageInfo_t *reply_msg) 
+static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_task) 
 {
     // ZF_LOGE("syscall: thread example made syscall 56!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    int mode = curr_task->msg[1];
+    int len = curr_task->msg[2];
 
     /* We set more than 2 mrs so we must be opening for the first time */
     if (current_thread->msg[1]) {
@@ -745,15 +816,20 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg)
     free(user_process.cache_curr_path);
 }
 
-static void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
+static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 {
-    //ZF_LOGE("syscall: some thread made syscall 66!\n");
+    ZF_LOGE("syscall: some thread made syscall 57!\n");
+}
+
+static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
+{
+    ZF_LOGE("syscall: some thread made syscall 66!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */
-    int write_fd = current_thread->msg[1];
+    int write_fd = curr_task->msg[1];
     /* Receive a byte from sos.c */
-    char receive = current_thread->msg[2];
+    char receive = curr_task->msg[2];
 
     sync_bin_sem_wait(syscall_sem);
     struct file *found = find_file(write_fd);
@@ -767,13 +843,13 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
     sync_bin_sem_post(syscall_sem);
 }
 
-static void syscall_sos_read(seL4_MessageInfo_t *reply_msg) 
+static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_task) 
 {
     ZF_LOGE("syscall: some thread made syscall 65!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */
-    int read_fd = current_thread->msg[1];
+    int read_fd = curr_task->msg[1];
 
     sync_bin_sem_wait(syscall_sem);
     struct file *found = find_file(read_fd);
@@ -787,14 +863,14 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg)
     sync_bin_sem_post(syscall_sem);
 }
 
-static void syscall_sos_usleep(bool *have_reply, seL4_CPtr *reply)
+static void syscall_sos_usleep(bool *have_reply, struct task *curr_task)
 {
     ZF_LOGE("syscall: some thread made syscall 101!\n");
-    register_timer(current_thread->msg[1], wakeup, (void*) *reply);
+    register_timer(curr_task->msg[1], wakeup, (void *) curr_task);
     *have_reply = false;
 }
 
-static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
+static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 {
     ZF_LOGE("syscall: some thread made syscall 113!\n");
     /* construct a reply message of length 1 */
@@ -811,4 +887,9 @@ static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word sys
     seL4_SetMR(1, -1);
 }
 
-
+static void wakeup(UNUSED uint32_t id, void* data)
+{
+    struct task *args = (struct task *) data;
+    seL4_NBSend(args->reply, seL4_MessageInfo_new(0, 0, 0, 1));
+    // free_untype(&args->reply, args->reply_ut);
+}
