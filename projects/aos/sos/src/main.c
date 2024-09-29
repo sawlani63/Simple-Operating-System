@@ -148,13 +148,13 @@ void handle_syscall(void *arg)
         syscall_sos_read(&reply_msg);
         break;
     case SYSCALL_SOS_USLEEP:
-        syscall_sos_usleep(&have_reply, reply);
+        syscall_sos_usleep(&have_reply, &reply);
         break;
     case SYSCALL_SOS_TIME_STAMP:
         syscall_sos_time_stamp(&reply_msg);
         break;
     default:
-        syscall_unknown_syscall(&reply_msg, &have_reply, syscall_number);
+        syscall_unknown_syscall(&reply_msg, syscall_number);
     }
 
     if (have_reply) {
@@ -760,17 +760,8 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg)
 static void syscall_sos_usleep(bool *have_reply, seL4_CPtr *reply)
 {
     ZF_LOGE("syscall: some thread made syscall 101!\n");
-    seL4_CPtr sender;
-    sender = *reply;
-    register_timer(seL4_GetMR(1), wakeup, (void*) sender);
+    register_timer(seL4_GetMR(1), wakeup, (void*) *reply);
     *have_reply = false;
-
-    seL4_CPtr new_reply;
-    ut_t *reply_ut = alloc_retype(&new_reply, seL4_ReplyObject, seL4_ReplyBits);
-    if (reply_ut == NULL) {
-        ZF_LOGF("Failed to alloc reply object ut");
-    }
-    *reply = new_reply;
 }
 
 static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)

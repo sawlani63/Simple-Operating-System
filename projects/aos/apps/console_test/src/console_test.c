@@ -86,46 +86,4 @@ int main(void)
     } while (1);
 
     return 0;
-}*/
-
-#include <assert.h>
-#include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <inttypes.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <time.h>
-#include <sys/time.h>
-#include <utils/time.h>
-#include <syscalls.h>
-/* Your OS header file */
-#include <sos.h>
-
-#include "benchmark.h"
-
-#define SMALL_BUF_SZ 2
-#define MEDIUM_BUF_SZ 256
-
-char test_str[] = "Basic test string for read/write\n";
-char small_buf[SMALL_BUF_SZ];
-
-int test_buffers(int console_fd) {
-   /* test a small string from the code segment */
-   int result = sos_write(console_fd, test_str, strlen(test_str));
-   assert(result == strlen(test_str));
-
-   /* try sleeping */
-   for (int i = 0; i < 5; i++) {
-       int64_t prev_seconds = sos_time_stamp();
-       sos_usleep(1000000);
-       int64_t next_seconds = sos_time_stamp();
-       assert(next_seconds > prev_seconds);
-       printf("Tick, diff: %lu (%lu, %lu)\n", next_seconds - prev_seconds, prev_seconds, next_seconds);
-   }
-}
-
-int main(void) {
-    test_buffers(1);
-    return 0;
 }
