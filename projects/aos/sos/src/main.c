@@ -78,11 +78,13 @@
 #define SYSCALL_SOS_TIME_STAMP SYS_clock_gettime
 
 static void syscall_sos_open(seL4_MessageInfo_t *reply_msg);
+static void syscall_sos_close(seL4_MessageInfo_t *reply_msg);
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg);
 static void syscall_sos_read(seL4_MessageInfo_t *reply_msg);
-static void syscall_sos_usleep(bool *have_reply, seL4_CPtr *reply);
+static void syscall_sos_usleep(bool *have_reply, void *data);
 static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg);
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
+static void wakeup(uint32_t id, void* data);
 
 /* The linker will link this symbol to the start address  *
  * of an archive of attached applications.                */
@@ -132,7 +134,6 @@ sync_bin_sem_t *syscall_sem = NULL;
 void handle_syscall(void *arg)
 {
     struct arg_struct *args = (struct arg_struct *) arg;
-    seL4_CPtr reply = (seL4_CPtr) args->reply;
     seL4_MessageInfo_t reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
 
     /* get the first word of the message, which in the SOS protocol is the number
@@ -154,7 +155,7 @@ void handle_syscall(void *arg)
         syscall_sos_read(&reply_msg);
         break;
     case SYSCALL_SOS_USLEEP:
-        syscall_sos_usleep(&have_reply, &reply);
+        syscall_sos_usleep(&have_reply, (void *) args);
         break;
     case SYSCALL_SOS_TIME_STAMP:
         syscall_sos_time_stamp(&reply_msg);
@@ -164,8 +165,8 @@ void handle_syscall(void *arg)
     }
 
     if (have_reply) {
-        seL4_NBSend(reply, reply_msg);
-        free_untype(reply, (ut_t *) args->reply_ut);
+        seL4_NBSend((seL4_CPtr) args->reply, reply_msg);
+        //free_untype(reply, (ut_t *) args->reply_ut);
     }
 }
 
@@ -725,6 +726,11 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg)
     seL4_SetMR(0, fd);
 }
 
+static void syscall_sos_close(seL4_MessageInfo_t *reply_msg)
+{
+    ZF_LOGE("syscall: some thread made syscall 57!\n");
+}
+
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
 {
     ZF_LOGE("syscall: some thread made syscall 66!\n");
@@ -767,10 +773,10 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg)
     sync_bin_sem_post(syscall_sem);
 }
 
-static void syscall_sos_usleep(bool *have_reply, seL4_CPtr *reply)
+static void syscall_sos_usleep(bool *have_reply, void *data)
 {
     ZF_LOGE("syscall: some thread made syscall 101!\n");
-    register_timer(current_thread->msg[1], wakeup, (void*) *reply);
+    register_timer(current_thread->msg[1], wakeup, data);
     *have_reply = false;
 }
 
@@ -791,4 +797,9 @@ static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word sys
     seL4_SetMR(1, -1);
 }
 
-
+static void wakeup(UNUSED uint32_t id, void* data)
+{
+    struct arg_struct *args = (struct arg_struct *) data;
+    seL4_NBSend(args->reply, seL4_MessageInfo_new(0, 0, 0, 1));
+    free_untype(args->reply, (ut_t *) args->reply_ut);
+}
