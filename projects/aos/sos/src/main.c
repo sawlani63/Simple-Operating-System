@@ -760,7 +760,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg)
 static void syscall_sos_usleep(bool *have_reply, seL4_CPtr *reply)
 {
     ZF_LOGE("syscall: some thread made syscall 101!\n");
-    register_timer(seL4_GetMR(1), wakeup, (void*) *reply);
+    register_timer(current_thread->msg[1], wakeup, (void*) *reply);
     *have_reply = false;
 }
 
