@@ -117,7 +117,6 @@ static struct {
 } user_process;
 
 struct network_console *console;
-bool console_open_for_read = false;
 
 struct task {
     ut_t *reply_ut;
@@ -126,6 +125,9 @@ struct task {
 };
 struct task task_queue[4];
 int task_count = 0;
+
+seL4_CPtr console_sem_cptr;
+sync_bin_sem_t *console_sem = NULL;
 
 seL4_CPtr sem_cptr;
 sync_bin_sem_t *syscall_sem = NULL;
@@ -704,7 +706,12 @@ NORETURN void *main_continued(UNUSED void *arg)
     signal_sem = malloc(sizeof(sync_bin_sem_t));
     sem_ut = alloc_retype(&signal_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!sem_ut, "No memory for notification");
-    sync_bin_sem_init(signal_sem, signal_sem_cptr, 0);
+    sync_bin_sem_init(signal_sem, signal_sem_cptr, 1);
+
+    console_sem = malloc(sizeof(sync_bin_sem_t));
+    sem_ut = alloc_retype(&console_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!sem_ut, "No memory for notification");
+    sync_bin_sem_init(console_sem, console_sem_cptr, 0);
 
     signal_cv = malloc(sizeof(sync_cv_t));
     sem_ut = alloc_retype(&signal_cv_cptr, seL4_NotificationObject, seL4_NotificationBits);
@@ -794,23 +801,14 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
     }
 
     int fd;
-    sync_bin_sem_wait(syscall_sem);
     if (!strcmp(user_process.cache_curr_path, "console")) {
         if (user_process.cache_curr_mode != 1) {
-            if (console_open_for_read) {
-                sync_bin_sem_post(syscall_sem);
-                seL4_SetMR(0, -2);
-                free(user_process.cache_curr_path);
-                return;
-            }
-            console_open_for_read = true;
+            sync_bin_sem_wait(console_sem);
         }
+        sync_bin_sem_wait(syscall_sem);
         fd = push_new_file(user_process.cache_curr_mode, network_console_byte_send, deque);
-        if (user_process.cache_curr_mode == 0 || user_process.cache_curr_mode == 2) {
-            console_open_for_read = true;
-        }
+        sync_bin_sem_post(syscall_sem);
     }
-    sync_bin_sem_post(syscall_sem);
     seL4_SetMR(0, fd);
 
     free(user_process.cache_curr_path);
