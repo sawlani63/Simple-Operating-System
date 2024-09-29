@@ -117,6 +117,11 @@ static struct {
     seL4_CPtr stack;
 } user_process;
 
+struct arg_struct {
+    ut_t *reply_ut;
+    seL4_CPtr reply;
+};
+
 struct network_console *console;
 seL4_CPtr sem_cptr;
 sync_bin_sem_t *syscall_sem = NULL;
@@ -126,7 +131,8 @@ sync_bin_sem_t *syscall_sem = NULL;
  */
 void handle_syscall(void *arg)
 {
-    seL4_CPtr reply = (seL4_CPtr) arg;
+    struct arg_struct *args = (struct arg_struct *) arg;
+    seL4_CPtr reply = (seL4_CPtr) args->reply;
     seL4_MessageInfo_t reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
 
     /* get the first word of the message, which in the SOS protocol is the number
@@ -159,6 +165,7 @@ void handle_syscall(void *arg)
 
     if (have_reply) {
         seL4_NBSend(reply, reply_msg);
+        free_untype(reply, (ut_t *) args->reply_ut);
     }
 }
 
@@ -195,7 +202,10 @@ NORETURN void syscall_loop(seL4_CPtr ep)
             }
             reply = new_reply;
             seL4_Word msg[4] = {seL4_GetMR(0), seL4_GetMR(1), seL4_GetMR(2), seL4_GetMR(3)};
-            sos_thread_t *new_thread = thread_create(handle_syscall, (void *) sender, 0, false, seL4_MaxPrio, seL4_CapNull, true);
+            struct arg_struct args;
+            args.reply_ut = reply_ut;
+            args.reply = sender;
+            sos_thread_t *new_thread = thread_create(handle_syscall, (void *) &args, 0, false, seL4_MaxPrio, seL4_CapNull, true);
             memcpy(new_thread->msg, msg, sizeof(seL4_Word) * 4);
             thread_resume(new_thread);
         } else {
@@ -717,7 +727,7 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg)
 
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
 {
-    //ZF_LOGE("syscall: some thread made syscall 66!\n");
+    ZF_LOGE("syscall: some thread made syscall 66!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */
