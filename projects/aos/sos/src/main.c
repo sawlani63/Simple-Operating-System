@@ -117,11 +117,12 @@ static struct {
 } user_process;
 
 struct network_console *console;
+bool console_open_for_read = false;
 
 struct task {
     ut_t *reply_ut;
     seL4_CPtr reply;
-    seL4_Word msg[4];
+    seL4_Word msg[5];
 };
 struct task task_queue[4];
 int task_count = 0;
@@ -143,7 +144,7 @@ static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_t
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
 static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
 static void syscall_sos_usleep(bool *have_reply, struct task *curr_task);
-static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
+static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg);
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
 static void wakeup(uint32_t id, void *data);
 
@@ -178,7 +179,7 @@ void handle_syscall(void *arg)
         syscall_sos_usleep(&have_reply, curr_task);
         break;
     case SYSCALL_SOS_TIME_STAMP:
-        syscall_sos_time_stamp(&reply_msg, curr_task);
+        syscall_sos_time_stamp(&reply_msg);
         break;
     default:
         syscall_unknown_syscall(&reply_msg, syscall_number);
@@ -249,12 +250,13 @@ NORETURN void syscall_loop(seL4_CPtr ep)
                 ZF_LOGF("Failed to alloc reply object ut");
             }
             reply = new_reply;
-            seL4_Word msg[4] = {seL4_GetMR(0), seL4_GetMR(1), seL4_GetMR(2), seL4_GetMR(3)};
-
+            seL4_Word msg[5] = {seL4_GetMR(0), seL4_GetMR(1), seL4_GetMR(2),
+                                seL4_GetMR(3), seL4_GetMR(4)};
+            
             struct task task;
             task.reply_ut = reply_ut;
             task.reply = sender;
-            memcpy(task.msg, msg, sizeof(seL4_Word) * 4);
+            memcpy(task.msg, msg, sizeof(seL4_Word) * 5);
             submit_task(task);
         } else {
             /* some kind of fault */
@@ -776,18 +778,16 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
     // ZF_LOGE("syscall: thread example made syscall 56!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    int mode = curr_task->msg[1];
-    int len = curr_task->msg[2];
 
     /* We set more than 2 mrs so we must be opening for the first time */
-    if (current_thread->msg[1]) {
-        user_process.open_len = current_thread->msg[3];
+    if (curr_task->msg[1]) {
+        user_process.open_len = curr_task->msg[3];
         user_process.curr_len = 0;
-        user_process.cache_curr_mode = current_thread->msg[4];
+        user_process.cache_curr_mode = curr_task->msg[4];
         user_process.cache_curr_path = malloc(user_process.open_len);
     }
 
-    user_process.cache_curr_path[user_process.curr_len++] = current_thread->msg[2];
+    user_process.cache_curr_path[user_process.curr_len++] = curr_task->msg[2];
     if (user_process.curr_len != user_process.open_len) {
         seL4_SetMR(0, -1);
         return;
@@ -823,7 +823,7 @@ static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_t
 
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 {
-    ZF_LOGE("syscall: some thread made syscall 66!\n");
+    // ZF_LOGE("syscall: some thread made syscall 66!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */
@@ -870,7 +870,7 @@ static void syscall_sos_usleep(bool *have_reply, struct task *curr_task)
     *have_reply = false;
 }
 
-static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
+static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
 {
     ZF_LOGE("syscall: some thread made syscall 113!\n");
     /* construct a reply message of length 1 */
