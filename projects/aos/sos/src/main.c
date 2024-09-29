@@ -109,6 +109,11 @@ static struct {
 
     ut_t *stack_ut;
     seL4_CPtr stack;
+
+    char *cache_curr_path;
+    int curr_len;
+    int open_len;
+    int cache_curr_mode;
 } user_process;
 
 struct network_console *console;
@@ -177,6 +182,7 @@ void handle_syscall(void *arg)
         break;
     default:
         syscall_unknown_syscall(&reply_msg, syscall_number);
+        have_reply = false;
     }
 
     if (have_reply) {
@@ -661,7 +667,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     network_init(&cspace, timer_vaddr, ntfn);
     console = network_console_init();
     network_console_register_handler(console, enqueue);
-    push_new_file(2, network_console_byte_send, deque);
+    push_new_file(1, network_console_byte_send, deque);
 
 #ifdef CONFIG_SOS_GDB_ENABLED
     /* Initialize the debugger */
@@ -767,24 +773,47 @@ int main(void)
 
 static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_task) 
 {
-    ZF_LOGE("syscall: thread example made syscall 56!\n");
+    // ZF_LOGE("syscall: thread example made syscall 56!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     int mode = curr_task->msg[1];
     int len = curr_task->msg[2];
 
-    char *string = malloc(len);
-    for (int i = 0; i < len; i++) {
-        string[i] = seL4_GetMR(i + 3);
+    /* We set more than 2 mrs so we must be opening for the first time */
+    if (current_thread->msg[1]) {
+        user_process.open_len = current_thread->msg[3];
+        user_process.curr_len = 0;
+        user_process.cache_curr_mode = current_thread->msg[4];
+        user_process.cache_curr_path = malloc(user_process.open_len);
     }
-    
+
+    user_process.cache_curr_path[user_process.curr_len++] = current_thread->msg[2];
+    if (user_process.curr_len != user_process.open_len) {
+        seL4_SetMR(0, -1);
+        return;
+    }
+
     int fd;
     sync_bin_sem_wait(syscall_sem);
-    if (!strcmp(string, "console")) {
-        fd = push_new_file(mode, network_console_byte_send, deque);
+    if (!strcmp(user_process.cache_curr_path, "console")) {
+        if (user_process.cache_curr_mode != 1) {
+            if (console_open_for_read) {
+                sync_bin_sem_post(syscall_sem);
+                seL4_SetMR(0, -2);
+                free(user_process.cache_curr_path);
+                return;
+            }
+            console_open_for_read = true;
+        }
+        fd = push_new_file(user_process.cache_curr_mode, network_console_byte_send, deque);
+        if (user_process.cache_curr_mode == 0 || user_process.cache_curr_mode == 2) {
+            console_open_for_read = true;
+        }
     }
     sync_bin_sem_post(syscall_sem);
     seL4_SetMR(0, fd);
+
+    free(user_process.cache_curr_path);
 }
 
 static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
