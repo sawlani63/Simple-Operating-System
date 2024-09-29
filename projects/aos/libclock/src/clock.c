@@ -109,6 +109,7 @@ int timer_irq(void *data, seL4_Word irq, seL4_IRQHandler irq_handler)
 {
     /* May want to change later, not sure if CLOCK_R_OK is best to return here. */
     if (SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)) {
+        seL4_IRQHandler_Ack(irq_handler);
         return CLOCK_R_OK;
     }
 

@@ -70,11 +70,7 @@
  * process */
 #define INITIAL_PROCESS_EXTRA_STACK_PAGES 4
 
-/*
- * A dummy starting syscall
- */
-#define SOS_SYSCALL0 0
-#define SYSCALL_SOS_OPEN SYS_openat //little unsure if this is right
+#define SYSCALL_SOS_OPEN SYS_openat
 #define SYSCALL_SOS_CLOSE SYS_close
 #define SYSCALL_SOS_READ SYS_readv
 #define SYSCALL_SOS_WRITE SYS_writev
@@ -84,9 +80,9 @@
 static void syscall_sos_open(seL4_MessageInfo_t *reply_msg);
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg);
 static void syscall_sos_read(seL4_MessageInfo_t *reply_msg);
-static void syscall_sos_usleep(bool *have_reply, seL4_CPtr reply);
+static void syscall_sos_usleep(bool *have_reply, seL4_CPtr *reply);
 static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg);
-static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, bool *have_repl, seL4_Word syscall_number);
+static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
 
 /* The linker will link this symbol to the start address  *
  * of an archive of attached applications.                */
@@ -175,6 +171,7 @@ NORETURN void syscall_loop(seL4_CPtr ep)
     if (reply_ut == NULL) {
         ZF_LOGF("Failed to alloc reply object ut");
     }
+    printf("start of syscall loop: %lu\n", reply);
 
     while (1) {
         seL4_Word badge = 0;
@@ -696,8 +693,9 @@ int main(void)
     UNREACHABLE();
 }
 
-static void syscall_sos_open(seL4_MessageInfo_t *reply_msg) {
-    ZF_LOGV("syscall: thread example made syscall 0!\n");
+static void syscall_sos_open(seL4_MessageInfo_t *reply_msg) 
+{
+    ZF_LOGE("syscall: thread example made syscall 56!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     int mode = current_thread->msg[1];
@@ -719,7 +717,7 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg) {
 
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
 {
-    // printf("syscall: some thread made syscall 66!\n");
+    //ZF_LOGE("syscall: some thread made syscall 66!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */
@@ -739,7 +737,9 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
     sync_bin_sem_post(syscall_sem);
 }
 
-static void syscall_sos_read(seL4_MessageInfo_t *reply_msg) {
+static void syscall_sos_read(seL4_MessageInfo_t *reply_msg) 
+{
+    ZF_LOGE("syscall: some thread made syscall 65!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */
@@ -757,28 +757,37 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg) {
     sync_bin_sem_post(syscall_sem);
 }
 
-static void syscall_sos_usleep(bool *have_reply, seL4_CPtr reply)
+static void syscall_sos_usleep(bool *have_reply, seL4_CPtr *reply)
 {
-    ZF_LOGV("syscall: some thread made syscall 101!\n");
-    register_timer(seL4_GetMR(1), wakeup, (void*) reply);
+    ZF_LOGE("syscall: some thread made syscall 101!\n");
+    seL4_CPtr sender;
+    sender = *reply;
+    register_timer(seL4_GetMR(1), wakeup, (void*) sender);
     *have_reply = false;
+
+    seL4_CPtr new_reply;
+    ut_t *reply_ut = alloc_retype(&new_reply, seL4_ReplyObject, seL4_ReplyBits);
+    if (reply_ut == NULL) {
+        ZF_LOGF("Failed to alloc reply object ut");
+    }
+    *reply = new_reply;
 }
 
 static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
 {
-    ZF_LOGV("syscall: some thread made syscall 113!\n");
+    ZF_LOGE("syscall: some thread made syscall 113!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Set the reply message to be the timestamp since booting in microseconds */
     seL4_SetMR(0, timestamp_us(timestamp_get_freq()));
 }
 
-static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, bool *have_reply, seL4_Word syscall_number)
+static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number)
 {
-    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
-    ZF_LOGE("Unknown syscall %lu\n", syscall_number);
-    /* Don't reply to an unknown syscall */
-    *have_reply = false;
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    ZF_LOGE("System call %lu not implemented\n", syscall_number);
+    /* Reply -1 to an unimplemented syscall */
+    seL4_SetMR(1, -1);
 }
 
 
