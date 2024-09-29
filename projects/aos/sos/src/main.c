@@ -171,11 +171,14 @@ void handle_syscall(void *arg)
     case SYSCALL_SOS_OPEN:
         syscall_sos_open(&reply_msg, curr_task);
         break;
-    case SYSCALL_SOS_WRITE:
-        syscall_sos_write(&reply_msg, curr_task);
+    case SYSCALL_SOS_CLOSE:
+        syscall_sos_close(&reply_msg, curr_task);
         break;
     case SYSCALL_SOS_READ:
         syscall_sos_read(&reply_msg, curr_task);
+        break;
+    case SYSCALL_SOS_WRITE:
+        syscall_sos_write(&reply_msg, curr_task);
         break;
     case SYSCALL_SOS_USLEEP:
         syscall_sos_usleep(&have_reply, curr_task);
@@ -817,6 +820,29 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 {
     ZF_LOGE("syscall: some thread made syscall 57!\n");
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    sync_bin_sem_wait(syscall_sem);
+    struct file *curr = find_file(curr_task->msg[1]);
+    if (curr == NULL) {
+        sync_bin_sem_post(syscall_sem);
+        ZF_LOGE("Cannot find file to close");
+        seL4_SetMR(0, -1);
+        return;
+    }
+
+    if (curr == file_stack) {
+        file_stack = file_stack->next;
+        free(curr);
+        sync_bin_sem_post(syscall_sem);
+        seL4_SetMR(0, 0);
+        return;
+    }
+
+    struct file *prev = find_prev_file(curr_task->msg[1]);
+    prev->next = curr->next;
+    free(curr);
+    sync_bin_sem_post(syscall_sem);
+    seL4_SetMR(0, 0);
 }
 
 static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_task) 
@@ -841,7 +867,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 {
-    // ZF_LOGE("syscall: some thread made syscall 66!\n");
+    ZF_LOGE("syscall: some thread made syscall 66!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */

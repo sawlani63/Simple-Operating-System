@@ -90,3 +90,14 @@ struct file *find_file(int fd) {
     }
     return NULL;
 }
+
+struct file *find_prev_file(int fd) {
+    struct file *curr = file_stack;
+    while (curr->next != NULL) {
+        if (curr->next->fd == fd) {
+            return curr;
+        }
+        curr = curr->next;
+    }
+    return NULL;
+}
