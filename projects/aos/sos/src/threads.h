@@ -38,7 +38,7 @@ typedef struct {
     uintptr_t tls_base;
 
     /* New args. */
-    seL4_Word msg[4];
+    seL4_Word msg[5];
 } sos_thread_t;
 
 typedef void thread_main_f(void *);

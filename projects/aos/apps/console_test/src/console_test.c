@@ -79,7 +79,12 @@ int test_buffers(int console_fd) {
 int main(void)
 {
     do {
-        test_buffers(1);
+        int fd = sos_open("console", 2);
+        int fail = sos_open("console", 2);
+        printf("Should fail: %d\n", fail);
+        fail = sos_open("console", 0);
+        printf("Should fail: %d\n", fail);
+        test_buffers(fd);
         fputs("task:\tHello world, I'm\tconsole_test!\n", stdout);
         thread_block();
         // sleep(1);    // Implement this as a syscall in the future
