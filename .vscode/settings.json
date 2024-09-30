@@ -35,6 +35,7 @@
         "optional": "c",
         "system_error": "c",
         "variant": "c",
-        "threads.h": "c"
+        "threads.h": "c",
+        "complex": "c"
     }
 }

@@ -78,6 +78,8 @@ int main(void)
 {
     do {
         int fd = sos_open("console", 2);
+        sos_close(fd);
+        fd = sos_open("console", 2);
         test_buffers(fd);
         fputs("task:\tHello world, I'm\tconsole_test!\n", stdout);
         thread_block();

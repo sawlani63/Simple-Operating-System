@@ -815,8 +815,6 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
         sync_bin_sem_post(syscall_sem);
     }
     seL4_SetMR(0, fd);
-
-    free(user_process.cache_curr_path);
 }
 
 static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
@@ -836,11 +834,12 @@ static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_t
 
     if (curr == file_stack) {
         file_stack = file_stack->next;
-        free(curr);
-        sync_bin_sem_post(syscall_sem);
         if (!strcmp(curr->path, "console") && curr->mode != O_WRONLY) {
             sync_bin_sem_post(console_sem);
         }
+        free(curr->path);
+        free(curr);
+        sync_bin_sem_post(syscall_sem);
         seL4_SetMR(0, 0);
         return;
     }
