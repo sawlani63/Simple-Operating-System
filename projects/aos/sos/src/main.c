@@ -789,11 +789,10 @@ int main(void)
 
 static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_task) 
 {
-    // ZF_LOGE("syscall: thread example made syscall 56!\n");
+    ZF_LOGE("syscall: thread example made syscall 56!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
-    /* We set more than 2 mrs so we must be opening for the first time */
     if (curr_task->msg[1]) {
         user_process.open_len = curr_task->msg[3];
         user_process.curr_len = 0;
@@ -809,7 +808,7 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
     int fd;
     if (!strcmp(user_process.cache_curr_path, "console")) {
-        if (user_process.cache_curr_mode != 1) {
+        if (user_process.cache_curr_mode != O_WRONLY) {
             sync_bin_sem_wait(console_sem);
         }
         sync_bin_sem_wait(syscall_sem);
@@ -824,7 +823,9 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 {
     ZF_LOGE("syscall: some thread made syscall 57!\n");
+    /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+
     sync_bin_sem_wait(syscall_sem);
     struct file *curr = find_file(curr_task->msg[1]);
     if (curr == NULL) {
