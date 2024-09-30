@@ -859,7 +859,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
     sync_bin_sem_wait(syscall_sem);
     struct file *found = find_file(read_fd);
-    if (found == NULL) {
+    if (found == NULL || found->mode == O_WRONLY) {
         /* Set the reply message to be an error value */
         seL4_SetMR(0, -1);
     } else {
@@ -881,7 +881,7 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
 
     sync_bin_sem_wait(syscall_sem);
     struct file *found = find_file(write_fd);
-    if (found == NULL) {
+    if (found == NULL || found->mode == O_RDONLY) {
         /* Set the reply message to be an error value */
         seL4_SetMR(0, -1);
     } else {
