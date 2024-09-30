@@ -67,6 +67,10 @@
 #define APP_PRIORITY         (0)
 #define APP_EP_BADGE         (101)
 
+#define O_RDONLY 0
+#define O_WRONLY 1
+#define O_RDWR 2
+
 /* The number of additional stack pages to provide to the initial
  * process */
 #define INITIAL_PROCESS_EXTRA_STACK_PAGES 4
@@ -143,8 +147,8 @@ sync_cv_t *signal_cv = NULL;
 
 static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
 static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
-static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
 static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
+static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
 static void syscall_sos_usleep(bool *have_reply, struct task *curr_task);
 static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg);
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
@@ -171,11 +175,14 @@ void handle_syscall(void *arg)
     case SYSCALL_SOS_OPEN:
         syscall_sos_open(&reply_msg, curr_task);
         break;
-    case SYSCALL_SOS_WRITE:
-        syscall_sos_write(&reply_msg, curr_task);
+    case SYSCALL_SOS_CLOSE:
+        syscall_sos_close(&reply_msg, curr_task);
         break;
     case SYSCALL_SOS_READ:
         syscall_sos_read(&reply_msg, curr_task);
+        break;
+    case SYSCALL_SOS_WRITE:
+        syscall_sos_write(&reply_msg, curr_task);
         break;
     case SYSCALL_SOS_USLEEP:
         syscall_sos_usleep(&have_reply, curr_task);
@@ -670,7 +677,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     network_init(&cspace, timer_vaddr, ntfn);
     console = network_console_init();
     network_console_register_handler(console, enqueue);
-    push_new_file(1, network_console_byte_send, deque);
+    push_new_file(1, network_console_byte_send, deque, "console");
 
 #ifdef CONFIG_SOS_GDB_ENABLED
     /* Initialize the debugger */
@@ -781,11 +788,10 @@ int main(void)
 
 static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_task) 
 {
-    // ZF_LOGE("syscall: thread example made syscall 56!\n");
+    ZF_LOGE("syscall: thread example made syscall 56!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
-    /* We set more than 2 mrs so we must be opening for the first time */
     if (curr_task->msg[1]) {
         user_process.open_len = curr_task->msg[3];
         user_process.curr_len = 0;
@@ -801,11 +807,11 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
     int fd;
     if (!strcmp(user_process.cache_curr_path, "console")) {
-        if (user_process.cache_curr_mode != 1) {
+        if (user_process.cache_curr_mode != O_WRONLY) {
             sync_bin_sem_wait(console_sem);
         }
         sync_bin_sem_wait(syscall_sem);
-        fd = push_new_file(user_process.cache_curr_mode, network_console_byte_send, deque);
+        fd = push_new_file(user_process.cache_curr_mode, network_console_byte_send, deque, user_process.cache_curr_path);
         sync_bin_sem_post(syscall_sem);
     }
     seL4_SetMR(0, fd);
@@ -816,28 +822,37 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 {
     ZF_LOGE("syscall: some thread made syscall 57!\n");
-}
-
-static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
-{
-    // ZF_LOGE("syscall: some thread made syscall 66!\n");
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    /* Receive a fd from sos.c */
-    int write_fd = curr_task->msg[1];
-    /* Receive a byte from sos.c */
-    char receive = curr_task->msg[2];
 
     sync_bin_sem_wait(syscall_sem);
-    struct file *found = find_file(write_fd);
-    if (found == NULL) {
-        /* Set the reply message to be an error value */
+    struct file *curr = find_file(curr_task->msg[1]);
+    if (curr == NULL) {
+        sync_bin_sem_post(syscall_sem);
+        ZF_LOGE("Cannot find file to close");
         seL4_SetMR(0, -1);
-    } else {
-        /* Set the reply message to be the return value of the write_handler */
-        seL4_SetMR(0, found->write_handler(receive));
+        return;
     }
+
+    if (curr == file_stack) {
+        file_stack = file_stack->next;
+        free(curr);
+        sync_bin_sem_post(syscall_sem);
+        if (!strcmp(curr->path, "console") && curr->mode != O_WRONLY) {
+            sync_bin_sem_post(console_sem);
+        }
+        seL4_SetMR(0, 0);
+        return;
+    }
+
+    struct file *prev = find_prev_file(curr_task->msg[1]);
+    prev->next = curr->next;
+    free(curr);
     sync_bin_sem_post(syscall_sem);
+    if (!strcmp(curr->path, "console") && curr->mode != O_WRONLY) {
+        sync_bin_sem_post(console_sem);
+    }
+    seL4_SetMR(0, 0);
 }
 
 static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_task) 
@@ -850,12 +865,34 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
     sync_bin_sem_wait(syscall_sem);
     struct file *found = find_file(read_fd);
-    if (found == NULL) {
+    if (found == NULL || found->mode == O_WRONLY) {
         /* Set the reply message to be an error value */
         seL4_SetMR(0, -1);
     } else {
         /* Set the reply message to be the return value of the read_handler */
         seL4_SetMR(0, found->read_handler());
+    }
+    sync_bin_sem_post(syscall_sem);
+}
+
+static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
+{
+    ZF_LOGE("syscall: some thread made syscall 66!\n");
+    /* construct a reply message of length 1 */
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    /* Receive a fd from sos.c */
+    int write_fd = curr_task->msg[1];
+    /* Receive a byte from sos.c */
+    char receive = curr_task->msg[2];
+
+    sync_bin_sem_wait(syscall_sem);
+    struct file *found = find_file(write_fd);
+    if (found == NULL || found->mode == O_RDONLY) {
+        /* Set the reply message to be an error value */
+        seL4_SetMR(0, -1);
+    } else {
+        /* Set the reply message to be the return value of the write_handler */
+        seL4_SetMR(0, found->write_handler(receive));
     }
     sync_bin_sem_post(syscall_sem);
 }
