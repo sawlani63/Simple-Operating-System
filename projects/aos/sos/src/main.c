@@ -192,6 +192,8 @@ void handle_syscall(void *arg)
         seL4_NBSend(curr_task->reply, reply_msg);
         free_untype(&curr_task->reply, curr_task->reply_ut);
     }
+
+    free(curr_task);
 }
 
 static void submit_task(struct task task) {
