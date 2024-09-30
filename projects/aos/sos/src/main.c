@@ -67,6 +67,10 @@
 #define APP_PRIORITY         (0)
 #define APP_EP_BADGE         (101)
 
+#define O_RDONLY 0
+#define O_WRONLY 1
+#define O_RDWR 2
+
 /* The number of additional stack pages to provide to the initial
  * process */
 #define INITIAL_PROCESS_EXTRA_STACK_PAGES 4
