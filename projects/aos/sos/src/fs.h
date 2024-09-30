@@ -44,18 +44,20 @@ struct file {
     fmode_t mode;
     int (*write_handler)(char c);
     char (*read_handler)(void);
+    char* path;
     struct file *next;
 };
 
 struct file *file_stack = NULL;
 int id = 1;
 
-static struct file *create_file(fmode_t mode, int (*write_handler)(char c), char (*read_handler)(void)) {
+static struct file *create_file(fmode_t mode, int (*write_handler)(char c), char (*read_handler)(void), char* path) {
     struct file *new_file = malloc(sizeof(struct file));
     new_file->fd = id++;
     new_file->mode = mode;
     new_file->write_handler = write_handler;
     new_file->read_handler = read_handler;
+    new_file->path = path;
     new_file->next = NULL;
     return new_file;
 }
@@ -65,7 +67,7 @@ static void push_file(struct file *file) {
     file_stack = file;
 }
 
-int push_new_file(fmode_t mode, int (*write_handler)(char c), char (*read_handler)(void)) {
+int push_new_file(fmode_t mode, int (*write_handler)(char c), char (*read_handler)(void), char* path) {
     if (queue_sem == NULL) {
         queue_sem = malloc(sizeof(sync_bin_sem_t));
         ut_t *sem_ut = alloc_retype(&sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
@@ -75,7 +77,7 @@ int push_new_file(fmode_t mode, int (*write_handler)(char c), char (*read_handle
     if (id == 2) {
         id += 2;
     }
-    struct file *file = create_file(mode, write_handler, read_handler);
+    struct file *file = create_file(mode, write_handler, read_handler, path);
     push_file(file);
     return file->fd;
 }

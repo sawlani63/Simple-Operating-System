@@ -678,7 +678,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     network_init(&cspace, timer_vaddr, ntfn);
     console = network_console_init();
     network_console_register_handler(console, enqueue);
-    push_new_file(1, network_console_byte_send, deque);
+    push_new_file(1, network_console_byte_send, deque, "console");
 
 #ifdef CONFIG_SOS_GDB_ENABLED
     /* Initialize the debugger */
@@ -812,7 +812,7 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
             sync_bin_sem_wait(console_sem);
         }
         sync_bin_sem_wait(syscall_sem);
-        fd = push_new_file(user_process.cache_curr_mode, network_console_byte_send, deque);
+        fd = push_new_file(user_process.cache_curr_mode, network_console_byte_send, deque, user_process.cache_curr_path);
         sync_bin_sem_post(syscall_sem);
     }
     seL4_SetMR(0, fd);
@@ -839,6 +839,9 @@ static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_t
         file_stack = file_stack->next;
         free(curr);
         sync_bin_sem_post(syscall_sem);
+        if (!strcmp(curr->path, "console") && curr->mode != O_WRONLY) {
+            sync_bin_sem_post(console_sem);
+        }
         seL4_SetMR(0, 0);
         return;
     }
@@ -847,6 +850,9 @@ static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_t
     prev->next = curr->next;
     free(curr);
     sync_bin_sem_post(syscall_sem);
+    if (!strcmp(curr->path, "console") && curr->mode != O_WRONLY) {
+        sync_bin_sem_post(console_sem);
+    }
     seL4_SetMR(0, 0);
 }
 
