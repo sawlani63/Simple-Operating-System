@@ -21,9 +21,6 @@ struct {
 seL4_CPtr tpool_sem_cptr;
 sync_bin_sem_t *tpool_sem = NULL;
 
-seL4_CPtr signal_sem_cptr;
-sync_bin_sem_t *signal_sem = NULL;
-
 seL4_CPtr signal_cv_cptr;
 sync_cv_t *signal_cv = NULL;
 
@@ -73,11 +70,6 @@ void initialise_thread_pool(void (*input_func)(void *arg)) {
     ut_t *ut = alloc_retype(&tpool_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!ut, "No memory for notification");
     sync_bin_sem_init(tpool_sem, tpool_sem_cptr, 1);
-
-    signal_sem = malloc(sizeof(sync_bin_sem_t));
-    ut = alloc_retype(&signal_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
-    ZF_LOGF_IF(!ut, "No memory for notification");
-    sync_bin_sem_init(signal_sem, signal_sem_cptr, 1);
 
     signal_cv = malloc(sizeof(sync_cv_t));
     ut = alloc_retype(&signal_cv_cptr, seL4_NotificationObject, seL4_NotificationBits);
