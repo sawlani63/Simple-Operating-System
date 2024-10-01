@@ -209,9 +209,7 @@ NORETURN void syscall_loop(seL4_CPtr ep)
             seL4_Word msg[5] = {seL4_GetMR(0), seL4_GetMR(1), seL4_GetMR(2),
                                 seL4_GetMR(3), seL4_GetMR(4)};
             
-            struct task task;
-            task.reply_ut = reply_ut;
-            task.reply = reply;
+            struct task task = {.reply_ut = reply_ut, .reply = reply};
             memcpy(task.msg, msg, sizeof(seL4_Word) * 5);
             submit_task(task);
             

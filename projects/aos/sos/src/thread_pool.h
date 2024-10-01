@@ -16,7 +16,7 @@ struct {
     int front;
     int rear;
     int size;
-} queue;
+} queue = {.front = 0, .rear = 0, .size = 0};
 
 seL4_CPtr tpool_sem_cptr;
 sync_bin_sem_t *tpool_sem = NULL;
@@ -62,10 +62,6 @@ void start_sos_worker_thread(void *arg) {
 }
 
 void initialise_thread_pool(void (*input_func)(void *arg)) {
-    queue.front = 0;
-    queue.rear = 0;
-    queue.size = 0;
-
     tpool_sem = malloc(sizeof(sync_bin_sem_t));
     ut_t *ut = alloc_retype(&tpool_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!ut, "No memory for notification");
