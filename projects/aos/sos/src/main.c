@@ -212,14 +212,12 @@ NORETURN void syscall_loop(seL4_CPtr ep)
             memcpy(task.msg, msg, sizeof(seL4_Word) * 5);
             submit_task(task);
             
-            /* To stop the main thread from overriding the worker thread's reply object,
+            /* To stop the main thread from overwriting the worker thread's reply object,
              *  we give the main thread a new one */
-            seL4_CPtr new_reply;
-            reply_ut = alloc_retype(&new_reply, seL4_ReplyObject, seL4_ReplyBits);
+            reply_ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
             if (reply_ut == NULL) {
                 ZF_LOGF("Failed to alloc reply object ut");
             }
-            reply = new_reply;
         } else {
             /* some kind of fault */
             debug_print_fault(message, APP_NAME);
