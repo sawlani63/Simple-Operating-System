@@ -36,6 +36,12 @@
         "system_error": "c",
         "variant": "c",
         "threads.h": "c",
-        "complex": "c"
+        "complex": "c",
+        "tests.h": "c",
+        "elf.h": "c",
+        "gen_config.h": "c",
+        "thread_pool.h": "c",
+        "bin_sem.h": "c",
+        "deque": "c"
     }
 }

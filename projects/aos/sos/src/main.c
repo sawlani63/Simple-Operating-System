@@ -48,8 +48,7 @@
 
 #include <aos/vsyscall.h>
 #include "fs.h"
-#include <sync/bin_sem.h>
-#include <sync/condition_var.h>
+#include "thread_pool.h"
 
 /*
  * To differentiate between signals from notification objects and and IPC messages,
@@ -122,28 +121,11 @@ static struct {
 
 struct network_console *console;
 
-struct task {
-    ut_t *reply_ut;
-    seL4_CPtr reply;
-    seL4_Word msg[5];
-};
-struct task task_queue[4];
-int task_count = 0;
-
 seL4_CPtr console_sem_cptr;
 sync_bin_sem_t *console_sem = NULL;
 
 seL4_CPtr sem_cptr;
 sync_bin_sem_t *syscall_sem = NULL;
-
-seL4_CPtr tpool_sem_cptr;
-sync_bin_sem_t *tpool_sem = NULL;
-
-seL4_CPtr signal_sem_cptr;
-sync_bin_sem_t *signal_sem = NULL;
-
-seL4_CPtr signal_cv_cptr;
-sync_cv_t *signal_cv = NULL;
 
 static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
 static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
@@ -198,33 +180,6 @@ void handle_syscall(void *arg)
     if (have_reply) {
         seL4_NBSend(curr_task->reply, reply_msg);
         free_untype(&curr_task->reply, curr_task->reply_ut);
-    }
-}
-
-static void submit_task(struct task task) {
-    sync_bin_sem_wait(tpool_sem);
-    task_queue[task_count++] = task;
-    sync_bin_sem_post(tpool_sem);
-    sync_cv_signal(signal_cv);
-}
-
-static void start_sos_worker_thread(UNUSED void *arg) {
-    while (1) {
-        struct task task;
-
-        sync_bin_sem_wait(tpool_sem);
-        while (task_count == 0) {
-            sync_cv_wait(tpool_sem, signal_cv);
-        }
-
-        task = task_queue[0];
-        int i;
-        for (i = 0; i < task_count - 1; i++) {
-            task_queue[i] = task_queue[i + 1];
-        }
-        task_count--;
-        sync_bin_sem_post(tpool_sem);
-        handle_syscall(&task);
     }
 }
 
@@ -699,35 +654,19 @@ NORETURN void *main_continued(UNUSED void *arg)
     bool success = start_first_process(APP_NAME, ipc_ep);
     ZF_LOGF_IF(!success, "Failed to start first process");
 
+    /* Initialise semaphores for synchronisation and console blocking */
     syscall_sem = malloc(sizeof(sync_bin_sem_t));
     ut_t *sem_ut = alloc_retype(&sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!sem_ut, "No memory for notification");
     sync_bin_sem_init(syscall_sem, sem_cptr, 1);
-
-    tpool_sem = malloc(sizeof(sync_bin_sem_t));
-    sem_ut = alloc_retype(&tpool_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
-    ZF_LOGF_IF(!sem_ut, "No memory for notification");
-    sync_bin_sem_init(tpool_sem, tpool_sem_cptr, 1);
-
-    signal_sem = malloc(sizeof(sync_bin_sem_t));
-    sem_ut = alloc_retype(&signal_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
-    ZF_LOGF_IF(!sem_ut, "No memory for notification");
-    sync_bin_sem_init(signal_sem, signal_sem_cptr, 1);
 
     console_sem = malloc(sizeof(sync_bin_sem_t));
     sem_ut = alloc_retype(&console_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!sem_ut, "No memory for notification");
     sync_bin_sem_init(console_sem, console_sem_cptr, 1);
 
-    signal_cv = malloc(sizeof(sync_cv_t));
-    sem_ut = alloc_retype(&signal_cv_cptr, seL4_NotificationObject, seL4_NotificationBits);
-    ZF_LOGF_IF(!sem_ut, "No memory for notification");
-    sync_cv_init(signal_cv, signal_cv_cptr);
-
     /* Creating thread pool */
-    for (int i = 0; i < 4; i++) {
-        spawn(start_sos_worker_thread, NULL, 0, true);
-    }
+    initialise_thread_pool(handle_syscall);
 
     printf("\nSOS entering syscall loop\n");
     syscall_loop(ipc_ep);
