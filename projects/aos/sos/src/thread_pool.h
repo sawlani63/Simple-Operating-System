@@ -46,7 +46,6 @@ static struct task dequeue_task() {
     return task;
 }
 
-
 void start_sos_worker_thread(void *arg) {
     void (*input_func)(void *args) = arg;
     while (1) {
