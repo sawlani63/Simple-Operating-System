@@ -42,6 +42,7 @@
         "gen_config.h": "c",
         "thread_pool.h": "c",
         "bin_sem.h": "c",
-        "deque": "c"
+        "deque": "c",
+        "condition_var.h": "c"
     }
 }
