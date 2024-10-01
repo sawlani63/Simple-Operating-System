@@ -30,8 +30,7 @@ sync_cv_t *signal_cv = NULL;
 void submit_task(struct task task) {
     sync_bin_sem_wait(tpool_sem);
     if (queue.size == QUEUE_SIZE) {
-        sync_bin_sem_post(tpool_sem);
-        return;
+        printf("Tried to add to a full task queue!\n");
     }
     queue.tasks[queue.rear] = task;
     queue.rear = (queue.rear + 1) % QUEUE_SIZE;
@@ -41,6 +40,9 @@ void submit_task(struct task task) {
 }
 
 static struct task dequeue_task() {
+    if (queue.size == 0) {
+        printf("Tried to remove from an empty task queue!\n");
+    }
     struct task task = queue.tasks[queue.front];
     queue.front = (queue.front + 1) % QUEUE_SIZE;
     queue.size--;
@@ -51,13 +53,12 @@ static struct task dequeue_task() {
 void start_sos_worker_thread(void *arg) {
     void (*input_func)(void *args) = arg;
     while (1) {
-        struct task task;
         sync_bin_sem_wait(tpool_sem);
         while (queue.size == 0) {
             sync_cv_wait(tpool_sem, signal_cv);
         }
-
-        task = dequeue_task();
+        
+        struct task task = dequeue_task();
         sync_bin_sem_post(tpool_sem);
         input_func(&task);
     }
