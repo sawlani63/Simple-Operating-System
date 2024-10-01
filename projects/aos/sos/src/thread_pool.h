@@ -3,12 +3,12 @@
 
 #define NUM_THREADS 2
 #define QUEUE_SIZE 4
-#define NUM_MESSAGE_REGISTERS 5
+#define NUM_MSG_REGISTERS 5
 
 struct task {
     ut_t *reply_ut;
     seL4_CPtr reply;
-    seL4_Word msg[NUM_MESSAGE_REGISTERS];
+    seL4_Word msg[NUM_MSG_REGISTERS];
 };
 
 struct {

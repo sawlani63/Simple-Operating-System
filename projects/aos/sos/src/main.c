@@ -198,20 +198,22 @@ NORETURN void syscall_loop(seL4_CPtr ep)
         seL4_MessageInfo_t message = seL4_Recv(ep, &badge, reply);
 
         /* Awake! We got a message - check the label and badge to
-        * see what the message is about */
+         * see what the message is about */
         seL4_Word label = seL4_MessageInfo_get_label(message);
 
         if (badge & IRQ_EP_BADGE) {
-            /* It's a notification from our bound notification
-                * object! */
+            /* It's a notification from our bound notification object! */
             sos_handle_irq_notification(&badge, false);
-        } else if (label == seL4_Fault_NullFault) {            
+        } else if (label == seL4_Fault_NullFault) {         
+            /* Create a new task for one of our worker threads in the thread pool */   
             struct task task = {.reply_ut = reply_ut, .reply = reply};
-            seL4_Word msg[5] = {seL4_GetMR(0), seL4_GetMR(1), seL4_GetMR(2),
-                                seL4_GetMR(3), seL4_GetMR(4)};
+            seL4_Word msg[NUM_MSG_REGISTERS]
+                = {seL4_GetMR(0), seL4_GetMR(1), seL4_GetMR(2), seL4_GetMR(3), seL4_GetMR(4)};
             memcpy(task.msg, msg, sizeof(seL4_Word) * 5);
             submit_task(task);
             
+            /* To stop the main thread from overriding the worker thread's reply object,
+             *  we give the main thread a new one */
             seL4_CPtr new_reply;
             reply_ut = alloc_retype(&new_reply, seL4_ReplyObject, seL4_ReplyBits);
             if (reply_ut == NULL) {
@@ -675,8 +677,7 @@ int main(void)
 {
     init_muslc();
 
-    /* register the location of the unwind_tables -- this is required for
-     * backtrace() to work */
+    /* register the location of the unwind_tables -- this is required for backtrace() to work */
     __register_frame(&__eh_frame_start);
 
     seL4_BootInfo *boot_info = sel4runtime_bootinfo();
@@ -747,7 +748,8 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
             sync_bin_sem_wait(console_sem);
         }
         sync_bin_sem_wait(syscall_sem);
-        fd = push_new_file(user_process.cache_curr_mode, network_console_byte_send, deque, user_process.cache_curr_path);
+        fd = push_new_file(user_process.cache_curr_mode, network_console_byte_send,
+                           deque, user_process.cache_curr_path);
         sync_bin_sem_post(syscall_sem);
     }
     seL4_SetMR(0, fd);
