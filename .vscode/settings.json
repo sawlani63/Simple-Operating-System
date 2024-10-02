@@ -43,6 +43,7 @@
         "thread_pool.h": "c",
         "bin_sem.h": "c",
         "deque": "c",
-        "condition_var.h": "c"
+        "condition_var.h": "c",
+        "vmem_layout.h": "c"
     }
 }

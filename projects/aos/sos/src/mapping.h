@@ -12,8 +12,7 @@
 #pragma once
 
 #include <stdbool.h>
-#include <sel4/sel4.h>
-#include <cspace/cspace.h>
+#include "addrspace.h"
 
 /**
  * Maps a page.
@@ -68,6 +67,29 @@ seL4_Error map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vsp
  */
 seL4_Error map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr, seL4_CapRights_t rights,
                      seL4_ARM_VMAttributes attr);
+
+/* Maps a page, allocating intermediate structures and cslots with the cspace provided.
+ *
+ * If you *know* you can map the vaddr without allocating any other paging structures, or that it is
+ * safe to allocate cslots, you can provide NULL as the cspace.
+
+ * Along with allocating intermediate structures and cslots within the provided cspace, we also allocate
+ * a slot within a "shadow" page table. This shadow page table maps virtual memory to a capability
+ * stored within the hardware page table. This shadow structure is necessary for us to keep track of the
+ * capabilities to physical frames so that we can later free them and approve/deny requests to perform
+ * actions on memory based off user permisions (recorded in regions within the address space).
+ *
+ * @param cspace          CSpace which can be used to allocate slots for intermediate paging structures.
+ * @param frame_cap       A capbility to the frame to be mapped (seL4_ARM_SmallPageObject).
+ * @param vspace          A capability to the vspace (seL4_ARM_PageGlobalDirectoryObject).
+ * @param vaddr           The virtual address to map the frame.
+ * @param rights          The access rights for the mapping
+ * @param attr            The VM attributes to use for the mapping
+ *
+ * @return 0 on success
+ */
+seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
+                     seL4_CapRights_t rights, seL4_ARM_VMAttributes attr);
 
 /*
  * Map a device and return the virtual address it is mapped to.
