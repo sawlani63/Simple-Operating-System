@@ -137,7 +137,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
 static void syscall_sos_usleep(bool *have_reply, struct task *curr_task);
 static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg);
-static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg);
+static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
 static void wakeup(UNUSED uint32_t id, void *data);
 
@@ -247,7 +247,7 @@ void handle_syscall(void *arg)
             syscall_sos_time_stamp(&reply_msg);
             break;
         case SYSCALL_SYS_BRK:
-            syscall_sys_brk(&reply_msg);
+            syscall_sys_brk(&reply_msg, curr_task);
             break;
         default:
             syscall_unknown_syscall(&reply_msg, syscall_number);
@@ -926,14 +926,23 @@ static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
     seL4_SetMR(0, timestamp_us(timestamp_get_freq()));
 }
 
-static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg)
+static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 {
     ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SYS_BRK);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
     uintptr_t newbrk = curr_task->msg[1];
-    user_process
-    seL4_SetMR(0, 0); // returns 0 if failure, newbrk if success
+    struct addrspace *as = user_process.addrspace;
+    mem_region_t *curr = as->regions;
+    while (curr->base != PROCESS_VMEM_START && curr != NULL) {
+        curr = curr->next;
+    }
+    if (curr == NULL) {
+        seL4_SetMR(0, 0);
+        return;
+    }
+    curr->size = newbrk - PROCESS_VMEM_START; //might need to page align
+    seL4_SetMR(0, newbrk);
 }
 
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number)
