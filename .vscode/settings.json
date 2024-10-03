@@ -44,6 +44,9 @@
         "bin_sem.h": "c",
         "deque": "c",
         "condition_var.h": "c",
-        "vmem_layout.h": "c"
+        "vmem_layout.h": "c",
+        "ut.h": "c",
+        "stddef.h": "c",
+        "addrspace.h": "c"
     }
 }

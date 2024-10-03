@@ -75,7 +75,7 @@ static seL4_Error retype_map_pud(cspace_t *cspace, seL4_CPtr vspace, seL4_Word v
 
 static seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
                                  seL4_CapRights_t rights, seL4_ARM_VMAttributes attr,
-                                 seL4_CPtr *free_slots, seL4_Word *used)
+                                 seL4_CPtr *free_slots, seL4_Word *used, ptEntry_t *ptE)
 {
     /* Attempt the mapping */
     seL4_Error err = seL4_ARM_Page_Map(frame_cap, vspace, vaddr, rights, attr);
@@ -104,6 +104,11 @@ static seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPt
             return -1;
         }
 
+        if (ptE != NULL) {
+            ptE->slot = slot;
+            ptE->ut = ut;
+        }
+
         switch (failed) {
         case SEL4_MAPPING_LOOKUP_NO_PT:
             err = retype_map_pt(cspace, vspace, vaddr, ut->cap, slot);
@@ -111,7 +116,6 @@ static seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPt
         case SEL4_MAPPING_LOOKUP_NO_PD:
             err = retype_map_pd(cspace, vspace, vaddr, ut->cap, slot);
             break;
-
         case SEL4_MAPPING_LOOKUP_NO_PUD:
             err = retype_map_pud(cspace, vspace, vaddr, ut->cap, slot);
             break;
@@ -134,19 +138,34 @@ seL4_Error map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vsp
         ZF_LOGE("Invalid arguments");
         return -1;
     }
-    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used);
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, NULL);
 }
 
 seL4_Error map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
                      seL4_CapRights_t rights, seL4_ARM_VMAttributes attr)
 {
-    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL);
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, NULL);
 }
 
 seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
-                     seL4_CapRights_t rights, seL4_ARM_VMAttributes attr)
+                                 seL4_CapRights_t rights, seL4_ARM_VMAttributes attr,
+                                 seL4_CPtr *free_slots, seL4_Word *used,
+                                 struct addrspace *as, frame_ref_t frame, uint16_t l1index, uint16_t l2index,
+                        uint16_t l3index, uint16_t l4index)
 {
-    return 0;
+    /* Allocate any necessary levels within the shadow page table */
+    if (as->page_table[l1index] == NULL) {
+        as->page_table[l1index] = calloc(sizeof(frame_ref_t), PAGE_TABLE_ENTRIES);
+    }
+    if (as->page_table[l1index][l2index] == NULL) {
+        as->page_table[l1index][l2index] = calloc(sizeof(frame_ref_t), PAGE_TABLE_ENTRIES);
+    }
+    if (as->page_table[l1index][l2index][l3index] == NULL) {
+        as->page_table[l1index][l2index][l3index] = calloc(sizeof(frame_ref_t), PAGE_TABLE_ENTRIES);
+    }
+    /* Attempt the mapping */
+    as->page_table[l1index][l2index][l3index][l4index].frame = frame;
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, &as->page_table[l1index][l2index][l3index][l4index]);
 }
 
 

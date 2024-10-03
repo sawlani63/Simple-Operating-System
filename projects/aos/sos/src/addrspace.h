@@ -9,6 +9,12 @@
 #define REGION_WR 0x2
 #define REGION_EX 0x4
 
+typedef struct ptEntry {
+    frame_ref_t frame;
+    seL4_CPtr slot;
+    ut_t *ut;
+} ptEntry_t;
+
 typedef struct _region {
     seL4_Word base;
     size_t size;
@@ -17,7 +23,7 @@ typedef struct _region {
 } region_t;
 
 struct addrspace {
-    frame_ref_t ****page_table;
+    ptEntry_t ****page_table;
     region_t *regions;
 };
 
