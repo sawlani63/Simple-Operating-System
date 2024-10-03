@@ -44,7 +44,7 @@ static inline seL4_CapRights_t get_sel4_rights_from_elf(unsigned long permission
  *       and leaves them there. Additionally, if the current implementation fails, it does not
  *       clean up after itself.
  *
- *       This is insufficient, as you will run out of resouces quickly, and will be completely fixed
+ *       This is insufficient, as you will run out of resources quickly, and will be completely fixed
  *       throughout the duration of the project, as different milestones are completed.
  *
  *       Be *very* careful when editing this code. Most students will experience at least one elf-loading
@@ -52,7 +52,7 @@ static inline seL4_CapRights_t get_sel4_rights_from_elf(unsigned long permission
  *
  * The content to load is either zeros or the content of the ELF
  * file itself, or both.
- * The split between file content and zeros is a follows.
+ * The split between file content and zeros is as follows.
  *
  * File content: [dst, dst + file_size)
  * Zeros:        [dst + file_size, dst + segment_size)
