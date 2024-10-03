@@ -10,11 +10,11 @@
 #define REGION_WR 0x2
 #define REGION_EX 0x4
 
-typedef struct ptEntry {
+typedef struct pt_entry {
     frame_ref_t frame;
     seL4_CPtr slot;
     ut_t *ut;
-} ptEntry_t;
+} pt_entry;
 
 typedef struct _region {
     seL4_Word base;
@@ -23,10 +23,10 @@ typedef struct _region {
     struct _region *next;
 } mem_region_t;
 
-struct addrspace {
-    ptEntry_t ****page_table;
+typedef struct addrspace {
+    pt_entry ****page_table;
     mem_region_t *regions;
-};
+} addrspace_t;
 
 /*
  * Functions in addrspace.c:
