@@ -75,7 +75,7 @@ static seL4_Error retype_map_pud(cspace_t *cspace, seL4_CPtr vspace, seL4_Word v
 
 static seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
                                  seL4_CapRights_t rights, seL4_ARM_VMAttributes attr,
-                                 seL4_CPtr *free_slots, seL4_Word *used, ptEntry_t *ptE)
+                                 seL4_CPtr *free_slots, seL4_Word *used, pt_entry *ptE)
 {
     /* Attempt the mapping */
     seL4_Error err = seL4_ARM_Page_Map(frame_cap, vspace, vaddr, rights, attr);
@@ -147,9 +147,9 @@ seL4_Error map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, se
     return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, NULL);
 }
 
-seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
-                         seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, seL4_CPtr *free_slots,
-                         seL4_Word *used, pt_entry *ptE)
+seL4_Error sos_map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
+                                seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, seL4_CPtr *free_slots,
+                                seL4_Word *used, pt_entry *ptE)
 {
     return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, ptE);
 }

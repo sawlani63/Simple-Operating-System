@@ -145,9 +145,7 @@ void handle_vm_fault(seL4_CPtr reply) {
     addrspace_t *as = user_process.addrspace;
     
     /* A VM Fault is an IPC. Check the seL4 Manual section 6.2.7 for message structure. */
-    seL4_Word program_counter = seL4_GetMR(seL4_VMFault_IP);
     seL4_Word fault_addr = seL4_GetMR(seL4_VMFault_Addr);
-    seL4_Word instruction_fault = seL4_GetMR(seL4_VMFault_PrefetchFault);
     seL4_Word fault_status_register = seL4_GetMR(seL4_VMFault_FSR);
 
     if (as == NULL || as->page_table == NULL) {
@@ -163,7 +161,6 @@ void handle_vm_fault(seL4_CPtr reply) {
     uint16_t l2_index = fault_addr << (unused_bits += seL4_VSpaceIndexBits) >> 55; /* Next 9 bits */
     uint16_t l3_index = fault_addr << (unused_bits += seL4_VSpaceIndexBits) >> 55; /* Next 9 bits */
     uint16_t l4_index = fault_addr << (unused_bits += seL4_VSpaceIndexBits) >> 55; /* Next 9 bits */
-    uint16_t frame_offset = fault_addr << (unused_bits += seL4_VSpaceIndexBits) >> 52; /* Last 12 bits */
 
     if (as->page_table[l1_index] != NULL
         && as->page_table[l1_index][l2_index] != NULL
@@ -180,7 +177,7 @@ void handle_vm_fault(seL4_CPtr reply) {
             /* We need this permissions check for demand paging that will later occur on the Hardware
              * Page Table. In the case a page in the HPT gets swapped to disk yet remains on the
              * Shadow Page Table, we need some way to know if the user is allowed to write to it. */
-            if ((fault_status_register >> 11) & 1 && reg->perms & REGION_WR == 0) {
+            if ((fault_status_register >> 11) & 1 && (reg->perms & REGION_WR) == 0) {
                 return;
             }
             /* Fault occurred in a valid region and permissions line up so we can safely break out. */
@@ -209,9 +206,11 @@ void handle_vm_fault(seL4_CPtr reply) {
     entry.frame = alloc_frame();
 
     /* Map the frame into the relevant page tables. */
-    sos_map_frame(&cspace, frame_page(entry.frame), user_process.vspace, fault_addr,
-                  seL4_CapRights_new(0, 0, reg->perms & REGION_RD, reg->perms & REGION_WR),
-                  seL4_ARM_Default_VMAttributes, &entry);
+    if (sos_map_frame(&cspace, frame_page(entry.frame), user_process.vspace, fault_addr,
+                      seL4_CapRights_new(0, 0, reg->perms & REGION_RD, reg->perms & REGION_WR),
+                      seL4_ARM_Default_VMAttributes, &entry) != 0) {
+        return;
+    }
 
     /* Respond with an empty message just to unblock the caller. */
     seL4_NBSend(reply, seL4_MessageInfo_new(0, 0, 0, 0));
