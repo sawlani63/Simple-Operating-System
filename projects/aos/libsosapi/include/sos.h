@@ -25,6 +25,7 @@
 #define SYSCALL_SOS_WRITE SYS_writev
 #define SYSCALL_SOS_USLEEP SYS_nanosleep
 #define SYSCALL_SOS_TIME_STAMP SYS_clock_gettime
+#define SYSCALL_SYS_BRK SYS_brk
 
 /* Endpoint for talking to SOS */
 #define SOS_IPC_EP_CAP     (0x1)

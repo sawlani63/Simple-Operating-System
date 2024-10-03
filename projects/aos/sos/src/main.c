@@ -49,6 +49,7 @@
 #include <aos/vsyscall.h>
 #include "fs.h"
 #include "thread_pool.h"
+#include "addrspace.h"
 
 /*
  * To differentiate between signals from notification objects and and IPC messages,
@@ -80,6 +81,7 @@
 #define SYSCALL_SOS_WRITE SYS_writev
 #define SYSCALL_SOS_USLEEP SYS_nanosleep
 #define SYSCALL_SOS_TIME_STAMP SYS_clock_gettime
+#define SYSCALL_SYS_BRK SYS_brk
 
 /* The linker will link this symbol to the start address  *
  * of an archive of attached applications.                */
@@ -133,6 +135,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
 static void syscall_sos_usleep(bool *have_reply, struct task *curr_task);
 static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg);
+static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg);
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
 static void wakeup(uint32_t id, void *data);
 
@@ -171,6 +174,9 @@ void handle_syscall(void *arg)
             break;
         case SYSCALL_SOS_TIME_STAMP:
             syscall_sos_time_stamp(&reply_msg);
+            break;
+        case SYSCALL_SYS_BRK:
+            syscall_sys_brk(&reply_msg);
             break;
         default:
             syscall_unknown_syscall(&reply_msg, syscall_number);
@@ -724,7 +730,7 @@ int main(void)
 
 static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_task) 
 {
-    ZF_LOGE("syscall: thread example made syscall 56!\n");
+    ZF_LOGE("syscall: thread example made syscall %d!\n", SYSCALL_SOS_OPEN);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
@@ -756,7 +762,7 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
 static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 {
-    ZF_LOGE("syscall: some thread made syscall 57!\n");
+    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_CLOSE);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
@@ -793,7 +799,7 @@ static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_t
 
 static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_task) 
 {
-    ZF_LOGE("syscall: some thread made syscall 65!\n");
+    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_READ);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */
@@ -813,7 +819,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 {
-    ZF_LOGE("syscall: some thread made syscall 66!\n");
+    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_WRITE);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */
@@ -835,18 +841,28 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
 
 static void syscall_sos_usleep(bool *have_reply, struct task *curr_task)
 {
-    ZF_LOGE("syscall: some thread made syscall 101!\n");
+    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_USLEEP);
     register_timer(curr_task->msg[1], wakeup, (void *) curr_task);
     *have_reply = false;
 }
 
 static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
 {
-    ZF_LOGE("syscall: some thread made syscall 113!\n");
+    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_TIME_STAMP);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Set the reply message to be the timestamp since booting in microseconds */
     seL4_SetMR(0, timestamp_us(timestamp_get_freq()));
+}
+
+static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg)
+{
+    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SYS_BRK);
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+
+    uintptr_t newbrk = curr_task->msg[1];
+    user_process
+    seL4_SetMR(0, 0); // returns 0 if failure, newbrk if success
 }
 
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number)
