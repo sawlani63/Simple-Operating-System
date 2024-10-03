@@ -1,18 +1,23 @@
 #include <cspace/cspace.h>
+#include "frame_table.h"
 
 #define PAGE_SIZE 0x1000
 #define PAGE_TABLE_BITS 9
 #define PAGE_TABLE_ENTRIES 0b1 << PAGE_TABLE_BITS
 
+#define REGION_RD 0x1
+#define REGION_WR 0x2
+#define REGION_EX 0x4
+
 typedef struct _region {
     seL4_Word base;
     size_t size;
-    unsigned int perms;
+    unsigned char perms;
     struct _region *next;
 } region_t;
 
 struct addrspace {
-    seL4_CPtr ****page_table;
+    frame_ref_t ****page_table;
     region_t *regions;
 };
 
@@ -35,5 +40,5 @@ struct addrspace {
  */
 
 struct addrspace *as_create(void);
-int as_define_region(struct addrspace *as, seL4_Word vaddr, size_t memsize);
+int as_define_region(struct addrspace *as, seL4_Word vaddr, size_t memsize, unsigned char perms);
 int as_define_stack(struct addrspace *as, seL4_Word *initstackptr);

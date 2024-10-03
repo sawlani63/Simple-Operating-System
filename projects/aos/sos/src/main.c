@@ -154,26 +154,26 @@ void handle_syscall(void *arg)
 
     /* Process system call */
     switch (syscall_number) {
-    case SYSCALL_SOS_OPEN:
-        syscall_sos_open(&reply_msg, curr_task);
-        break;
-    case SYSCALL_SOS_CLOSE:
-        syscall_sos_close(&reply_msg, curr_task);
-        break;
-    case SYSCALL_SOS_READ:
-        syscall_sos_read(&reply_msg, curr_task);
-        break;
-    case SYSCALL_SOS_WRITE:
-        syscall_sos_write(&reply_msg, curr_task);
-        break;
-    case SYSCALL_SOS_USLEEP:
-        syscall_sos_usleep(&have_reply, curr_task);
-        break;
-    case SYSCALL_SOS_TIME_STAMP:
-        syscall_sos_time_stamp(&reply_msg);
-        break;
-    default:
-        syscall_unknown_syscall(&reply_msg, syscall_number);
+        case SYSCALL_SOS_OPEN:
+            syscall_sos_open(&reply_msg, curr_task);
+            break;
+        case SYSCALL_SOS_CLOSE:
+            syscall_sos_close(&reply_msg, curr_task);
+            break;
+        case SYSCALL_SOS_READ:
+            syscall_sos_read(&reply_msg, curr_task);
+            break;
+        case SYSCALL_SOS_WRITE:
+            syscall_sos_write(&reply_msg, curr_task);
+            break;
+        case SYSCALL_SOS_USLEEP:
+            syscall_sos_usleep(&have_reply, curr_task);
+            break;
+        case SYSCALL_SOS_TIME_STAMP:
+            syscall_sos_time_stamp(&reply_msg);
+            break;
+        default:
+            syscall_unknown_syscall(&reply_msg, syscall_number);
     }
 
     if (have_reply) {
@@ -211,8 +211,8 @@ NORETURN void syscall_loop(seL4_CPtr ep)
             memcpy(task.msg, msg, sizeof(seL4_Word) * 5);
             submit_task(task);
             
-            /* To stop the main thread from overwriting the worker thread's reply object,
-             *  we give the main thread a new one */
+            /* To stop the main thread from overwriting the worker thread's
+             * reply object, we give the main thread a new one */
             reply_ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
             if (reply_ut == NULL) {
                 ZF_LOGF("Failed to alloc reply object ut");

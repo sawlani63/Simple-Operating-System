@@ -24,13 +24,14 @@ struct addrspace *as_create(void) {
 
 }
 
-int as_define_region(struct addrspace *as, seL4_Word vaddr, size_t memsize) {
+int as_define_region(struct addrspace *as, seL4_Word vaddr, size_t memsize, unsigned char perms) {
     region_t *region = malloc(sizeof(region_t));
     if (region == NULL) {
         return -1;
     }
     region->base = vaddr;
     region->size = memsize;
+    region->perms = perms;
 
     region_t *temp = as->regions;
     as->regions = region;
@@ -41,10 +42,10 @@ int as_define_region(struct addrspace *as, seL4_Word vaddr, size_t memsize) {
 
 int as_define_ipc_buff(struct addrspace *as, seL4_Word *initipcbuff) {
     *initipcbuff = PROCESS_IPC_BUFFER;
-    return as_define_region(as, PROCESS_IPC_BUFFER, PAGE_SIZE);
+    return as_define_region(as, PROCESS_IPC_BUFFER, PAGE_SIZE, REGION_RD | REGION_WR);
 }
 
 int as_define_stack(struct addrspace *as, seL4_Word *initstackptr) {
     *initstackptr = PROCESS_STACK_TOP;
-    return as_define_region(as, PROCESS_STACK_TOP - PAGE_SIZE, PAGE_SIZE);
+    return as_define_region(as, PROCESS_STACK_TOP - PAGE_SIZE, PAGE_SIZE, REGION_RD | REGION_WR);
 }
