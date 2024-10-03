@@ -7,6 +7,7 @@
 typedef struct _region {
     seL4_Word base;
     size_t size;
+    unsigned int perms;
     struct _region *next;
 } region_t;
 
