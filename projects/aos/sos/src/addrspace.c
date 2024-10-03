@@ -3,6 +3,8 @@
 #include "addrspace.h"
 #include "vmem_layout.h"
 
+#define PAGE_SIZE 0x1000
+
 struct addrspace *as_create(void) {
     struct addrspace *as = malloc(sizeof(struct addrspace));
     if (as == NULL) {
@@ -10,21 +12,17 @@ struct addrspace *as_create(void) {
 	}
 
     as->regions = NULL;
-    as->page_table = malloc(sizeof(frame_ref_t) * PAGE_TABLE_ENTRIES);
+    as->page_table = calloc(sizeof(frame_ref_t), PAGE_TABLE_ENTRIES);
     if (as->page_table == NULL) {
         free(as);
         return NULL;
-    }
-    
-    for (int i = 0; i < PAGE_TABLE_ENTRIES; i++){
-        as->page_table[i] = NULL;
     }
 
 	return as;
 }
 
 int as_define_region(struct addrspace *as, seL4_Word vaddr, size_t memsize, unsigned char perms) {
-    region_t *region = malloc(sizeof(region_t));
+    mem_region_t *region = malloc(sizeof(mem_region_t));
     if (region == NULL) {
         return -1;
     }
@@ -32,7 +30,7 @@ int as_define_region(struct addrspace *as, seL4_Word vaddr, size_t memsize, unsi
     region->size = memsize;
     region->perms = perms;
 
-    region_t *temp = as->regions;
+    mem_region_t *temp = as->regions;
     as->regions = region;
     as->regions->next = temp;
 
