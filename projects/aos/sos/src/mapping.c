@@ -148,24 +148,16 @@ seL4_Error map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, se
 }
 
 seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
-                                 seL4_CapRights_t rights, seL4_ARM_VMAttributes attr,
-                                 seL4_CPtr *free_slots, seL4_Word *used,
-                                 struct addrspace *as, frame_ref_t frame, uint16_t l1index, uint16_t l2index,
-                        uint16_t l3index, uint16_t l4index)
+                         seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, seL4_CPtr *free_slots,
+                         seL4_Word *used, pt_entry *ptE)
 {
-    /* Allocate any necessary levels within the shadow page table */
-    if (as->page_table[l1index] == NULL) {
-        as->page_table[l1index] = calloc(sizeof(frame_ref_t), PAGE_TABLE_ENTRIES);
-    }
-    if (as->page_table[l1index][l2index] == NULL) {
-        as->page_table[l1index][l2index] = calloc(sizeof(frame_ref_t), PAGE_TABLE_ENTRIES);
-    }
-    if (as->page_table[l1index][l2index][l3index] == NULL) {
-        as->page_table[l1index][l2index][l3index] = calloc(sizeof(frame_ref_t), PAGE_TABLE_ENTRIES);
-    }
-    /* Attempt the mapping */
-    as->page_table[l1index][l2index][l3index][l4index].frame = frame;
-    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, &as->page_table[l1index][l2index][l3index][l4index]);
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, ptE);
+}
+
+seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
+                         seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, pt_entry *ptE)
+{
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, ptE);
 }
 
 

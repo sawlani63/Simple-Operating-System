@@ -87,10 +87,11 @@ seL4_Error map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, se
  * @return 0 on success
  */
 seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
-                                 seL4_CapRights_t rights, seL4_ARM_VMAttributes attr,
-                                 seL4_CPtr *free_slots, seL4_Word *used,
-                                 struct addrspace *as, frame_ref_t frame, uint16_t l1index, uint16_t l2index,
-                        uint16_t l3index, uint16_t l4index);
+                         seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, seL4_CPtr *free_slots,
+                         seL4_Word *used, pt_entry *ptE);
+
+seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
+                         seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, pt_entry *ptE);
 
 /*
  * Map a device and return the virtual address it is mapped to.

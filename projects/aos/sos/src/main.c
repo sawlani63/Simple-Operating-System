@@ -115,7 +115,7 @@ static struct {
     ut_t *stack_ut;
     seL4_CPtr stack;
 
-    struct addrspace *addrspace;
+    addrspace_t *addrspace;
 
     char *cache_curr_path;
     int curr_len;
@@ -142,7 +142,7 @@ static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word sys
 static void wakeup(UNUSED uint32_t id, void *data);
 
 void handle_vm_fault(seL4_CPtr reply) {
-    struct addrspace *as = user_process.addrspace;
+    addrspace_t *as = user_process.addrspace;
     
     /* A VM Fault is an IPC. Check the seL4 Manual section 6.2.7 for message structure. */
     seL4_Word program_counter = seL4_GetMR(seL4_VMFault_IP);
@@ -168,7 +168,7 @@ void handle_vm_fault(seL4_CPtr reply) {
     if (as->page_table[l1_index] != NULL
         && as->page_table[l1_index][l2_index] != NULL
         && as->page_table[l1_index][l2_index][l3_index] != NULL
-        && as->page_table[l1_index][l2_index][l3_index][l4_index] != NULL_FRAME) {
+        && as->page_table[l1_index][l2_index][l3_index][l4_index].frame != NULL_FRAME) {
         /* There already exists a valid entry in our page table.*/
         return;
     }
@@ -205,6 +205,13 @@ void handle_vm_fault(seL4_CPtr reply) {
     }
 
     /* Allocate a new frame to be mapped by the shadow page table. */
+    pt_entry entry = as->page_table[l1_index][l2_index][l3_index][l4_index];
+    entry.frame = alloc_frame();
+
+    /* Map the frame into the relevant page tables. */
+    sos_map_frame(&cspace, frame_page(entry.frame), user_process.vspace, fault_addr,
+                  seL4_CapRights_new(0, 0, reg->perms & REGION_RD, reg->perms & REGION_WR),
+                  seL4_ARM_Default_VMAttributes, &entry);
 
     /* Respond with an empty message just to unblock the caller. */
     seL4_NBSend(reply, seL4_MessageInfo_new(0, 0, 0, 0));
