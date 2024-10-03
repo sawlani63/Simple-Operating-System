@@ -49,6 +49,7 @@
 #include <aos/vsyscall.h>
 #include "fs.h"
 #include "thread_pool.h"
+#include "addrspace.h"
 
 /*
  * To differentiate between signals from notification objects and and IPC messages,
@@ -113,6 +114,8 @@ static struct {
     ut_t *stack_ut;
     seL4_CPtr stack;
 
+    struct addrspace *addrspace;
+
     char *cache_curr_path;
     int curr_len;
     int open_len;
@@ -134,7 +137,76 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
 static void syscall_sos_usleep(bool *have_reply, struct task *curr_task);
 static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg);
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
-static void wakeup(uint32_t id, void *data);
+static void wakeup(UNUSED uint32_t id, void *data);
+
+void handle_vm_fault(seL4_CPtr reply) {
+    struct addrspace *as = user_process.addrspace;
+    
+    /* A VM Fault is an IPC. Check the seL4 Manual section 6.2.7 for message structure. */
+    seL4_Word program_counter = seL4_GetMR(seL4_VMFault_IP);
+    seL4_Word fault_addr = seL4_GetMR(seL4_VMFault_Addr);
+    seL4_Word instruction_fault = seL4_GetMR(seL4_VMFault_PrefetchFault);
+    seL4_Word fault_status_register = seL4_GetMR(seL4_VMFault_FSR);
+
+    if (as == NULL || as->page_table == NULL) {
+        /* We encountered some weird error where the address space for the user
+         * process or its page table was uninitialised. */
+        return;
+    }
+
+    /* We use our shadow page table which follows the same structure as the hardware one.
+     * Check the seL4 Manual section 7.1.1 for hardware virtual memory objects. */
+    uint8_t unused_bits = 16;
+    uint16_t l1_index = fault_addr << unused_bits >> 55; /* Top 9 bits */
+    uint16_t l2_index = fault_addr << (unused_bits += seL4_VSpaceIndexBits) >> 55; /* Next 9 bits */
+    uint16_t l3_index = fault_addr << (unused_bits += seL4_VSpaceIndexBits) >> 55; /* Next 9 bits */
+    uint16_t l4_index = fault_addr << (unused_bits += seL4_VSpaceIndexBits) >> 55; /* Next 9 bits */
+    uint16_t frame_offset = fault_addr << (unused_bits += seL4_VSpaceIndexBits) >> 52; /* Last 12 bits */
+
+    if (as->page_table[l1_index] != NULL
+        && as->page_table[l1_index][l2_index] != NULL
+        && as->page_table[l1_index][l2_index][l3_index] != NULL
+        && as->page_table[l1_index][l2_index][l3_index][l4_index] != NULL_FRAME) {
+        /* There already exists a valid entry in our page table.*/
+        return;
+    }
+
+    /* Check if the fault occurred in a valid region. */
+    mem_region_t *reg;
+    for (reg = as->regions; reg != NULL; reg = reg->next) {
+        if (fault_addr >= reg->base && fault_addr < reg->base + reg->size) {
+            /* We need this permissions check for demand paging that will later occur on the Hardware
+             * Page Table. In the case a page in the HPT gets swapped to disk yet remains on the
+             * Shadow Page Table, we need some way to know if the user is allowed to write to it. */
+            if ((fault_status_register >> 11) & 1 && reg->perms & REGION_WR == 0) {
+                return;
+            }
+            /* Fault occurred in a valid region and permissions line up so we can safely break out. */
+            break;
+        }
+    }
+
+    if (reg == NULL) {
+        /* We did not find a valid region for this memory.*/
+        return;
+    }
+
+    /* Allocate any necessary levels within the shadow page table. */
+    if (as->page_table[l1_index] == NULL) {
+        as->page_table[l1_index] = calloc(sizeof(frame_ref_t), PAGE_TABLE_ENTRIES);
+    }
+    if (as->page_table[l1_index][l2_index] == NULL) {
+        as->page_table[l1_index][l2_index] = calloc(sizeof(frame_ref_t), PAGE_TABLE_ENTRIES);
+    }
+    if (as->page_table[l1_index][l2_index][l3_index] == NULL) {
+        as->page_table[l1_index][l2_index][l3_index] = calloc(sizeof(frame_ref_t), PAGE_TABLE_ENTRIES);
+    }
+
+    /* Allocate a new frame to be mapped by the shadow page table. */
+
+    /* Respond with an empty message just to unblock the caller. */
+    seL4_NBSend(reply, seL4_MessageInfo_new(0, 0, 0, 0));
+}
 
 /**
  * Deals with a syscall and sets the message registers before returning the
@@ -154,26 +226,26 @@ void handle_syscall(void *arg)
 
     /* Process system call */
     switch (syscall_number) {
-    case SYSCALL_SOS_OPEN:
-        syscall_sos_open(&reply_msg, curr_task);
-        break;
-    case SYSCALL_SOS_CLOSE:
-        syscall_sos_close(&reply_msg, curr_task);
-        break;
-    case SYSCALL_SOS_READ:
-        syscall_sos_read(&reply_msg, curr_task);
-        break;
-    case SYSCALL_SOS_WRITE:
-        syscall_sos_write(&reply_msg, curr_task);
-        break;
-    case SYSCALL_SOS_USLEEP:
-        syscall_sos_usleep(&have_reply, curr_task);
-        break;
-    case SYSCALL_SOS_TIME_STAMP:
-        syscall_sos_time_stamp(&reply_msg);
-        break;
-    default:
-        syscall_unknown_syscall(&reply_msg, syscall_number);
+        case SYSCALL_SOS_OPEN:
+            syscall_sos_open(&reply_msg, curr_task);
+            break;
+        case SYSCALL_SOS_CLOSE:
+            syscall_sos_close(&reply_msg, curr_task);
+            break;
+        case SYSCALL_SOS_READ:
+            syscall_sos_read(&reply_msg, curr_task);
+            break;
+        case SYSCALL_SOS_WRITE:
+            syscall_sos_write(&reply_msg, curr_task);
+            break;
+        case SYSCALL_SOS_USLEEP:
+            syscall_sos_usleep(&have_reply, curr_task);
+            break;
+        case SYSCALL_SOS_TIME_STAMP:
+            syscall_sos_time_stamp(&reply_msg);
+            break;
+        default:
+            syscall_unknown_syscall(&reply_msg, syscall_number);
     }
 
     if (have_reply) {
@@ -211,12 +283,14 @@ NORETURN void syscall_loop(seL4_CPtr ep)
             memcpy(task.msg, msg, sizeof(seL4_Word) * 5);
             submit_task(task);
             
-            /* To stop the main thread from overwriting the worker thread's reply object,
-             *  we give the main thread a new one */
+            /* To stop the main thread from overwriting the worker thread's
+             * reply object, we give the main thread a new one */
             reply_ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
             if (reply_ut == NULL) {
                 ZF_LOGF("Failed to alloc reply object ut");
             }
+        } else if (label == seL4_Fault_VMFault) {
+            handle_vm_fault(reply);
         } else {
             /* some kind of fault */
             debug_print_fault(message, APP_NAME);

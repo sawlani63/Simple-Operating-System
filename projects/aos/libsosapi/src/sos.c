@@ -86,6 +86,9 @@ int sos_read(int file, char *buf, size_t nbyte)
             return -1;
         }
         buf[i] = recv;
+        if (recv == '\n') {
+            return i + 1;
+        }
     }
     return nbyte;
 }
@@ -105,7 +108,6 @@ int sos_write(int file, const char *buf, size_t nbyte)
         if (seL4_GetMR(0) == -1) {
             return -1;
         }
-        if (recv == '\n') return i + 1;
     }
     return nbyte;
 }
