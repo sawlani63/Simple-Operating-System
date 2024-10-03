@@ -146,7 +146,6 @@ void handle_vm_fault(seL4_CPtr reply) {
     
     /* A VM Fault is an IPC. Check the seL4 Manual section 6.2.7 for message structure. */
     seL4_Word fault_addr = seL4_GetMR(seL4_VMFault_Addr);
-    seL4_Word fault_status_register = seL4_GetMR(seL4_VMFault_FSR);
 
     if (as == NULL || as->page_table == NULL) {
         /* We encountered some weird error where the address space for the user
@@ -177,7 +176,7 @@ void handle_vm_fault(seL4_CPtr reply) {
             /* We need this permissions check for demand paging that will later occur on the Hardware
              * Page Table. In the case a page in the HPT gets swapped to disk yet remains on the
              * Shadow Page Table, we need some way to know if the user is allowed to write to it. */
-            if ((fault_status_register >> 11) & 1 && (reg->perms & REGION_WR) == 0) {
+            if (!debug_is_read_fault() && reg->perms & ~REGION_WR) {
                 return;
             }
             /* Fault occurred in a valid region and permissions line up so we can safely break out. */
@@ -937,9 +936,7 @@ static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_tas
     ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SYS_BRK);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
-    uintptr_t newbrk = curr_task->msg[1];
-    struct addrspace *as = user_process.addrspace;
-    mem_region_t *curr = as->regions;
+    mem_region_t *curr = user_process.addrspace->regions;
     while (curr->base != PROCESS_VMEM_START && curr != NULL) {
         curr = curr->next;
     }
@@ -947,6 +944,7 @@ static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_tas
         seL4_SetMR(0, 0);
         return;
     }
+    uintptr_t newbrk = curr_task->msg[1];
     curr->size = newbrk - PROCESS_VMEM_START; //might need to page align
     seL4_SetMR(0, newbrk);
 }
