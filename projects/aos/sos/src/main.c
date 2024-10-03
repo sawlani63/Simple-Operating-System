@@ -217,6 +217,8 @@ NORETURN void syscall_loop(seL4_CPtr ep)
             if (reply_ut == NULL) {
                 ZF_LOGF("Failed to alloc reply object ut");
             }
+        } else if (label == seL4_Fault_VMFault) {
+            /* Handle VM Fault */
         } else {
             /* some kind of fault */
             debug_print_fault(message, APP_NAME);

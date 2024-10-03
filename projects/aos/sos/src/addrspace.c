@@ -10,7 +10,7 @@ struct addrspace *as_create(void) {
 	}
 
     as->regions = NULL;
-    as->page_table = malloc(sizeof(seL4_CPtr) * PAGE_TABLE_ENTRIES);
+    as->page_table = malloc(sizeof(frame_ref_t) * PAGE_TABLE_ENTRIES);
     if (as->page_table == NULL) {
         free(as);
         return NULL;
@@ -21,7 +21,6 @@ struct addrspace *as_create(void) {
     }
 
 	return as;
-
 }
 
 int as_define_region(struct addrspace *as, seL4_Word vaddr, size_t memsize, unsigned char perms) {
