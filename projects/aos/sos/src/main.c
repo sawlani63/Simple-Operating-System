@@ -174,7 +174,6 @@ void handle_syscall(void *arg)
         break;
     default:
         syscall_unknown_syscall(&reply_msg, syscall_number);
-        have_reply = false;
     }
 
     if (have_reply) {
@@ -853,7 +852,7 @@ static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word sys
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     ZF_LOGE("System call %lu not implemented\n", syscall_number);
     /* Reply -1 to an unimplemented syscall */
-    seL4_SetMR(1, -1);
+    seL4_SetMR(0, -1);
 }
 
 static void wakeup(UNUSED uint32_t id, void* data)

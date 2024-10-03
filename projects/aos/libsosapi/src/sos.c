@@ -105,6 +105,7 @@ int sos_write(int file, const char *buf, size_t nbyte)
         if (seL4_GetMR(0) == -1) {
             return -1;
         }
+        if (recv == '\n') return i + 1;
     }
     return nbyte;
 }
