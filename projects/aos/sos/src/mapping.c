@@ -178,24 +178,15 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace
     pt_entry ***l2_pt = NULL;
     pt_entry **l3_pt = NULL;
     pt_entry *l4_pt = NULL;
-    if (l1_pt[l1_index] != NULL) {
-        l2_pt = l1_pt[l1_index];
-        if (l2_pt[l2_index] != NULL) {
-            l3_pt = l2_pt[l2_index];
-            if (l3_pt[l3_index] != NULL) {
-                l4_pt = l3_pt[l3_index];
-            }
-        }
-    }
 
     /* Allocate any necessary levels within the shadow page table. */
-    if (l2_pt == NULL) {
+    if (l1_pt[l1_index] == NULL) {
         l2_pt = l1_pt[l1_index] = calloc(sizeof(pt_entry *), PAGE_TABLE_ENTRIES);
     }
-    if (l3_pt == NULL) {
+    if (l2_pt[l2_index] == NULL) {
         l3_pt = l2_pt[l2_index] = calloc(sizeof(pt_entry *), PAGE_TABLE_ENTRIES);
     }
-    if (l4_pt == NULL) {
+    if (l3_pt[l3_index] == NULL) {
         l4_pt = l3_pt[l3_index] = calloc(sizeof(pt_entry), PAGE_TABLE_ENTRIES);
     }
 
