@@ -145,7 +145,7 @@ void handle_vm_fault(seL4_CPtr reply) {
     addrspace_t *as = user_process.addrspace;
     
     /* A VM Fault is an IPC. Check the seL4 Manual section 6.2.7 for message structure. */
-    seL4_Word fault_addr = seL4_GetMR(seL4_VMFault_Addr);
+    seL4_Word fault_addr = seL4_GetMR(seL4_VMFault_Addr) & ~(PAGE_SIZE_4K - 1);
 
     if (as == NULL || as->page_table == NULL) {
         /* We encountered some weird error where the address space for the user
@@ -180,11 +180,11 @@ void handle_vm_fault(seL4_CPtr reply) {
      * unblock the caller with an empty message. */
     if (l4_pt != NULL && l4_pt[l4_index].frame != NULL_FRAME) {
         pt_entry entry = l4_pt[l4_index];
-        if (!debug_is_read_fault() && entry.perms & ~REGION_WR) {
+        if (!debug_is_read_fault() && (entry.perms & REGION_WR) == 0) {
             return;
         }
         if (sos_map_frame_impl(&cspace, frame_page(entry.frame), user_process.vspace, fault_addr,
-                           seL4_CapRights_new(0, 0, entry.perms & REGION_RD, entry.perms & REGION_WR),
+                           seL4_CapRights_new(0, 0, entry.perms & REGION_RD, (entry.perms >> 1) & 1),
                            seL4_ARM_Default_VMAttributes, l4_pt + sizeof(pt_entry) * l4_index) != 0) {
             return;
         }
@@ -194,14 +194,20 @@ void handle_vm_fault(seL4_CPtr reply) {
     /* Check if the fault occurred in a valid region. */
     mem_region_t *reg;
     for (reg = as->regions; reg != NULL; reg = reg->next) {
-        if (fault_addr >= reg->base && fault_addr < reg->base + reg->size) {
+        seL4_Word top_of_region = reg->base + reg->size;
+        if (fault_addr >= reg->base && fault_addr < top_of_region) {
             /* We need this permissions check for demand paging that will later occur on the Hardware
              * Page Table. In the case a page in the HPT gets swapped to disk yet remains on the
              * Shadow Page Table, we need some way to know if the user is allowed to write to it. */
-            if (!debug_is_read_fault() && reg->perms & ~REGION_WR) {
+            if (!debug_is_read_fault() && (reg->perms & REGION_WR) == 0) {
                 return;
             }
             /* Fault occurred in a valid region and permissions line up so we can safely break out. */
+            break;
+        } else if (top_of_region == PROCESS_STACK_TOP && fault_addr < top_of_region && fault_addr >= as->heap_top) {
+            /* Expand the stack. */
+            reg->base = fault_addr;
+            reg->size = PROCESS_STACK_TOP - fault_addr;
             break;
         }
     }
@@ -214,23 +220,56 @@ void handle_vm_fault(seL4_CPtr reply) {
     /* Allocate any necessary levels within the shadow page table. */
     if (l2_pt == NULL) {
         l2_pt = l1_pt[l1_index] = calloc(sizeof(pt_entry *), PAGE_TABLE_ENTRIES);
+        if (l2_pt == NULL) {
+            /* Failed to allocate memory for shadow page table, just block the caller. */
+            return;
+        }
     }
     if (l3_pt == NULL) {
         l3_pt = l2_pt[l2_index] = calloc(sizeof(pt_entry *), PAGE_TABLE_ENTRIES);
+        if (l3_pt == NULL) {
+            /* Failed to allocate memory for shadow page table, just block the caller. */
+            return;
+        }
     }
     if (l4_pt == NULL) {
         l4_pt = l3_pt[l3_index] = calloc(sizeof(pt_entry), PAGE_TABLE_ENTRIES);
+        if (l4_pt == NULL) {
+            /* Failed to allocate memory for shadow page table, just block the caller. */
+            return;
+        }
+    }
+
+    /* Create slot for the frame to load the data into. */
+    seL4_CPtr loadee_frame = cspace_alloc_slot(&cspace);
+    if (loadee_frame == seL4_CapNull) {
+        ZF_LOGD("Failed to alloc slot");
+        return;
     }
 
     /* Allocate a new frame to be mapped by the shadow page table. */
     pt_entry entry = l4_pt[l4_index];
     entry.frame = alloc_frame();
+    if (entry.frame == NULL_FRAME) {
+        ZF_LOGD("Failed to alloc frame");
+        return;
+    }
     entry.perms = reg->perms;
 
+    /* Assign the appropriate rights for the frame we are about to map. */
+    seL4_CapRights_t rights = seL4_CapRights_new(0, 0, reg->perms & REGION_RD, (reg->perms >> 1) & 1);
+
+    /* Copy the frame capability into the slot we just assigned within the root cspace. */
+    seL4_Error err = cspace_copy(&cspace, loadee_frame,
+                                 frame_table_cspace(), frame_page(entry.frame), rights);
+    if (err != seL4_NoError) {
+        ZF_LOGD("Failed to untyped reypte");
+        return;
+    }
+
     /* Map the frame into the relevant page tables. */
-    if (sos_map_frame_impl(&cspace, frame_page(entry.frame), user_process.vspace, fault_addr,
-                      seL4_CapRights_new(0, 0, reg->perms & REGION_RD, reg->perms & REGION_WR),
-                      seL4_ARM_Default_VMAttributes, &entry) != 0) {
+    if (sos_map_frame_impl(&cspace, loadee_frame, user_process.vspace, fault_addr,
+                           rights, seL4_ARM_Default_VMAttributes, &entry) != 0) {
         return;
     }
 
@@ -345,6 +384,7 @@ static int stack_write(seL4_Word *mapped_stack, int index, uintptr_t val)
  * start up and initialise the C library */
 static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, elf_t *elf_file)
 {
+
     /* Create a stack frame */
     user_process.stack_ut = alloc_retype(&user_process.stack, seL4_ARM_SmallPageObject, seL4_PageBits);
     if (user_process.stack_ut == NULL) {
@@ -353,8 +393,8 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
     }
 
     /* virtual addresses in the target process' address space */
-    uintptr_t stack_top = PROCESS_STACK_TOP;
-    uintptr_t stack_bottom = PROCESS_STACK_TOP - PAGE_SIZE_4K;
+    uintptr_t stack_top;
+    uintptr_t stack_bottom = PROCESS_STACK_TOP - as_define_stack(user_process.addrspace, &stack_top);
     /* virtual addresses in the SOS's address space */
     void *local_stack_top  = (seL4_Word *) SOS_SCRATCH;
     uintptr_t local_stack_bottom = SOS_SCRATCH - PAGE_SIZE_4K;
@@ -367,8 +407,8 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
     }
 
     /* Map in the stack frame for the user app */
-    seL4_Error err = map_frame(cspace, user_process.stack, user_process.vspace, stack_bottom,
-                               seL4_AllRights, seL4_ARM_Default_VMAttributes);
+    seL4_Error err = sos_map_frame(cspace, user_process.stack, user_process.vspace, stack_bottom,
+                                   seL4_AllRights, seL4_ARM_Default_VMAttributes, user_process.addrspace);
     if (err != 0) {
         ZF_LOGE("Unable to map stack for user app");
         return 0;
@@ -514,6 +554,9 @@ bool start_first_process(char *app_name, seL4_CPtr ep)
         ZF_LOGE("Failed to create cspace");
         return false;
     }
+
+    /* Initialise the process address space */
+    user_process.addrspace = as_create();
 
     /* Create an IPC buffer */
     user_process.ipc_buffer_ut = alloc_retype(&user_process.ipc_buffer, seL4_ARM_SmallPageObject,
