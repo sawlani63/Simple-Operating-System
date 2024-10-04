@@ -92,7 +92,7 @@ seL4_Error sos_map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr v
 
 seL4_Error sos_map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
                                 seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, seL4_CPtr *free_slots,
-                                seL4_Word *used, pt_entry *ptE);
+                                seL4_Word *used, pt_entry *pte);
 
 seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
                          seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, addrspace_t *as);
