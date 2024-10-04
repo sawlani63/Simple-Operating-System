@@ -176,6 +176,21 @@ void handle_vm_fault(seL4_CPtr reply) {
         }
     }
 
+    /* If there already exists a valid entry in our page table, reload the Hardware Page Table and
+     * unblock the caller with an empty message. */
+    if (l4_pt != NULL && l4_pt[l4_index].frame != NULL_FRAME) {
+        pt_entry entry = l4_pt[l4_index];
+        if (!debug_is_read_fault() && entry.perms & ~REGION_WR) {
+            return;
+        }
+        if (sos_map_frame_impl(&cspace, frame_page(entry.frame), user_process.vspace, fault_addr,
+                           seL4_CapRights_new(0, 0, entry.perms & REGION_RD, entry.perms & REGION_WR),
+                           seL4_ARM_Default_VMAttributes, l4_pt + sizeof(pt_entry) * l4_index) != 0) {
+            return;
+        }
+        seL4_NBSend(reply, seL4_MessageInfo_new(0, 0, 0, 0));
+    }
+
     /* Check if the fault occurred in a valid region. */
     mem_region_t *reg;
     for (reg = as->regions; reg != NULL; reg = reg->next) {
@@ -196,34 +211,24 @@ void handle_vm_fault(seL4_CPtr reply) {
         return;
     }
 
-    /* If there already exists a valid entry in our page table, reload the Hardware Page Table and
-     * unblock the caller with an empty message. */
-    if (l4_pt != NULL && l4_pt[l4_index].frame != NULL_FRAME) {
-        if (sos_map_frame(&cspace, frame_page(l4_pt[l4_index].frame), user_process.vspace, fault_addr,
-                          seL4_CapRights_new(0, 0, reg->perms & REGION_RD, reg->perms & REGION_WR),
-                          seL4_ARM_Default_VMAttributes, l4_pt + sizeof(pt_entry) * l4_index) != 0) {
-            return;
-        }
-        seL4_NBSend(reply, seL4_MessageInfo_new(0, 0, 0, 0));
-    }
-
     /* Allocate any necessary levels within the shadow page table. */
     if (l2_pt == NULL) {
-        l1_pt[l1_index] = calloc(sizeof(pt_entry *), PAGE_TABLE_ENTRIES);
+        l2_pt = l1_pt[l1_index] = calloc(sizeof(pt_entry *), PAGE_TABLE_ENTRIES);
     }
     if (l3_pt == NULL) {
-        l2_pt[l2_index] = calloc(sizeof(pt_entry *), PAGE_TABLE_ENTRIES);
+        l3_pt = l2_pt[l2_index] = calloc(sizeof(pt_entry *), PAGE_TABLE_ENTRIES);
     }
     if (l4_pt == NULL) {
-        l3_pt[l3_index] = calloc(sizeof(pt_entry), PAGE_TABLE_ENTRIES);
+        l4_pt = l3_pt[l3_index] = calloc(sizeof(pt_entry), PAGE_TABLE_ENTRIES);
     }
 
     /* Allocate a new frame to be mapped by the shadow page table. */
     pt_entry entry = l4_pt[l4_index];
     entry.frame = alloc_frame();
+    entry.perms = reg->perms;
 
     /* Map the frame into the relevant page tables. */
-    if (sos_map_frame(&cspace, frame_page(entry.frame), user_process.vspace, fault_addr,
+    if (sos_map_frame_impl(&cspace, frame_page(entry.frame), user_process.vspace, fault_addr,
                       seL4_CapRights_new(0, 0, reg->perms & REGION_RD, reg->perms & REGION_WR),
                       seL4_ARM_Default_VMAttributes, &entry) != 0) {
         return;

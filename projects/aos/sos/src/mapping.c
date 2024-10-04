@@ -75,7 +75,7 @@ static seL4_Error retype_map_pud(cspace_t *cspace, seL4_CPtr vspace, seL4_Word v
 
 static seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
                                  seL4_CapRights_t rights, seL4_ARM_VMAttributes attr,
-                                 seL4_CPtr *free_slots, seL4_Word *used, pt_entry *ptE)
+                                 seL4_CPtr *free_slots, seL4_Word *used, pt_entry *pte)
 {
     /* Attempt the mapping */
     seL4_Error err = seL4_ARM_Page_Map(frame_cap, vspace, vaddr, rights, attr);
@@ -104,9 +104,9 @@ static seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPt
             return -1;
         }
 
-        if (ptE != NULL) {
-            ptE->slot = slot;
-            ptE->ut = ut;
+        if (pte != NULL) {
+            pte->slot = slot;
+            pte->ut = ut;
         }
 
         switch (failed) {
@@ -149,15 +149,58 @@ seL4_Error map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, se
 
 seL4_Error sos_map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
                                 seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, seL4_CPtr *free_slots,
-                                seL4_Word *used, pt_entry *ptE)
+                                seL4_Word *used, pt_entry *pte)
 {
-    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, ptE);
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, pte);
+}
+
+seL4_Error sos_map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
+                              seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, pt_entry *pte)
+{
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, pte);
 }
 
 seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
-                         seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, pt_entry *ptE)
+                         seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, addrspace_t *as)
 {
-    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, ptE);
+    /* We assume SOS provided us with a valid, unmapped vaddr and isn't confusing any permissions. */
+
+    /* We use our shadow page table which follows the same structure as the hardware one.
+     * Check the seL4 Manual section 7.1.1 for hardware virtual memory objects. Importantly
+     * the top-most 16 bits of the virtual address are unused bits, so we ignore them. */
+    uint16_t l1_index = (vaddr >> 39) & 0x1FF; /* Top 9 bits */
+    uint16_t l2_index = (vaddr >> 30) & 0x1FF; /* Next 9 bits */
+    uint16_t l3_index = (vaddr >> 21) & 0x1FF; /* Next 9 bits */
+    uint16_t l4_index = (vaddr >> 12) & 0x1FF; /* Next 9 bits */
+
+    /* Cache the related page table entries so we don't have to perform lots of dereferencing. */
+    pt_entry ****l1_pt = as->page_table;
+    pt_entry ***l2_pt = NULL;
+    pt_entry **l3_pt = NULL;
+    pt_entry *l4_pt = NULL;
+    if (l1_pt[l1_index] != NULL) {
+        l2_pt = l1_pt[l1_index];
+        if (l2_pt[l2_index] != NULL) {
+            l3_pt = l2_pt[l2_index];
+            if (l3_pt[l3_index] != NULL) {
+                l4_pt = l3_pt[l3_index];
+            }
+        }
+    }
+
+    /* Allocate any necessary levels within the shadow page table. */
+    if (l2_pt == NULL) {
+        l2_pt = l1_pt[l1_index] = calloc(sizeof(pt_entry *), PAGE_TABLE_ENTRIES);
+    }
+    if (l3_pt == NULL) {
+        l3_pt = l2_pt[l2_index] = calloc(sizeof(pt_entry *), PAGE_TABLE_ENTRIES);
+    }
+    if (l4_pt == NULL) {
+        l4_pt = l3_pt[l3_index] = calloc(sizeof(pt_entry), PAGE_TABLE_ENTRIES);
+    }
+
+    return sos_map_frame_impl(cspace, frame_cap, vspace, vaddr, rights,
+                              attr, l4_pt + sizeof(pt_entry) * l4_index);
 }
 
 
