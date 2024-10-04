@@ -176,17 +176,6 @@ void handle_vm_fault(seL4_CPtr reply) {
         }
     }
 
-    /* If there already exists a valid entry in our page table, reload the Hardware Page Table and
-     * unblock the caller with an empty message. */
-    if (l4_pt != NULL && l4_pt[l4_index].frame != NULL_FRAME) {
-        if (sos_map_frame(&cspace, frame_page(l4_pt[l4_index].frame), user_process.vspace, fault_addr,
-                          seL4_CapRights_new(0, 0, reg->perms & REGION_RD, reg->perms & REGION_WR),
-                          seL4_ARM_Default_VMAttributes, &entry) != 0) {
-            return;
-        }
-        seL4_NBSend(reply, seL4_MessageInfo_new(0, 0, 0, 0));
-    }
-
     /* Check if the fault occurred in a valid region. */
     mem_region_t *reg;
     for (reg = as->regions; reg != NULL; reg = reg->next) {
@@ -205,6 +194,17 @@ void handle_vm_fault(seL4_CPtr reply) {
     if (reg == NULL) {
         /* We did not find a valid region for this memory.*/
         return;
+    }
+
+    /* If there already exists a valid entry in our page table, reload the Hardware Page Table and
+     * unblock the caller with an empty message. */
+    if (l4_pt != NULL && l4_pt[l4_index].frame != NULL_FRAME) {
+        if (sos_map_frame(&cspace, frame_page(l4_pt[l4_index].frame), user_process.vspace, fault_addr,
+                          seL4_CapRights_new(0, 0, reg->perms & REGION_RD, reg->perms & REGION_WR),
+                          seL4_ARM_Default_VMAttributes, &l4_pt[l4_index]) != 0) {
+            return;
+        }
+        seL4_NBSend(reply, seL4_MessageInfo_new(0, 0, 0, 0));
     }
 
     /* Allocate any necessary levels within the shadow page table. */
