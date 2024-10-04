@@ -647,6 +647,9 @@ bool start_first_process(char *app_name, seL4_CPtr ep)
     /* set up the stack */
     seL4_Word sp = init_process_stack(&cspace, seL4_CapInitThreadVSpace, &elf_file);
 
+    /* set up the heap */
+    as_define_heap(user_process.addrspace, &user_process.addrspace->heap_top);
+
     /* load the elf image from the cpio file */
     err = elf_load(&cspace, user_process.vspace, &elf_file);
     if (err) {
@@ -961,7 +964,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 {
-    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_WRITE);
+    // ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_WRITE);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */
@@ -999,20 +1002,21 @@ static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
 
 static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 {
-    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SYS_BRK);
+    // ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SYS_BRK);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
     mem_region_t *curr = user_process.addrspace->regions;
-    while (curr->base != PROCESS_VMEM_START && curr != NULL) {
+    while (curr != NULL && curr->base != PROCESS_HEAP_START) {
         curr = curr->next;
     }
-    if (curr == NULL) {
-        seL4_SetMR(0, 0);
-        return;
-    }
+
     uintptr_t newbrk = curr_task->msg[1];
-    curr->size = newbrk - PROCESS_VMEM_START; //might need to page align
-    seL4_SetMR(0, newbrk);
+    if (curr == NULL || !newbrk) {
+        seL4_SetMR(0, PROCESS_HEAP_START);
+    } else {
+        curr->size = newbrk - PROCESS_HEAP_START;
+        seL4_SetMR(0, user_process.addrspace->heap_top = newbrk);
+    }
 }
 
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number)

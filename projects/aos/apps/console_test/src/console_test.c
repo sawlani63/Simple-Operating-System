@@ -90,9 +90,5 @@ pt_test( void )
 
 int main(void)
 {
-    do {
-        fputs("task:\tHello world, I'm\tconsole_test!\n", stdout);
-        pt_test();
-        // sleep(1);    // Implement this as a syscall in the future
-    } while(1);
+    pt_test();
 }

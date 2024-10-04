@@ -45,3 +45,8 @@ int as_define_stack(addrspace_t *as, seL4_Word *initstackptr) {
     *initstackptr = PROCESS_STACK_TOP;
     return as_define_region(as, PROCESS_STACK_TOP - PAGE_SIZE, PAGE_SIZE, REGION_RD | REGION_WR);
 }
+
+int as_define_heap(addrspace_t *as, seL4_Word *initheapptr) {
+    *initheapptr = PROCESS_HEAP_START;
+    return as_define_region(as, PROCESS_HEAP_START, 0, REGION_RD | REGION_WR);
+}
