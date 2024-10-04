@@ -201,7 +201,7 @@ void handle_vm_fault(seL4_CPtr reply) {
     if (l4_pt != NULL && l4_pt[l4_index].frame != NULL_FRAME) {
         if (sos_map_frame(&cspace, frame_page(l4_pt[l4_index].frame), user_process.vspace, fault_addr,
                           seL4_CapRights_new(0, 0, reg->perms & REGION_RD, reg->perms & REGION_WR),
-                          seL4_ARM_Default_VMAttributes, &l4_pt[l4_index]) != 0) {
+                          seL4_ARM_Default_VMAttributes, l4_pt + sizeof(pt_entry) * l4_index) != 0) {
             return;
         }
         seL4_NBSend(reply, seL4_MessageInfo_new(0, 0, 0, 0));
@@ -209,13 +209,13 @@ void handle_vm_fault(seL4_CPtr reply) {
 
     /* Allocate any necessary levels within the shadow page table. */
     if (l2_pt == NULL) {
-        l1_pt[l1_index] = calloc(sizeof(frame_ref_t), PAGE_TABLE_ENTRIES);
+        l1_pt[l1_index] = calloc(sizeof(pt_entry), PAGE_TABLE_ENTRIES);
     }
     if (l3_pt == NULL) {
-        l2_pt[l2_index] = calloc(sizeof(frame_ref_t), PAGE_TABLE_ENTRIES);
+        l2_pt[l2_index] = calloc(sizeof(pt_entry), PAGE_TABLE_ENTRIES);
     }
     if (l4_pt == NULL) {
-        l3_pt[l3_index] = calloc(sizeof(frame_ref_t), PAGE_TABLE_ENTRIES);
+        l3_pt[l3_index] = calloc(sizeof(pt_entry), PAGE_TABLE_ENTRIES);
     }
 
     /* Allocate a new frame to be mapped by the shadow page table. */
