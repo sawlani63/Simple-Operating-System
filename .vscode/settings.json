@@ -50,6 +50,7 @@
         "addrspace.h": "c",
         "syscall.h": "c",
         "frame_table.h": "c",
-        "bootstrap.h": "c"
+        "bootstrap.h": "c",
+        "elfload.h": "c"
     }
 }
