@@ -154,19 +154,37 @@ void handle_vm_fault(seL4_CPtr reply) {
     }
 
     /* We use our shadow page table which follows the same structure as the hardware one.
-     * Check the seL4 Manual section 7.1.1 for hardware virtual memory objects. */
-    uint8_t unused_bits = 16;
-    uint16_t l1_index = fault_addr << unused_bits >> 55; /* Top 9 bits */
-    uint16_t l2_index = fault_addr << (unused_bits += seL4_VSpaceIndexBits) >> 55; /* Next 9 bits */
-    uint16_t l3_index = fault_addr << (unused_bits += seL4_VSpaceIndexBits) >> 55; /* Next 9 bits */
-    uint16_t l4_index = fault_addr << (unused_bits += seL4_VSpaceIndexBits) >> 55; /* Next 9 bits */
+     * Check the seL4 Manual section 7.1.1 for hardware virtual memory objects. Importantly
+     * the top-most 16 bits of the virtual address are unused bits, so we ignore them. */
+    uint16_t l1_index = (fault_addr >> 39) & 0x1FF; /* Top 9 bits */
+    uint16_t l2_index = (fault_addr >> 30) & 0x1FF; /* Next 9 bits */
+    uint16_t l3_index = (fault_addr >> 21) & 0x1FF; /* Next 9 bits */
+    uint16_t l4_index = (fault_addr >> 12) & 0x1FF; /* Next 9 bits */
 
-    if (as->page_table[l1_index] != NULL
-        && as->page_table[l1_index][l2_index] != NULL
-        && as->page_table[l1_index][l2_index][l3_index] != NULL
-        && as->page_table[l1_index][l2_index][l3_index][l4_index].frame != NULL_FRAME) {
-        /* There already exists a valid entry in our page table.*/
-        return;
+    /* Cache the related page table entries so we don't have to perform lots of dereferencing. */
+    pt_entry ****l1_pt = as->page_table;
+    pt_entry ***l2_pt = NULL;
+    pt_entry **l3_pt = NULL;
+    pt_entry *l4_pt = NULL;
+    if (l1_pt[l1_index] != NULL) {
+        l2_pt = l1_pt[l1_index];
+        if (l2_pt[l2_index] != NULL) {
+            l3_pt = l2_pt[l2_index];
+            if (l3_pt[l3_index] != NULL) {
+                l4_pt = l3_pt[l3_index];
+            }
+        }
+    }
+
+    /* If there already exists a valid entry in our page table, reload the Hardware Page Table and
+     * unblock the caller with an empty message. */
+    if (l4_pt != NULL && l4_pt[l4_index].frame != NULL_FRAME) {
+        if (sos_map_frame(&cspace, frame_page(l4_pt[l4_index].frame), user_process.vspace, fault_addr,
+                          seL4_CapRights_new(0, 0, reg->perms & REGION_RD, reg->perms & REGION_WR),
+                          seL4_ARM_Default_VMAttributes, &entry) != 0) {
+            return;
+        }
+        seL4_NBSend(reply, seL4_MessageInfo_new(0, 0, 0, 0));
     }
 
     /* Check if the fault occurred in a valid region. */
@@ -190,18 +208,18 @@ void handle_vm_fault(seL4_CPtr reply) {
     }
 
     /* Allocate any necessary levels within the shadow page table. */
-    if (as->page_table[l1_index] == NULL) {
-        as->page_table[l1_index] = calloc(sizeof(frame_ref_t), PAGE_TABLE_ENTRIES);
+    if (l2_pt == NULL) {
+        l1_pt[l1_index] = calloc(sizeof(frame_ref_t), PAGE_TABLE_ENTRIES);
     }
-    if (as->page_table[l1_index][l2_index] == NULL) {
-        as->page_table[l1_index][l2_index] = calloc(sizeof(frame_ref_t), PAGE_TABLE_ENTRIES);
+    if (l3_pt == NULL) {
+        l2_pt[l2_index] = calloc(sizeof(frame_ref_t), PAGE_TABLE_ENTRIES);
     }
-    if (as->page_table[l1_index][l2_index][l3_index] == NULL) {
-        as->page_table[l1_index][l2_index][l3_index] = calloc(sizeof(frame_ref_t), PAGE_TABLE_ENTRIES);
+    if (l4_pt == NULL) {
+        l3_pt[l3_index] = calloc(sizeof(frame_ref_t), PAGE_TABLE_ENTRIES);
     }
 
     /* Allocate a new frame to be mapped by the shadow page table. */
-    pt_entry entry = as->page_table[l1_index][l2_index][l3_index][l4_index];
+    pt_entry entry = l4_pt[l4_index];
     entry.frame = alloc_frame();
 
     /* Map the frame into the relevant page tables. */
