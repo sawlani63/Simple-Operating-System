@@ -51,5 +51,6 @@ typedef struct addrspace {
 addrspace_t *as_create();
 int as_define_region(addrspace_t *as, seL4_Word vaddr, size_t memsize, unsigned char perms);
 int as_define_stack(addrspace_t *as, seL4_Word *initstackptr);
+int as_define_heap(addrspace_t *as, seL4_Word *initheapptr);
 
 #endif
