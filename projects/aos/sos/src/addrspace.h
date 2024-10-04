@@ -12,6 +12,7 @@
 
 typedef struct pt_entry {
     frame_ref_t frame;
+    unsigned char perms;
     seL4_CPtr slot;
     ut_t *ut;
 } pt_entry;
