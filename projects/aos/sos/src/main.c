@@ -209,10 +209,10 @@ void handle_vm_fault(seL4_CPtr reply) {
 
     /* Allocate any necessary levels within the shadow page table. */
     if (l2_pt == NULL) {
-        l1_pt[l1_index] = calloc(sizeof(pt_entry), PAGE_TABLE_ENTRIES);
+        l1_pt[l1_index] = calloc(sizeof(pt_entry *), PAGE_TABLE_ENTRIES);
     }
     if (l3_pt == NULL) {
-        l2_pt[l2_index] = calloc(sizeof(pt_entry), PAGE_TABLE_ENTRIES);
+        l2_pt[l2_index] = calloc(sizeof(pt_entry *), PAGE_TABLE_ENTRIES);
     }
     if (l4_pt == NULL) {
         l3_pt[l3_index] = calloc(sizeof(pt_entry), PAGE_TABLE_ENTRIES);

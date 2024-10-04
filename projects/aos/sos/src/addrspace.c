@@ -12,7 +12,7 @@ struct addrspace *as_create(void) {
 	}
 
     as->regions = NULL;
-    as->page_table = calloc(sizeof(frame_ref_t), PAGE_TABLE_ENTRIES);
+    as->page_table = calloc(sizeof(pt_entry *), PAGE_TABLE_ENTRIES);
     if (as->page_table == NULL) {
         free(as);
         return NULL;
