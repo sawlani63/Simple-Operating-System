@@ -27,6 +27,7 @@ typedef struct _region {
 typedef struct addrspace {
     pt_entry ****page_table;
     mem_region_t *regions;
+    seL4_Word heap_top;
 } addrspace_t;
 
 /*
@@ -47,8 +48,8 @@ typedef struct addrspace {
  * functions are found in dumbvm.c.
  */
 
-struct addrspace *as_create(void);
-int as_define_region(struct addrspace *as, seL4_Word vaddr, size_t memsize, unsigned char perms);
-int as_define_stack(struct addrspace *as, seL4_Word *initstackptr);
+addrspace_t *as_create();
+int as_define_region(addrspace_t *as, seL4_Word vaddr, size_t memsize, unsigned char perms);
+int as_define_stack(addrspace_t *as, seL4_Word *initstackptr);
 
 #endif

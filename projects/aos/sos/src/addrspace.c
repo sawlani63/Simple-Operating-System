@@ -3,15 +3,14 @@
 #include "addrspace.h"
 #include "vmem_layout.h"
 
-#define PAGE_SIZE 0x1000
-
-struct addrspace *as_create(void) {
-    struct addrspace *as = malloc(sizeof(struct addrspace));
+addrspace_t *as_create() {
+    addrspace_t *as = malloc(sizeof(addrspace_t));
     if (as == NULL) {
 		return NULL;
 	}
 
     as->regions = NULL;
+    as->heap_top = PROCESS_HEAP_START;
     as->page_table = calloc(sizeof(pt_entry *), PAGE_TABLE_ENTRIES);
     if (as->page_table == NULL) {
         free(as);
@@ -21,7 +20,7 @@ struct addrspace *as_create(void) {
 	return as;
 }
 
-int as_define_region(struct addrspace *as, seL4_Word vaddr, size_t memsize, unsigned char perms) {
+int as_define_region(addrspace_t *as, seL4_Word vaddr, size_t memsize, unsigned char perms) {
     mem_region_t *region = malloc(sizeof(mem_region_t));
     if (region == NULL) {
         return -1;
@@ -34,15 +33,15 @@ int as_define_region(struct addrspace *as, seL4_Word vaddr, size_t memsize, unsi
     as->regions = region;
     as->regions->next = temp;
 
-	return 0;
+	return memsize;
 }
 
-int as_define_ipc_buff(struct addrspace *as, seL4_Word *initipcbuff) {
+int as_define_ipc_buff(addrspace_t *as, seL4_Word *initipcbuff) {
     *initipcbuff = PROCESS_IPC_BUFFER;
     return as_define_region(as, PROCESS_IPC_BUFFER, PAGE_SIZE, REGION_RD | REGION_WR);
 }
 
-int as_define_stack(struct addrspace *as, seL4_Word *initstackptr) {
+int as_define_stack(addrspace_t *as, seL4_Word *initstackptr) {
     *initstackptr = PROCESS_STACK_TOP;
     return as_define_region(as, PROCESS_STACK_TOP - PAGE_SIZE, PAGE_SIZE, REGION_RD | REGION_WR);
 }
