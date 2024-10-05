@@ -155,6 +155,9 @@ int elf_load(cspace_t *cspace, seL4_CPtr loadee_vspace, elf_t *elf_file, addrspa
         uintptr_t vaddr = elf_getProgramHeaderVaddr(elf_file, i);
         seL4_Word flags = elf_getProgramHeaderFlags(elf_file, i);
 
+        /* Load the segment into the address space */
+        as_define_region(as, vaddr, segment_size, flags & 0x3);
+
         /* Copy it across into the vspace. */
         ZF_LOGD(" * Loading segment %p-->%p\n", (void *) vaddr, (void *)(vaddr + segment_size));
         int err = load_segment_into_vspace(cspace, loadee_vspace, source_addr, segment_size, file_size, vaddr,

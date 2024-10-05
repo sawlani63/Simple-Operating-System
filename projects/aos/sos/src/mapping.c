@@ -73,9 +73,9 @@ static seL4_Error retype_map_pud(cspace_t *cspace, seL4_CPtr vspace, seL4_Word v
     return seL4_ARM_PageUpperDirectory_Map(empty, vspace, vaddr, seL4_ARM_Default_VMAttributes);
 }
 
-static seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
-                                 seL4_CapRights_t rights, seL4_ARM_VMAttributes attr,
-                                 seL4_CPtr *free_slots, seL4_Word *used, page_upper_directory *page_table)
+seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
+                          seL4_CapRights_t rights, seL4_ARM_VMAttributes attr,
+                          seL4_CPtr *free_slots, seL4_Word *used, page_upper_directory *page_table)
 {
     /* We use our shadow page table which follows the same structure as the hardware one.
     * Check the seL4 Manual section 7.1.1 for hardware virtual memory objects. Importantly

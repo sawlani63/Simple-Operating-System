@@ -57,6 +57,7 @@
         "sel4_zf_logif.h": "c",
         "networkconsole.h": "c",
         "simple_types.h": "c",
-        "macros.h": "c"
+        "macros.h": "c",
+        "mapping.h": "c"
     }
 }

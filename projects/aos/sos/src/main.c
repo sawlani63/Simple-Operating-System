@@ -183,10 +183,10 @@ void handle_vm_fault(seL4_CPtr reply) {
             ZF_LOGE("Trying to write to a read only page");
             return;
         }
-        if (sos_map_frame_impl(&cspace, user_process.vspace, fault_addr,
-                               seL4_CapRights_new(0, 0, entry.perms & REGION_RD, (entry.perms >> 1) & 1),
-                               entry.perms & REGION_EX ? seL4_ARM_Default_VMAttributes : seL4_ARM_ExecuteNever,
-                               entry.frame, l1_pt) != 0) {
+        if (map_frame_impl(&cspace, entry.frame, user_process.vspace, fault_addr,
+                           seL4_CapRights_new(0, 0, entry.perms & REGION_RD, (entry.perms >> 1) & 1),
+                           entry.perms & REGION_EX ? seL4_ARM_Default_VMAttributes : seL4_ARM_ExecuteNever,
+                           NULL, NULL, NULL) != 0) {
             ZF_LOGE("Could not map the frame into the two page tables");
             return;
         }
