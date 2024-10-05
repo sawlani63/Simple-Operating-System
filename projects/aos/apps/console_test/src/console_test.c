@@ -36,9 +36,7 @@
 #define TEST_ADDRESS 0x8000000000
 
 /* called from pt_test */
-static void
-do_pt_test(char **buf)
-{
+static void do_pt_test(char **buf) {
     int i;
 
     /* set */
@@ -56,9 +54,7 @@ do_pt_test(char **buf)
     }
 }
 
-static void
-pt_test( void )
-{
+static void pt_test(void) {
     /* need a decent sized stack */
     char buf1[NBLOCKS][NPAGES_PER_BLOCK * PAGE_SIZE_4K];
     char *buf1_ptrs[NBLOCKS];
@@ -87,6 +83,18 @@ pt_test( void )
         free(buf2[b]);
     }
     printf("Passed heap test\n");
+}
+
+static void recursive_stack_test(int counter) {
+    char arr[NBLOCKS][NPAGES_PER_BLOCK * PAGE_SIZE_4K];
+    if (counter == 10,000) {
+        return;
+    }
+    recursive_stack_test(counter + 1);
+}
+
+static void stack_overflow(int counter) {
+    stack_overflow(counter + 1);
 }
 
 #define SMALL_BUF_SZ 2
@@ -141,4 +149,7 @@ int main(void)
 
     test_buffers(fd);
     pt_test();
+    recursive_stack_test(0);
+    printf("Passed recursive stack test\n");
+    // stack_overflow(0);
 }

@@ -148,8 +148,7 @@ void handle_vm_fault(seL4_CPtr reply) {
     seL4_Word fault_addr = seL4_GetMR(seL4_VMFault_Addr) & ~(PAGE_SIZE_4K - 1);
 
     if (as == NULL || as->page_table == NULL) {
-        /* We encountered some weird error where the address space for the user
-         * process or its page table was uninitialised. */
+        ZF_LOGE("Encountered a weird error where the address space or level 1 page table is null");
         return;
     }
 
@@ -181,11 +180,14 @@ void handle_vm_fault(seL4_CPtr reply) {
     if (l4_pt != NULL && l4_pt[l4_index].frame != NULL_FRAME) {
         pt_entry entry = l4_pt[l4_index];
         if (!debug_is_read_fault() && (entry.perms & REGION_WR) == 0) {
+            ZF_LOGE("Trying to write to a read only page");
             return;
         }
         if (sos_map_frame_impl(&cspace, user_process.vspace, fault_addr,
                                seL4_CapRights_new(0, 0, entry.perms & REGION_RD, (entry.perms >> 1) & 1),
-                               seL4_ARM_Default_VMAttributes, entry.frame, l4_pt + l4_index) != 0) {
+                               entry.perms & REGION_EX ? seL4_ARM_Default_VMAttributes : seL4_ARM_ExecuteNever,
+                               entry.frame, l4_pt + l4_index) != 0) {
+            ZF_LOGE("Could not map the frame into the two page tables");
             return;
         }
         seL4_NBSend(reply, seL4_MessageInfo_new(0, 0, 0, 0));
@@ -200,6 +202,7 @@ void handle_vm_fault(seL4_CPtr reply) {
              * Page Table. In the case a page in the HPT gets swapped to disk yet remains on the
              * Shadow Page Table, we need some way to know if the user is allowed to write to it. */
             if (!debug_is_read_fault() && (reg->perms & REGION_WR) == 0) {
+                ZF_LOGE("Trying to write to a read only page");
                 return;
             }
             /* Fault occurred in a valid region and permissions line up so we can safely break out. */
@@ -213,7 +216,7 @@ void handle_vm_fault(seL4_CPtr reply) {
     }
 
     if (reg == NULL) {
-        /* We did not find a valid region for this memory.*/
+        ZF_LOGE("Could not find a valid region for  this address");
         return;
     }
 
@@ -221,21 +224,21 @@ void handle_vm_fault(seL4_CPtr reply) {
     if (l2_pt == NULL) {
         l2_pt = l1_pt[l1_index] = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry *));
         if (l2_pt == NULL) {
-            /* Failed to allocate memory for shadow page table, just block the caller. */
+            ZF_LOGE("Failed to allocate level 2 page table");
             return;
         }
     }
     if (l3_pt == NULL) {
         l3_pt = l2_pt[l2_index] = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry *));
         if (l3_pt == NULL) {
-            /* Failed to allocate memory for shadow page table, just block the caller. */
+            ZF_LOGE("Failed to allocate level 3 page table");
             return;
         }
     }
     if (l4_pt == NULL) {
         l4_pt = l3_pt[l3_index] = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry));
         if (l4_pt == NULL) {
-            /* Failed to allocate memory for shadow page table, just block the caller. */
+            ZF_LOGE("Failed to allocate level 4 page table");
             return;
         }
     }
@@ -246,14 +249,16 @@ void handle_vm_fault(seL4_CPtr reply) {
     /* Allocate a new frame to be mapped by the shadow page table. */
     frame_ref_t frame_ref = l4_pt[l4_index].frame = alloc_frame();
     if (frame_ref == NULL_FRAME) {
-        ZF_LOGD("Failed to alloc frame");
+        ZF_LOGE("Failed to allocate a frame");
         return;
     }
     l4_pt[l4_index].perms = reg->perms;
 
     /* Map the frame into the relevant page tables. */
     if (sos_map_frame_impl(&cspace, user_process.vspace, fault_addr, rights,
-                           seL4_ARM_Default_VMAttributes, frame_ref, l4_pt + l4_index) != 0) {
+                           reg->perms & REGION_EX ? seL4_ARM_Default_VMAttributes : seL4_ARM_ExecuteNever,
+                           frame_ref, l4_pt + l4_index) != 0) {
+        ZF_LOGE("Could not map the frame into the two page tables");
         return;
     }
 
