@@ -52,6 +52,8 @@
         "frame_table.h": "c",
         "bootstrap.h": "c",
         "elfload.h": "c",
-        "inttypes.h": "c"
+        "inttypes.h": "c",
+        "console.h": "c",
+        "sel4_zf_logif.h": "c"
     }
 }

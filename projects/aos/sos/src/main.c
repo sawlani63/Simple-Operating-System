@@ -125,8 +125,7 @@ static struct {
 
 struct network_console *console;
 
-seL4_CPtr console_sem_cptr;
-sync_bin_sem_t *console_sem = NULL;
+bool console_open_for_read = false;
 
 seL4_CPtr sem_cptr;
 sync_bin_sem_t *syscall_sem = NULL;
@@ -144,7 +143,8 @@ static void wakeup(UNUSED uint32_t id, void *data);
 void handle_vm_fault(seL4_CPtr reply) {
     addrspace_t *as = user_process.addrspace;
     
-    /* A VM Fault is an IPC. Check the seL4 Manual section 6.2.7 for message structure. */
+    /* A VM Fault is an IPC. Check the seL4 Manual section 6.2.7 for message structure. We also
+     * page align the vaddr since the Hardware Page Table expects addresses to be page aligned. */
     seL4_Word fault_addr = seL4_GetMR(seL4_VMFault_Addr) & ~(PAGE_SIZE_4K - 1);
 
     if (as == NULL || as->page_table == NULL) {
@@ -815,11 +815,6 @@ NORETURN void *main_continued(UNUSED void *arg)
     ZF_LOGF_IF(!sem_ut, "No memory for notification");
     sync_bin_sem_init(syscall_sem, sem_cptr, 1);
 
-    console_sem = malloc(sizeof(sync_bin_sem_t));
-    sem_ut = alloc_retype(&console_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
-    ZF_LOGF_IF(!sem_ut, "No memory for notification");
-    sync_bin_sem_init(console_sem, console_sem_cptr, 1);
-
     /* Creating thread pool */
     initialise_thread_pool(handle_syscall);
 
@@ -900,10 +895,12 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
     int fd;
     if (!strcmp(user_process.cache_curr_path, "console")) {
-        if (user_process.cache_curr_mode != O_WRONLY) {
-            sync_bin_sem_wait(console_sem);
+        if (user_process.cache_curr_mode != O_WRONLY && console_open_for_read) {
+            seL4_SetMR(0, -1);
+            return;
         }
         sync_bin_sem_wait(syscall_sem);
+        console_open_for_read = true;
         fd = push_new_file(user_process.cache_curr_mode, network_console_byte_send,
                            deque, user_process.cache_curr_path);
         sync_bin_sem_post(syscall_sem);
@@ -918,33 +915,18 @@ static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_t
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
     sync_bin_sem_wait(syscall_sem);
-    struct file *curr = find_file(curr_task->msg[1]);
-    if (curr == NULL) {
-        sync_bin_sem_post(syscall_sem);
-        ZF_LOGE("Cannot find file to close");
+    struct file *found = pop_file(curr_task->msg[1]);
+    sync_bin_sem_post(syscall_sem);
+    if (found == NULL) {
         seL4_SetMR(0, -1);
         return;
-    }
-
-    if (curr == file_stack) {
-        file_stack = file_stack->next;
-        if (!strcmp(curr->path, "console") && curr->mode != O_WRONLY) {
-            sync_bin_sem_post(console_sem);
-        }
-        free(curr->path);
-        free(curr);
+    } else if (!strcmp(found->path, "console") && found->mode != O_WRONLY) {
+        sync_bin_sem_wait(syscall_sem);
+        console_open_for_read = false;
         sync_bin_sem_post(syscall_sem);
-        seL4_SetMR(0, 0);
-        return;
     }
-
-    struct file *prev = find_prev_file(curr_task->msg[1]);
-    prev->next = curr->next;
-    free(curr);
-    sync_bin_sem_post(syscall_sem);
-    if (!strcmp(curr->path, "console") && curr->mode != O_WRONLY) {
-        sync_bin_sem_post(console_sem);
-    }
+    free(found->path);
+    free(found);
     seL4_SetMR(0, 0);
 }
 
