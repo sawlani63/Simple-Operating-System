@@ -374,14 +374,7 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
         ZF_LOGD("Failed to alloc frame");
         return -1;
     }
-
-    /* copy it */
-    seL4_Error err = cspace_copy(cspace, user_process.stack, frame_table_cspace(),
-                                 frame_page(user_process.stack_frame), seL4_AllRights);
-    if (err != seL4_NoError) {
-        ZF_LOGD("Failed to untyped reypte");
-        return -1;
-    }
+    user_process.stack = frame_page(user_process.stack_frame);
 
     /* virtual addresses in the target process' address space */
     uintptr_t stack_top;
@@ -398,7 +391,7 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
     }
 
     /* Map in the stack frame for the user app */
-    err = sos_map_frame(cspace, user_process.vspace, stack_bottom, seL4_AllRights,
+    seL4_Error err = sos_map_frame(cspace, user_process.vspace, stack_bottom, seL4_AllRights,
                         seL4_ARM_ExecuteNever, user_process.stack_frame, user_process.addrspace);
     if (err != 0) {
         ZF_LOGE("Unable to map stack for user app");
@@ -551,7 +544,7 @@ bool start_first_process(char *app_name, seL4_CPtr ep)
 
     /* Create an IPC buffer */
     user_process.ipc_buffer_frame = alloc_frame();
-    if (user_process.ipc_buffer_frame == NULL) {
+    if (user_process.ipc_buffer_frame == NULL_FRAME) {
         ZF_LOGE("Failed to alloc ipc buffer ut");
         return false;
     }
@@ -587,20 +580,6 @@ bool start_first_process(char *app_name, seL4_CPtr ep)
                              user_process.ipc_buffer);
     if (err != seL4_NoError) {
         ZF_LOGE("Unable to configure new TCB");
-        return false;
-    }
-
-    /* create slot for the frame to load the data into */
-    seL4_CPtr loadee_frame = cspace_alloc_slot(&cspace);
-    if (loadee_frame == seL4_CapNull) {
-        ZF_LOGD("Failed to alloc slot");
-        return false;
-    }
-
-    /* copy the frame cptr into the loadee's address space */
-    err = cspace_copy(&cspace, loadee_frame, &cspace, user_process.ipc_buffer, seL4_AllRights);
-    if (err != seL4_NoError) {
-        ZF_LOGD("Failed to untyped reypte");
         return false;
     }
 
