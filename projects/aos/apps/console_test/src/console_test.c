@@ -24,6 +24,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <fcntl.h>
 
 #include <sel4/sel4.h>
 #include <sos.h>
@@ -127,7 +128,7 @@ int test_buffers(int console_fd) {
 
 int main(void)
 {
-    int fd = sos_open("console", 2);
+    int fd = sos_open("console", O_RDWR);
     test_buffers(fd);
     pt_test();
 }
