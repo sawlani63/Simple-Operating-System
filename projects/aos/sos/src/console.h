@@ -37,11 +37,9 @@ char deque() {
     return ret;
 }
 
-void try_init_console_sem() {
-    if (queue_sem == NULL) {
-        queue_sem = malloc(sizeof(sync_bin_sem_t));
-        ut_t *sem_ut = alloc_retype(&sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
-        ZF_LOGF_IF(!sem_ut, "No memory for notification");
-        sync_bin_sem_init(queue_sem, sem_cptr, 0);
-    }
+void init_console_sem() {
+    queue_sem = malloc(sizeof(sync_bin_sem_t));
+    ut_t *sem_ut = alloc_retype(&sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!sem_ut, "No memory for notification");
+    sync_bin_sem_init(queue_sem, sem_cptr, 0);
 }

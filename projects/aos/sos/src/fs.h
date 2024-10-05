@@ -31,7 +31,6 @@ static void push_file(struct file *file) {
 }
 
 int push_new_file(fmode_t mode, int (*write_handler)(char c), char (*read_handler)(void), char* path) {
-    try_init_console_sem();
     struct file *file = create_file(mode, write_handler, read_handler, path);
     push_file(file);
     return file->fd;

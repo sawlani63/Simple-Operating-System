@@ -161,16 +161,16 @@ void handle_vm_fault(seL4_CPtr reply) {
     uint16_t l4_index = (fault_addr >> 12) & 0x1FF; /* Next 9 bits */
 
     /* Cache the related page table entries so we don't have to perform lots of dereferencing. */
-    pt_entry ****l1_pt = as->page_table;
-    pt_entry ***l2_pt = NULL;
-    pt_entry **l3_pt = NULL;
+    page_upper_directory *l1_pt = as->page_table;
+    page_directory *l2_pt = NULL;
+    page_table *l3_pt = NULL;
     pt_entry *l4_pt = NULL;
-    if (l1_pt[l1_index] != NULL) {
-        l2_pt = l1_pt[l1_index];
-        if (l2_pt[l2_index] != NULL) {
-            l3_pt = l2_pt[l2_index];
-            if (l3_pt[l3_index] != NULL) {
-                l4_pt = l3_pt[l3_index];
+    if (l1_pt[l1_index].l2 != NULL) {
+        l2_pt = l1_pt[l1_index].l2;
+        if (l2_pt[l2_index].l3 != NULL) {
+            l3_pt = l2_pt[l2_index].l3;
+            if (l3_pt[l3_index].l4 != NULL) {
+                l4_pt = l3_pt[l3_index].l4;
             }
         }
     }
@@ -186,7 +186,7 @@ void handle_vm_fault(seL4_CPtr reply) {
         if (sos_map_frame_impl(&cspace, user_process.vspace, fault_addr,
                                seL4_CapRights_new(0, 0, entry.perms & REGION_RD, (entry.perms >> 1) & 1),
                                entry.perms & REGION_EX ? seL4_ARM_Default_VMAttributes : seL4_ARM_ExecuteNever,
-                               entry.frame, l4_pt + l4_index) != 0) {
+                               entry.frame, l1_pt) != 0) {
             ZF_LOGE("Could not map the frame into the two page tables");
             return;
         }
@@ -222,21 +222,21 @@ void handle_vm_fault(seL4_CPtr reply) {
 
     /* Allocate any necessary levels within the shadow page table. */
     if (l2_pt == NULL) {
-        l2_pt = l1_pt[l1_index] = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry *));
+        l2_pt = l1_pt[l1_index].l2 = calloc(PAGE_TABLE_ENTRIES, sizeof(page_directory));
         if (l2_pt == NULL) {
             ZF_LOGE("Failed to allocate level 2 page table");
             return;
         }
     }
     if (l3_pt == NULL) {
-        l3_pt = l2_pt[l2_index] = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry *));
+        l3_pt = l2_pt[l2_index].l3 = calloc(PAGE_TABLE_ENTRIES, sizeof(page_table));
         if (l3_pt == NULL) {
             ZF_LOGE("Failed to allocate level 3 page table");
             return;
         }
     }
     if (l4_pt == NULL) {
-        l4_pt = l3_pt[l3_index] = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry));
+        l4_pt = l3_pt[l3_index].l4 = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry));
         if (l4_pt == NULL) {
             ZF_LOGE("Failed to allocate level 4 page table");
             return;
@@ -257,7 +257,7 @@ void handle_vm_fault(seL4_CPtr reply) {
     /* Map the frame into the relevant page tables. */
     if (sos_map_frame_impl(&cspace, user_process.vspace, fault_addr, rights,
                            reg->perms & REGION_EX ? seL4_ARM_Default_VMAttributes : seL4_ARM_ExecuteNever,
-                           frame_ref, l4_pt + l4_index) != 0) {
+                           frame_ref, l1_pt) != 0) {
         ZF_LOGE("Could not map the frame into the two page tables");
         return;
     }
@@ -770,6 +770,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     network_init(&cspace, timer_vaddr, ntfn);
     console = network_console_init();
     network_console_register_handler(console, enqueue);
+    init_console_sem();
     push_new_file(O_WRONLY, network_console_byte_send, deque, "console"); // initialise stdout
     push_new_file(O_WRONLY, network_console_byte_send, deque, "console"); // initialise stderr
 

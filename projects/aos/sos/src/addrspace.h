@@ -10,13 +10,6 @@
 #define REGION_WR 0x2
 #define REGION_EX 0x4
 
-typedef struct pt_entry {
-    frame_ref_t frame;
-    unsigned char perms;
-    seL4_CPtr slot;
-    ut_t *ut;
-} pt_entry;
-
 typedef struct _region {
     seL4_Word base;
     size_t size;
@@ -24,8 +17,31 @@ typedef struct _region {
     struct _region *next;
 } mem_region_t;
 
+typedef struct pt_l4 {
+    frame_ref_t frame;
+    unsigned char perms;
+} pt_entry;
+
+typedef struct pt_l3 {
+    pt_entry *l4;
+    seL4_CPtr slot;
+    ut_t *ut;
+} page_table;
+
+typedef struct pt_l2 {
+    page_table *l3;
+    seL4_CPtr slot;
+    ut_t *ut;
+} page_directory;
+
+typedef struct pt_l1 {
+    page_directory *l2;
+    seL4_CPtr slot;
+    ut_t *ut;
+} page_upper_directory;
+
 typedef struct addrspace {
-    pt_entry ****page_table;
+    page_upper_directory *page_table;
     mem_region_t *regions;
     seL4_Word heap_top;
 } addrspace_t;
