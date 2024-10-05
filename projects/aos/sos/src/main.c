@@ -112,7 +112,7 @@ static struct {
 
     cspace_t cspace;
 
-    ut_t *stack_ut;
+    frame_ref_t stack_frame;
     seL4_CPtr stack;
 
     addrspace_t *addrspace;
@@ -184,8 +184,8 @@ void handle_vm_fault(seL4_CPtr reply) {
             return;
         }
         if (sos_map_frame_impl(&cspace, frame_page(entry.frame), user_process.vspace, fault_addr,
-                           seL4_CapRights_new(0, 0, entry.perms & REGION_RD, (entry.perms >> 1) & 1),
-                           seL4_ARM_Default_VMAttributes, l4_pt + l4_index) != 0) {
+                               seL4_CapRights_new(0, 0, entry.perms & REGION_RD, (entry.perms >> 1) & 1),
+                               l4_pt + l4_index) != 0) {
             return;
         }
         seL4_NBSend(reply, seL4_MessageInfo_new(0, 0, 0, 0));
@@ -248,8 +248,8 @@ void handle_vm_fault(seL4_CPtr reply) {
     }
 
     /* Allocate a new frame to be mapped by the shadow page table. */
-    l4_pt[l4_index].frame = alloc_frame();
-    if (l4_pt[l4_index].frame == NULL_FRAME) {
+    frame_ref_t frame_ref = l4_pt[l4_index].frame = alloc_frame();
+    if (frame_ref == NULL_FRAME) {
         ZF_LOGD("Failed to alloc frame");
         return;
     }
@@ -259,16 +259,15 @@ void handle_vm_fault(seL4_CPtr reply) {
     seL4_CapRights_t rights = seL4_CapRights_new(0, 0, reg->perms & REGION_RD, (reg->perms >> 1) & 1);
 
     /* Copy the frame capability into the slot we just assigned within the root cspace. */
-    seL4_Error err = cspace_copy(&cspace, loadee_frame,
-                                 frame_table_cspace(), frame_page(l4_pt[l4_index].frame), rights);
+    seL4_Error err = cspace_copy(&cspace, loadee_frame, &cspace, frame_page(frame_ref), rights);
     if (err != seL4_NoError) {
         ZF_LOGD("Failed to untyped reypte");
         return;
     }
 
     /* Map the frame into the relevant page tables. */
-    if (sos_map_frame_impl(&cspace, loadee_frame, user_process.vspace, fault_addr, rights,
-                           seL4_ARM_Default_VMAttributes, l4_pt + l4_index) != 0) {
+    if (sos_map_frame_impl(&cspace, loadee_frame, user_process.vspace,
+                           fault_addr, rights, l4_pt + l4_index) != 0) {
         return;
     }
 
@@ -384,21 +383,15 @@ static int stack_write(seL4_Word *mapped_stack, int index, uintptr_t val)
 static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, elf_t *elf_file)
 {
     /* Create a stack frame */
-    // user_process.stack_ut = alloc_retype(&user_process.stack, seL4_ARM_SmallPageObject, seL4_PageBits);
-    // if (user_process.stack_ut == NULL) {
-    //     ZF_LOGE("Failed to allocate stack");
-    //     return 0;
-    // }
-
-    /* allocate the untyped for the loadees address space */
-    frame_ref_t frame = alloc_frame();
-    if (frame == NULL_FRAME) {
+    user_process.stack_frame = alloc_frame();
+    if (user_process.stack_frame == NULL_FRAME) {
         ZF_LOGD("Failed to alloc frame");
         return -1;
     }
 
     /* copy it */
-    seL4_Error err = cspace_copy(cspace, user_process.stack, frame_table_cspace(), frame_page(frame), seL4_AllRights);
+    seL4_Error err = cspace_copy(cspace, user_process.stack, frame_table_cspace(),
+                                 frame_page(user_process.stack_frame), seL4_AllRights);
     if (err != seL4_NoError) {
         ZF_LOGD("Failed to untyped reypte");
         return -1;
@@ -419,8 +412,8 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
     }
 
     /* Map in the stack frame for the user app */
-    err = sos_map_frame(cspace, user_process.stack, frame, user_process.vspace, stack_bottom,
-                        seL4_AllRights, seL4_ARM_Default_VMAttributes, user_process.addrspace);
+    err = sos_map_frame(cspace, user_process.stack, user_process.stack_frame, user_process.vspace,
+                        stack_bottom, seL4_AllRights, user_process.addrspace);
     if (err != 0) {
         ZF_LOGE("Unable to map stack for user app");
         return 0;

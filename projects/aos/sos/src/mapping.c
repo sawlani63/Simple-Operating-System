@@ -155,13 +155,13 @@ seL4_Error sos_map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr
 }
 
 seL4_Error sos_map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
-                              seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, pt_entry *pte)
+                              seL4_CapRights_t rights, pt_entry *pte)
 {
-    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, pte);
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, seL4_ARM_Default_VMAttributes, NULL, NULL, pte);
 }
 
 seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, frame_ref_t frame_ref, seL4_CPtr vspace,
-                         seL4_Word vaddr, seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, addrspace_t *as)
+                         seL4_Word vaddr, seL4_CapRights_t rights, addrspace_t *as)
 {
     /* We assume SOS provided us with a valid, unmapped vaddr and isn't confusing any permissions. */
 
@@ -194,7 +194,7 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, frame_ref_t fram
     l4_pt[l4_index].frame = frame_ref;
     l4_pt[l4_index].perms = REGION_RD | REGION_WR;
 
-    return sos_map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, l4_pt + l4_index);
+    return sos_map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, l4_pt + l4_index);
 }
 
 
