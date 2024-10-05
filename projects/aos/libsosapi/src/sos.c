@@ -99,7 +99,6 @@ int sos_write(int file, const char *buf, size_t nbyte)
         return -1;
     }
 
-
     for (int i = 0; i < nbyte; i++) {
         seL4_SetMR(0, SYSCALL_SOS_WRITE);
         seL4_SetMR(1, file);

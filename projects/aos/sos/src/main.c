@@ -185,7 +185,7 @@ void handle_vm_fault(seL4_CPtr reply) {
         }
         if (sos_map_frame_impl(&cspace, frame_page(entry.frame), user_process.vspace, fault_addr,
                            seL4_CapRights_new(0, 0, entry.perms & REGION_RD, (entry.perms >> 1) & 1),
-                           seL4_ARM_Default_VMAttributes, l4_pt + sizeof(pt_entry) * l4_index) != 0) {
+                           seL4_ARM_Default_VMAttributes, l4_pt + l4_index) != 0) {
             return;
         }
         seL4_NBSend(reply, seL4_MessageInfo_new(0, 0, 0, 0));
@@ -219,21 +219,21 @@ void handle_vm_fault(seL4_CPtr reply) {
 
     /* Allocate any necessary levels within the shadow page table. */
     if (l2_pt == NULL) {
-        l2_pt = l1_pt[l1_index] = calloc(sizeof(pt_entry *), PAGE_TABLE_ENTRIES);
+        l2_pt = l1_pt[l1_index] = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry *));
         if (l2_pt == NULL) {
             /* Failed to allocate memory for shadow page table, just block the caller. */
             return;
         }
     }
     if (l3_pt == NULL) {
-        l3_pt = l2_pt[l2_index] = calloc(sizeof(pt_entry *), PAGE_TABLE_ENTRIES);
+        l3_pt = l2_pt[l2_index] = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry *));
         if (l3_pt == NULL) {
             /* Failed to allocate memory for shadow page table, just block the caller. */
             return;
         }
     }
     if (l4_pt == NULL) {
-        l4_pt = l3_pt[l3_index] = calloc(sizeof(pt_entry), PAGE_TABLE_ENTRIES);
+        l4_pt = l3_pt[l3_index] = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry));
         if (l4_pt == NULL) {
             /* Failed to allocate memory for shadow page table, just block the caller. */
             return;
@@ -248,28 +248,27 @@ void handle_vm_fault(seL4_CPtr reply) {
     }
 
     /* Allocate a new frame to be mapped by the shadow page table. */
-    pt_entry entry = l4_pt[l4_index];
-    entry.frame = alloc_frame();
-    if (entry.frame == NULL_FRAME) {
+    l4_pt[l4_index].frame = alloc_frame();
+    if (l4_pt[l4_index].frame == NULL_FRAME) {
         ZF_LOGD("Failed to alloc frame");
         return;
     }
-    entry.perms = reg->perms;
+    l4_pt[l4_index].perms = reg->perms;
 
     /* Assign the appropriate rights for the frame we are about to map. */
     seL4_CapRights_t rights = seL4_CapRights_new(0, 0, reg->perms & REGION_RD, (reg->perms >> 1) & 1);
 
     /* Copy the frame capability into the slot we just assigned within the root cspace. */
     seL4_Error err = cspace_copy(&cspace, loadee_frame,
-                                 frame_table_cspace(), frame_page(entry.frame), rights);
+                                 frame_table_cspace(), frame_page(l4_pt[l4_index].frame), rights);
     if (err != seL4_NoError) {
         ZF_LOGD("Failed to untyped reypte");
         return;
     }
 
     /* Map the frame into the relevant page tables. */
-    if (sos_map_frame_impl(&cspace, loadee_frame, user_process.vspace, fault_addr,
-                           rights, seL4_ARM_Default_VMAttributes, &entry) != 0) {
+    if (sos_map_frame_impl(&cspace, loadee_frame, user_process.vspace, fault_addr, rights,
+                           seL4_ARM_Default_VMAttributes, l4_pt + l4_index) != 0) {
         return;
     }
 
@@ -384,12 +383,25 @@ static int stack_write(seL4_Word *mapped_stack, int index, uintptr_t val)
  * start up and initialise the C library */
 static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, elf_t *elf_file)
 {
-
     /* Create a stack frame */
-    user_process.stack_ut = alloc_retype(&user_process.stack, seL4_ARM_SmallPageObject, seL4_PageBits);
-    if (user_process.stack_ut == NULL) {
-        ZF_LOGE("Failed to allocate stack");
-        return 0;
+    // user_process.stack_ut = alloc_retype(&user_process.stack, seL4_ARM_SmallPageObject, seL4_PageBits);
+    // if (user_process.stack_ut == NULL) {
+    //     ZF_LOGE("Failed to allocate stack");
+    //     return 0;
+    // }
+
+    /* allocate the untyped for the loadees address space */
+    frame_ref_t frame = alloc_frame();
+    if (frame == NULL_FRAME) {
+        ZF_LOGD("Failed to alloc frame");
+        return -1;
+    }
+
+    /* copy it */
+    seL4_Error err = cspace_copy(cspace, user_process.stack, frame_table_cspace(), frame_page(frame), seL4_AllRights);
+    if (err != seL4_NoError) {
+        ZF_LOGD("Failed to untyped reypte");
+        return -1;
     }
 
     /* virtual addresses in the target process' address space */
@@ -407,8 +419,8 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
     }
 
     /* Map in the stack frame for the user app */
-    seL4_Error err = sos_map_frame(cspace, user_process.stack, user_process.vspace, stack_bottom,
-                                   seL4_AllRights, seL4_ARM_Default_VMAttributes, user_process.addrspace);
+    err = sos_map_frame(cspace, user_process.stack, frame, user_process.vspace, stack_bottom,
+                        seL4_AllRights, seL4_ARM_Default_VMAttributes, user_process.addrspace);
     if (err != 0) {
         ZF_LOGE("Unable to map stack for user app");
         return 0;
@@ -651,7 +663,7 @@ bool start_first_process(char *app_name, seL4_CPtr ep)
     as_define_heap(user_process.addrspace, &user_process.addrspace->heap_top);
 
     /* load the elf image from the cpio file */
-    err = elf_load(&cspace, user_process.vspace, &elf_file);
+    err = elf_load(&cspace, user_process.vspace, &elf_file, user_process.addrspace);
     if (err) {
         ZF_LOGE("Failed to load elf image");
         return false;
@@ -781,7 +793,8 @@ NORETURN void *main_continued(UNUSED void *arg)
     network_init(&cspace, timer_vaddr, ntfn);
     console = network_console_init();
     network_console_register_handler(console, enqueue);
-    push_new_file(1, network_console_byte_send, deque, "console");
+    push_new_file(O_WRONLY, network_console_byte_send, deque, "console"); // initialise stdout
+    push_new_file(O_WRONLY, network_console_byte_send, deque, "console"); // initialise stderr
 
 #ifdef CONFIG_SOS_GDB_ENABLED
     /* Initialize the debugger */
@@ -964,7 +977,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 {
-    // ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_WRITE);
+    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_WRITE);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */
@@ -1002,7 +1015,7 @@ static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
 
 static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 {
-    // ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SYS_BRK);
+    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SYS_BRK);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
     mem_region_t *curr = user_process.addrspace->regions;
@@ -1030,6 +1043,6 @@ static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word sys
 static void wakeup(UNUSED uint32_t id, void* data)
 {
     struct task *args = (struct task *) data;
-    seL4_NBSend(args->reply, seL4_MessageInfo_new(0, 0, 0, 1));
+    seL4_NBSend(args->reply, seL4_MessageInfo_new(0, 0, 0, 0));
     free_untype(&args->reply, args->reply_ut);
 }

@@ -160,8 +160,8 @@ seL4_Error sos_map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr v
     return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, pte);
 }
 
-seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
-                         seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, addrspace_t *as)
+seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, frame_ref_t frame_ref, seL4_CPtr vspace,
+                         seL4_Word vaddr, seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, addrspace_t *as)
 {
     /* We assume SOS provided us with a valid, unmapped vaddr and isn't confusing any permissions. */
 
@@ -173,25 +173,28 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace
     uint16_t l3_index = (vaddr >> 21) & 0x1FF; /* Next 9 bits */
     uint16_t l4_index = (vaddr >> 12) & 0x1FF; /* Next 9 bits */
 
-    /* Cache the related page table entries so we don't have to perform lots of dereferencing. */
     pt_entry ****l1_pt = as->page_table;
-    pt_entry ***l2_pt = NULL;
-    pt_entry **l3_pt = NULL;
-    pt_entry *l4_pt = NULL;
 
     /* Allocate any necessary levels within the shadow page table. */
     if (l1_pt[l1_index] == NULL) {
-        l2_pt = l1_pt[l1_index] = calloc(sizeof(pt_entry *), PAGE_TABLE_ENTRIES);
+        l1_pt[l1_index] = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry *));
     }
-    if (l2_pt[l2_index] == NULL) {
-        l3_pt = l2_pt[l2_index] = calloc(sizeof(pt_entry *), PAGE_TABLE_ENTRIES);
-    }
-    if (l3_pt[l3_index] == NULL) {
-        l4_pt = l3_pt[l3_index] = calloc(sizeof(pt_entry), PAGE_TABLE_ENTRIES);
-    }
+    pt_entry ***l2_pt = l1_pt[l1_index];
 
-    return sos_map_frame_impl(cspace, frame_cap, vspace, vaddr, rights,
-                              attr, l4_pt + sizeof(pt_entry) * l4_index);
+    if (l2_pt[l2_index] == NULL) {
+        l2_pt[l2_index] = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry *));
+    }
+    pt_entry **l3_pt = l2_pt[l2_index];
+
+    if (l3_pt[l3_index] == NULL) {
+        l3_pt[l3_index] = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry));
+    }
+    pt_entry *l4_pt = l3_pt[l3_index];
+
+    l4_pt[l4_index].frame = frame_ref;
+    l4_pt[l4_index].perms = REGION_RD | REGION_WR;
+
+    return sos_map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, l4_pt + l4_index);
 }
 
 
