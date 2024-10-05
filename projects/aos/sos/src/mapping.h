@@ -14,6 +14,10 @@
 #include <stdbool.h>
 #include "addrspace.h"
 
+seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
+                          seL4_CapRights_t rights, seL4_ARM_VMAttributes attr,
+                          seL4_CPtr *free_slots, seL4_Word *used, page_upper_directory *page_table);
+
 /**
  * Maps a page.
  *
@@ -87,15 +91,15 @@ seL4_Error map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, se
  * @return 0 on success
  */
 
-seL4_Error sos_map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
-                              seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, pt_entry *pte);
+seL4_Error sos_map_frame_impl(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, seL4_CapRights_t rights,
+                              seL4_ARM_VMAttributes attr, frame_ref_t frame_ref, page_upper_directory *page_table);
 
 seL4_Error sos_map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
                                 seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, seL4_CPtr *free_slots,
-                                seL4_Word *used, pt_entry *pte);
+                                seL4_Word *used, page_upper_directory *page_table);
 
-seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, frame_ref_t frame_ref, seL4_CPtr vspace,
-                         seL4_Word vaddr, seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, addrspace_t *as);
+seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, seL4_CapRights_t rights,
+                         seL4_ARM_VMAttributes attr, frame_ref_t frame_ref, addrspace_t *as);
 
 /*
  * Map a device and return the virtual address it is mapped to.

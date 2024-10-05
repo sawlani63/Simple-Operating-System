@@ -104,7 +104,7 @@ static struct {
     ut_t *vspace_ut;
     seL4_CPtr vspace;
 
-    ut_t *ipc_buffer_ut;
+    frame_ref_t ipc_buffer_frame;
     seL4_CPtr ipc_buffer;
 
     ut_t *sched_context_ut;
@@ -112,7 +112,7 @@ static struct {
 
     cspace_t cspace;
 
-    ut_t *stack_ut;
+    frame_ref_t stack_frame;
     seL4_CPtr stack;
 
     addrspace_t *addrspace;
@@ -125,8 +125,7 @@ static struct {
 
 struct network_console *console;
 
-seL4_CPtr console_sem_cptr;
-sync_bin_sem_t *console_sem = NULL;
+bool console_open_for_read = false;
 
 seL4_CPtr sem_cptr;
 sync_bin_sem_t *syscall_sem = NULL;
@@ -144,12 +143,12 @@ static void wakeup(UNUSED uint32_t id, void *data);
 void handle_vm_fault(seL4_CPtr reply) {
     addrspace_t *as = user_process.addrspace;
     
-    /* A VM Fault is an IPC. Check the seL4 Manual section 6.2.7 for message structure. */
+    /* A VM Fault is an IPC. Check the seL4 Manual section 6.2.7 for message structure. We also
+     * page align the vaddr since the Hardware Page Table expects addresses to be page aligned. */
     seL4_Word fault_addr = seL4_GetMR(seL4_VMFault_Addr) & ~(PAGE_SIZE_4K - 1);
 
     if (as == NULL || as->page_table == NULL) {
-        /* We encountered some weird error where the address space for the user
-         * process or its page table was uninitialised. */
+        ZF_LOGE("Encountered a weird error where the address space or level 1 page table is null");
         return;
     }
 
@@ -162,16 +161,16 @@ void handle_vm_fault(seL4_CPtr reply) {
     uint16_t l4_index = (fault_addr >> 12) & 0x1FF; /* Next 9 bits */
 
     /* Cache the related page table entries so we don't have to perform lots of dereferencing. */
-    pt_entry ****l1_pt = as->page_table;
-    pt_entry ***l2_pt = NULL;
-    pt_entry **l3_pt = NULL;
+    page_upper_directory *l1_pt = as->page_table;
+    page_directory *l2_pt = NULL;
+    page_table *l3_pt = NULL;
     pt_entry *l4_pt = NULL;
-    if (l1_pt[l1_index] != NULL) {
-        l2_pt = l1_pt[l1_index];
-        if (l2_pt[l2_index] != NULL) {
-            l3_pt = l2_pt[l2_index];
-            if (l3_pt[l3_index] != NULL) {
-                l4_pt = l3_pt[l3_index];
+    if (l1_pt[l1_index].l2 != NULL) {
+        l2_pt = l1_pt[l1_index].l2;
+        if (l2_pt[l2_index].l3 != NULL) {
+            l3_pt = l2_pt[l2_index].l3;
+            if (l3_pt[l3_index].l4 != NULL) {
+                l4_pt = l3_pt[l3_index].l4;
             }
         }
     }
@@ -181,11 +180,14 @@ void handle_vm_fault(seL4_CPtr reply) {
     if (l4_pt != NULL && l4_pt[l4_index].frame != NULL_FRAME) {
         pt_entry entry = l4_pt[l4_index];
         if (!debug_is_read_fault() && (entry.perms & REGION_WR) == 0) {
+            ZF_LOGE("Trying to write to a read only page");
             return;
         }
-        if (sos_map_frame_impl(&cspace, frame_page(entry.frame), user_process.vspace, fault_addr,
+        if (map_frame_impl(&cspace, entry.frame, user_process.vspace, fault_addr,
                            seL4_CapRights_new(0, 0, entry.perms & REGION_RD, (entry.perms >> 1) & 1),
-                           seL4_ARM_Default_VMAttributes, l4_pt + l4_index) != 0) {
+                           entry.perms & REGION_EX ? seL4_ARM_Default_VMAttributes : seL4_ARM_ExecuteNever,
+                           NULL, NULL, NULL) != 0) {
+            ZF_LOGE("Could not map the frame into the two page tables");
             return;
         }
         seL4_NBSend(reply, seL4_MessageInfo_new(0, 0, 0, 0));
@@ -200,6 +202,7 @@ void handle_vm_fault(seL4_CPtr reply) {
              * Page Table. In the case a page in the HPT gets swapped to disk yet remains on the
              * Shadow Page Table, we need some way to know if the user is allowed to write to it. */
             if (!debug_is_read_fault() && (reg->perms & REGION_WR) == 0) {
+                ZF_LOGE("Trying to write to a read only page");
                 return;
             }
             /* Fault occurred in a valid region and permissions line up so we can safely break out. */
@@ -213,62 +216,49 @@ void handle_vm_fault(seL4_CPtr reply) {
     }
 
     if (reg == NULL) {
-        /* We did not find a valid region for this memory.*/
+        ZF_LOGE("Could not find a valid region for  this address");
         return;
     }
 
     /* Allocate any necessary levels within the shadow page table. */
     if (l2_pt == NULL) {
-        l2_pt = l1_pt[l1_index] = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry *));
+        l2_pt = l1_pt[l1_index].l2 = calloc(PAGE_TABLE_ENTRIES, sizeof(page_directory));
         if (l2_pt == NULL) {
-            /* Failed to allocate memory for shadow page table, just block the caller. */
+            ZF_LOGE("Failed to allocate level 2 page table");
             return;
         }
     }
     if (l3_pt == NULL) {
-        l3_pt = l2_pt[l2_index] = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry *));
+        l3_pt = l2_pt[l2_index].l3 = calloc(PAGE_TABLE_ENTRIES, sizeof(page_table));
         if (l3_pt == NULL) {
-            /* Failed to allocate memory for shadow page table, just block the caller. */
+            ZF_LOGE("Failed to allocate level 3 page table");
             return;
         }
     }
     if (l4_pt == NULL) {
-        l4_pt = l3_pt[l3_index] = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry));
+        l4_pt = l3_pt[l3_index].l4 = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry));
         if (l4_pt == NULL) {
-            /* Failed to allocate memory for shadow page table, just block the caller. */
+            ZF_LOGE("Failed to allocate level 4 page table");
             return;
         }
     }
 
-    /* Create slot for the frame to load the data into. */
-    seL4_CPtr loadee_frame = cspace_alloc_slot(&cspace);
-    if (loadee_frame == seL4_CapNull) {
-        ZF_LOGD("Failed to alloc slot");
-        return;
-    }
+    /* Assign the appropriate rights for the frame we are about to map. */
+    seL4_CapRights_t rights = seL4_CapRights_new(0, 0, reg->perms & REGION_RD, (reg->perms >> 1) & 1);
 
     /* Allocate a new frame to be mapped by the shadow page table. */
-    l4_pt[l4_index].frame = alloc_frame();
-    if (l4_pt[l4_index].frame == NULL_FRAME) {
-        ZF_LOGD("Failed to alloc frame");
+    frame_ref_t frame_ref = l4_pt[l4_index].frame = alloc_frame();
+    if (frame_ref == NULL_FRAME) {
+        ZF_LOGE("Failed to allocate a frame");
         return;
     }
     l4_pt[l4_index].perms = reg->perms;
 
-    /* Assign the appropriate rights for the frame we are about to map. */
-    seL4_CapRights_t rights = seL4_CapRights_new(0, 0, reg->perms & REGION_RD, (reg->perms >> 1) & 1);
-
-    /* Copy the frame capability into the slot we just assigned within the root cspace. */
-    seL4_Error err = cspace_copy(&cspace, loadee_frame,
-                                 frame_table_cspace(), frame_page(l4_pt[l4_index].frame), rights);
-    if (err != seL4_NoError) {
-        ZF_LOGD("Failed to untyped reypte");
-        return;
-    }
-
     /* Map the frame into the relevant page tables. */
-    if (sos_map_frame_impl(&cspace, loadee_frame, user_process.vspace, fault_addr, rights,
-                           seL4_ARM_Default_VMAttributes, l4_pt + l4_index) != 0) {
+    if (sos_map_frame_impl(&cspace, user_process.vspace, fault_addr, rights,
+                           reg->perms & REGION_EX ? seL4_ARM_Default_VMAttributes : seL4_ARM_ExecuteNever,
+                           frame_ref, l1_pt) != 0) {
+        ZF_LOGE("Could not map the frame into the two page tables");
         return;
     }
 
@@ -384,25 +374,12 @@ static int stack_write(seL4_Word *mapped_stack, int index, uintptr_t val)
 static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, elf_t *elf_file)
 {
     /* Create a stack frame */
-    // user_process.stack_ut = alloc_retype(&user_process.stack, seL4_ARM_SmallPageObject, seL4_PageBits);
-    // if (user_process.stack_ut == NULL) {
-    //     ZF_LOGE("Failed to allocate stack");
-    //     return 0;
-    // }
-
-    /* allocate the untyped for the loadees address space */
-    frame_ref_t frame = alloc_frame();
-    if (frame == NULL_FRAME) {
+    user_process.stack_frame = alloc_frame();
+    if (user_process.stack_frame == NULL_FRAME) {
         ZF_LOGD("Failed to alloc frame");
         return -1;
     }
-
-    /* copy it */
-    seL4_Error err = cspace_copy(cspace, user_process.stack, frame_table_cspace(), frame_page(frame), seL4_AllRights);
-    if (err != seL4_NoError) {
-        ZF_LOGD("Failed to untyped reypte");
-        return -1;
-    }
+    user_process.stack = frame_page(user_process.stack_frame);
 
     /* virtual addresses in the target process' address space */
     uintptr_t stack_top;
@@ -419,8 +396,8 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
     }
 
     /* Map in the stack frame for the user app */
-    err = sos_map_frame(cspace, user_process.stack, frame, user_process.vspace, stack_bottom,
-                        seL4_AllRights, seL4_ARM_Default_VMAttributes, user_process.addrspace);
+    seL4_Error err = sos_map_frame(cspace, user_process.vspace, stack_bottom, seL4_AllRights,
+                        seL4_ARM_ExecuteNever, user_process.stack_frame, user_process.addrspace);
     if (err != 0) {
         ZF_LOGE("Unable to map stack for user app");
         return 0;
@@ -571,12 +548,12 @@ bool start_first_process(char *app_name, seL4_CPtr ep)
     user_process.addrspace = as_create();
 
     /* Create an IPC buffer */
-    user_process.ipc_buffer_ut = alloc_retype(&user_process.ipc_buffer, seL4_ARM_SmallPageObject,
-                                                  seL4_PageBits);
-    if (user_process.ipc_buffer_ut == NULL) {
+    user_process.ipc_buffer_frame = alloc_frame();
+    if (user_process.ipc_buffer_frame == NULL_FRAME) {
         ZF_LOGE("Failed to alloc ipc buffer ut");
         return false;
     }
+    user_process.ipc_buffer = frame_page(user_process.ipc_buffer_frame);
 
     /* allocate a new slot in the target cspace which we will mint a badged endpoint cap into --
      * the badge is used to identify the process, which will come in handy when you have multiple
@@ -670,8 +647,8 @@ bool start_first_process(char *app_name, seL4_CPtr ep)
     }
 
     /* Map in the IPC buffer for the thread */
-    err = map_frame(&cspace, user_process.ipc_buffer, user_process.vspace, PROCESS_IPC_BUFFER,
-                    seL4_AllRights, seL4_ARM_Default_VMAttributes);
+    err = sos_map_frame(&cspace, user_process.vspace, PROCESS_IPC_BUFFER, seL4_AllRights,
+                        seL4_ARM_ExecuteNever, user_process.ipc_buffer_frame, user_process.addrspace);
     if (err != 0) {
         ZF_LOGE("Unable to map IPC buffer for user app");
         return false;
@@ -793,6 +770,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     network_init(&cspace, timer_vaddr, ntfn);
     console = network_console_init();
     network_console_register_handler(console, enqueue);
+    init_console_sem();
     push_new_file(O_WRONLY, network_console_byte_send, deque, "console"); // initialise stdout
     push_new_file(O_WRONLY, network_console_byte_send, deque, "console"); // initialise stderr
 
@@ -821,11 +799,6 @@ NORETURN void *main_continued(UNUSED void *arg)
     ut_t *sem_ut = alloc_retype(&sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!sem_ut, "No memory for notification");
     sync_bin_sem_init(syscall_sem, sem_cptr, 1);
-
-    console_sem = malloc(sizeof(sync_bin_sem_t));
-    sem_ut = alloc_retype(&console_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
-    ZF_LOGF_IF(!sem_ut, "No memory for notification");
-    sync_bin_sem_init(console_sem, console_sem_cptr, 1);
 
     /* Creating thread pool */
     initialise_thread_pool(handle_syscall);
@@ -907,10 +880,12 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
     int fd;
     if (!strcmp(user_process.cache_curr_path, "console")) {
-        if (user_process.cache_curr_mode != O_WRONLY) {
-            sync_bin_sem_wait(console_sem);
+        if (user_process.cache_curr_mode != O_WRONLY && console_open_for_read) {
+            seL4_SetMR(0, -1);
+            return;
         }
         sync_bin_sem_wait(syscall_sem);
+        console_open_for_read = true;
         fd = push_new_file(user_process.cache_curr_mode, network_console_byte_send,
                            deque, user_process.cache_curr_path);
         sync_bin_sem_post(syscall_sem);
@@ -925,33 +900,18 @@ static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_t
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
     sync_bin_sem_wait(syscall_sem);
-    struct file *curr = find_file(curr_task->msg[1]);
-    if (curr == NULL) {
-        sync_bin_sem_post(syscall_sem);
-        ZF_LOGE("Cannot find file to close");
+    struct file *found = pop_file(curr_task->msg[1]);
+    sync_bin_sem_post(syscall_sem);
+    if (found == NULL) {
         seL4_SetMR(0, -1);
         return;
-    }
-
-    if (curr == file_stack) {
-        file_stack = file_stack->next;
-        if (!strcmp(curr->path, "console") && curr->mode != O_WRONLY) {
-            sync_bin_sem_post(console_sem);
-        }
-        free(curr->path);
-        free(curr);
+    } else if (!strcmp(found->path, "console") && found->mode != O_WRONLY) {
+        sync_bin_sem_wait(syscall_sem);
+        console_open_for_read = false;
         sync_bin_sem_post(syscall_sem);
-        seL4_SetMR(0, 0);
-        return;
     }
-
-    struct file *prev = find_prev_file(curr_task->msg[1]);
-    prev->next = curr->next;
-    free(curr);
-    sync_bin_sem_post(syscall_sem);
-    if (!strcmp(curr->path, "console") && curr->mode != O_WRONLY) {
-        sync_bin_sem_post(console_sem);
-    }
+    free(found->path);
+    free(found);
     seL4_SetMR(0, 0);
 }
 

@@ -73,10 +73,17 @@ static seL4_Error retype_map_pud(cspace_t *cspace, seL4_CPtr vspace, seL4_Word v
     return seL4_ARM_PageUpperDirectory_Map(empty, vspace, vaddr, seL4_ARM_Default_VMAttributes);
 }
 
-static seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
-                                 seL4_CapRights_t rights, seL4_ARM_VMAttributes attr,
-                                 seL4_CPtr *free_slots, seL4_Word *used, pt_entry *pte)
+seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
+                          seL4_CapRights_t rights, seL4_ARM_VMAttributes attr,
+                          seL4_CPtr *free_slots, seL4_Word *used, page_upper_directory *page_table)
 {
+    /* We use our shadow page table which follows the same structure as the hardware one.
+    * Check the seL4 Manual section 7.1.1 for hardware virtual memory objects. Importantly
+    * the top-most 16 bits of the virtual address are unused bits, so we ignore them. */
+    uint16_t l1_index = (vaddr >> 39) & 0x1FF; /* Top 9 bits */
+    uint16_t l2_index = (vaddr >> 30) & 0x1FF; /* Next 9 bits */
+    uint16_t l3_index = (vaddr >> 21) & 0x1FF; /* Next 9 bits */
+
     /* Attempt the mapping */
     seL4_Error err = seL4_ARM_Page_Map(frame_cap, vspace, vaddr, rights, attr);
     for (size_t i = 0; i < MAPPING_SLOTS && err == seL4_FailedLookup; i++) {
@@ -104,20 +111,27 @@ static seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPt
             return -1;
         }
 
-        if (pte != NULL) {
-            pte->slot = slot;
-            pte->ut = ut;
-        }
-
         switch (failed) {
         case SEL4_MAPPING_LOOKUP_NO_PT:
             err = retype_map_pt(cspace, vspace, vaddr, ut->cap, slot);
+            if (page_table != NULL) {
+                page_table[l1_index].l2[l2_index].l3[l3_index].ut = ut;
+                page_table[l1_index].l2[l2_index].l3[l3_index].slot = slot;
+            }
             break;
         case SEL4_MAPPING_LOOKUP_NO_PD:
             err = retype_map_pd(cspace, vspace, vaddr, ut->cap, slot);
+            if (page_table != NULL) {
+                page_table[l1_index].l2[l2_index].ut = ut;
+                page_table[l1_index].l2[l2_index].slot = slot;
+            }
             break;
         case SEL4_MAPPING_LOOKUP_NO_PUD:
             err = retype_map_pud(cspace, vspace, vaddr, ut->cap, slot);
+            if (page_table != NULL) {
+                page_table[l1_index].ut = ut;
+                page_table[l1_index].slot = slot;
+            }
             break;
         }
 
@@ -149,19 +163,33 @@ seL4_Error map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, se
 
 seL4_Error sos_map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
                                 seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, seL4_CPtr *free_slots,
-                                seL4_Word *used, pt_entry *pte)
+                                seL4_Word *used, page_upper_directory *page_table)
 {
-    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, pte);
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, page_table);
 }
 
-seL4_Error sos_map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
-                              seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, pt_entry *pte)
+seL4_Error sos_map_frame_impl(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, seL4_CapRights_t rights,
+                              seL4_ARM_VMAttributes attr, frame_ref_t frame_ref, page_upper_directory *page_table)
 {
-    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, pte);
+    /* create slot for the frame to load the data into */
+    seL4_CPtr frame_cap = cspace_alloc_slot(cspace);
+    if (frame_cap == seL4_CapNull) {
+        ZF_LOGD("Failed to alloc slot");
+        return 1;
+    }
+
+    /* copy the frame cptr into the loadee's address space */
+    seL4_Error err = cspace_copy(cspace, frame_cap, cspace, frame_page(frame_ref), seL4_AllRights);
+    if (err != seL4_NoError) {
+        ZF_LOGD("Failed to untyped reypte");
+        return err;
+    }
+
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, page_table);
 }
 
-seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, frame_ref_t frame_ref, seL4_CPtr vspace,
-                         seL4_Word vaddr, seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, addrspace_t *as)
+seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, seL4_CapRights_t rights,
+                         seL4_ARM_VMAttributes attr, frame_ref_t frame_ref, addrspace_t *as)
 {
     /* We assume SOS provided us with a valid, unmapped vaddr and isn't confusing any permissions. */
 
@@ -173,28 +201,28 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, frame_ref_t fram
     uint16_t l3_index = (vaddr >> 21) & 0x1FF; /* Next 9 bits */
     uint16_t l4_index = (vaddr >> 12) & 0x1FF; /* Next 9 bits */
 
-    pt_entry ****l1_pt = as->page_table;
+    page_upper_directory *l1_pt = as->page_table;
 
     /* Allocate any necessary levels within the shadow page table. */
-    if (l1_pt[l1_index] == NULL) {
-        l1_pt[l1_index] = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry *));
+    if (l1_pt[l1_index].l2 == NULL) {
+        l1_pt[l1_index].l2 = calloc(PAGE_TABLE_ENTRIES, sizeof(page_directory));
     }
-    pt_entry ***l2_pt = l1_pt[l1_index];
+    page_directory *l2_pt = l1_pt[l1_index].l2;
 
-    if (l2_pt[l2_index] == NULL) {
-        l2_pt[l2_index] = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry *));
+    if (l2_pt[l2_index].l3 == NULL) {
+        l2_pt[l2_index].l3 = calloc(PAGE_TABLE_ENTRIES, sizeof(page_table));
     }
-    pt_entry **l3_pt = l2_pt[l2_index];
+    page_table *l3_pt = l2_pt[l2_index].l3;
 
-    if (l3_pt[l3_index] == NULL) {
-        l3_pt[l3_index] = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry));
+    if (l3_pt[l3_index].l4 == NULL) {
+        l3_pt[l3_index].l4 = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry));
     }
-    pt_entry *l4_pt = l3_pt[l3_index];
+    pt_entry *l4_pt = l3_pt[l3_index].l4;
 
     l4_pt[l4_index].frame = frame_ref;
     l4_pt[l4_index].perms = REGION_RD | REGION_WR;
 
-    return sos_map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, l4_pt + l4_index);
+    return sos_map_frame_impl(cspace, vspace, vaddr, rights, attr, frame_ref, l1_pt);
 }
 
 

@@ -33,12 +33,10 @@
 
 #define NBLOCKS 9
 #define NPAGES_PER_BLOCK 28
-#define TEST_ADDRESS 0x8000000000
+#define TEST_ADDRESS 0x1000000000
 
 /* called from pt_test */
-static void
-do_pt_test(char **buf)
-{
+static void do_pt_test(char **buf) {
     int i;
 
     /* set */
@@ -56,9 +54,7 @@ do_pt_test(char **buf)
     }
 }
 
-static void
-pt_test( void )
-{
+static void pt_test(void) {
     /* need a decent sized stack */
     char buf1[NBLOCKS][NPAGES_PER_BLOCK * PAGE_SIZE_4K];
     char *buf1_ptrs[NBLOCKS];
@@ -89,6 +85,21 @@ pt_test( void )
     printf("Passed heap test\n");
 }
 
+static void recursive_stack_test(int counter) {
+    char **arr = malloc(NBLOCKS * sizeof(char *));
+    for (int i = 0; i < NBLOCKS; i++) {
+        arr[i] = malloc(NPAGES_PER_BLOCK * PAGE_SIZE_4K);
+    }
+    if (counter == 1000) {
+        return;
+    }
+    recursive_stack_test(counter + 1);
+}
+
+static void stack_overflow(int counter) {
+    stack_overflow(counter + 1);
+}
+
 #define SMALL_BUF_SZ 2
 #define MEDIUM_BUF_SZ 5
 
@@ -96,39 +107,52 @@ char test_str[] = "Basic test string for read/write\n";
 char small_buf[SMALL_BUF_SZ];
 
 int test_buffers(int console_fd) {
-   /* test a small string from the code segment */
-   int result = sos_write(console_fd, test_str, strlen(test_str));
-   assert(result == strlen(test_str));
+    /* test a small string from the code segment */
+    int result = sos_write(console_fd, test_str, strlen(test_str));
+    assert(result == strlen(test_str));
 
-   /* test reading to a small buffer */
-   result = sos_read(console_fd, small_buf, SMALL_BUF_SZ);
-   /* make sure you type in at least SMALL_BUF_SZ */
-   assert(result == SMALL_BUF_SZ);
+    /* test reading to a small buffer */
+    result = sos_read(console_fd, small_buf, SMALL_BUF_SZ);
+    /* make sure you type in at least SMALL_BUF_SZ */
+    assert(result == SMALL_BUF_SZ);
 
-   /* test reading into a large on-stack buffer */
-   char stack_buf[MEDIUM_BUF_SZ];
-   /* for this test you'll need to paste a lot of data into
+    /* test reading into a large on-stack buffer */
+    char stack_buf[MEDIUM_BUF_SZ];
+    /* for this test you'll need to paste a lot of data into
       the console, without newlines */
 
     result = sos_read(console_fd, stack_buf, MEDIUM_BUF_SZ);
     assert(result == MEDIUM_BUF_SZ);
 
-   result = sos_write(console_fd, stack_buf, MEDIUM_BUF_SZ);
-   assert(result == MEDIUM_BUF_SZ);
+    result = sos_write(console_fd, stack_buf, MEDIUM_BUF_SZ);
+    assert(result == MEDIUM_BUF_SZ);
 
-   /* try sleeping */
-   for (int i = 0; i < 5; i++) {
-       uint64_t prev_seconds = sos_time_stamp();
-       sos_usleep(1000000);
-       uint64_t next_seconds = sos_time_stamp();
-       assert(next_seconds > prev_seconds);
-       printf("Tick\n");
-   }
+    /* try sleeping */
+    for (int i = 0; i < 5; i++) {
+        uint64_t prev_seconds = sos_time_stamp();
+        sos_usleep(1000000);
+        uint64_t next_seconds = sos_time_stamp();
+        assert(next_seconds > prev_seconds);
+        printf("Tick\n");
+    }
 }
 
 int main(void)
 {
     int fd = sos_open("console", O_RDWR);
+    assert(fd > 2);
+    int fail = sos_open("console", O_RDONLY);
+    assert(fail == -1);
+    fail = sos_open("console", O_RDWR);
+    assert(fail == -1);
+    int res = sos_close(fd);
+    assert(!res);
+    fd = sos_open("console", O_RDWR);
+    assert(fd > 2);
+
     test_buffers(fd);
     pt_test();
+    recursive_stack_test(0);
+    printf("Passed recursive stack test\n");
+    // stack_overflow(0);
 }

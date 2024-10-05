@@ -82,30 +82,15 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
     while (pos < segment_size) {
         uintptr_t loadee_vaddr = (ROUND_DOWN(dst, PAGE_SIZE_4K));
 
-        /* create slot for the frame to load the data into */
-        seL4_CPtr loadee_frame = cspace_alloc_slot(cspace);
-        if (loadee_frame == seL4_CapNull) {
-            ZF_LOGD("Failed to alloc slot");
-            return -1;
-        }
-
-        /* allocate the untyped for the loadees address space */
+        /* allocate the frame for the loadees address space */
         frame_ref_t frame = alloc_frame();
         if (frame == NULL_FRAME) {
             ZF_LOGD("Failed to alloc frame");
             return -1;
         }
 
-        /* copy it */
-        err = cspace_copy(cspace, loadee_frame, frame_table_cspace(), frame_page(frame), seL4_AllRights);
-        if (err != seL4_NoError) {
-            ZF_LOGD("Failed to untyped reypte");
-            return -1;
-        }
-
         /* map the frame into the loadee address space */
-        err = sos_map_frame(cspace, loadee_frame, frame, loadee, loadee_vaddr, permissions,
-                        seL4_ARM_Default_VMAttributes, as);
+        err = sos_map_frame(cspace, loadee, loadee_vaddr, permissions, seL4_ARM_Default_VMAttributes, frame, as);
 
         /* A frame has already been mapped at this address. This occurs when segments overlap in
          * the same frame, which is permitted by the standard. That's fine as we
@@ -117,8 +102,6 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
         bool already_mapped = (err == seL4_DeleteFirst);
 
         if (already_mapped) {
-            cspace_delete(cspace, loadee_frame);
-            cspace_free_slot(cspace, loadee_frame);
             free_frame(frame);
         } else if (err != seL4_NoError) {
             ZF_LOGE("Failed to map into loadee at %p, error %u", (void *) loadee_vaddr, err);
@@ -171,6 +154,9 @@ int elf_load(cspace_t *cspace, seL4_CPtr loadee_vspace, elf_t *elf_file, addrspa
         size_t segment_size = elf_getProgramHeaderMemorySize(elf_file, i);
         uintptr_t vaddr = elf_getProgramHeaderVaddr(elf_file, i);
         seL4_Word flags = elf_getProgramHeaderFlags(elf_file, i);
+
+        /* Load the segment into the address space */
+        as_define_region(as, vaddr, segment_size, flags & 0x3);
 
         /* Copy it across into the vspace. */
         ZF_LOGD(" * Loading segment %p-->%p\n", (void *) vaddr, (void *)(vaddr + segment_size));
