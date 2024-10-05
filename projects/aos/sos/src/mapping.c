@@ -154,14 +154,28 @@ seL4_Error sos_map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr
     return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, pte);
 }
 
-seL4_Error sos_map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
-                              seL4_CapRights_t rights, pt_entry *pte)
+seL4_Error sos_map_frame_impl(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, seL4_CapRights_t rights,
+                              seL4_ARM_VMAttributes attr, frame_ref_t frame_ref, pt_entry *pte)
 {
-    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, seL4_ARM_Default_VMAttributes, NULL, NULL, pte);
+    /* create slot for the frame to load the data into */
+    seL4_CPtr frame_cap = cspace_alloc_slot(cspace);
+    if (frame_cap == seL4_CapNull) {
+        ZF_LOGD("Failed to alloc slot");
+        return 1;
+    }
+
+    /* copy the frame cptr into the loadee's address space */
+    seL4_Error err = cspace_copy(cspace, frame_cap, cspace, frame_page(frame_ref), seL4_AllRights);
+    if (err != seL4_NoError) {
+        ZF_LOGD("Failed to untyped reypte");
+        return err;
+    }
+
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, pte);
 }
 
-seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, frame_ref_t frame_ref, seL4_CPtr vspace,
-                         seL4_Word vaddr, seL4_CapRights_t rights, addrspace_t *as)
+seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, seL4_CapRights_t rights,
+                         seL4_ARM_VMAttributes attr, frame_ref_t frame_ref, addrspace_t *as)
 {
     /* We assume SOS provided us with a valid, unmapped vaddr and isn't confusing any permissions. */
 
@@ -194,7 +208,7 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, frame_ref_t fram
     l4_pt[l4_index].frame = frame_ref;
     l4_pt[l4_index].perms = REGION_RD | REGION_WR;
 
-    return sos_map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, l4_pt + l4_index);
+    return sos_map_frame_impl(cspace, vspace, vaddr, rights, attr, frame_ref, l4_pt + l4_index);
 }
 
 
