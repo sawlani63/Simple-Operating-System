@@ -89,14 +89,14 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
             return -1;
         }
 
-        /* allocate the untyped for the loadees address space */
+        /* allocate the frame for the loadees address space */
         frame_ref_t frame = alloc_frame();
         if (frame == NULL_FRAME) {
             ZF_LOGD("Failed to alloc frame");
             return -1;
         }
 
-        /* copy it */
+        /* copy the frame cptr into the loadee's address space */
         err = cspace_copy(cspace, loadee_frame, frame_table_cspace(), frame_page(frame), seL4_AllRights);
         if (err != seL4_NoError) {
             ZF_LOGD("Failed to untyped reypte");

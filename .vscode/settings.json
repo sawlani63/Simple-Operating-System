@@ -54,6 +54,7 @@
         "elfload.h": "c",
         "inttypes.h": "c",
         "console.h": "c",
-        "sel4_zf_logif.h": "c"
+        "sel4_zf_logif.h": "c",
+        "networkconsole.h": "c"
     }
 }

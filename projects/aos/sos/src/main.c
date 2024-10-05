@@ -104,7 +104,7 @@ static struct {
     ut_t *vspace_ut;
     seL4_CPtr vspace;
 
-    ut_t *ipc_buffer_ut;
+    frame_ref_t ipc_buffer_frame;
     seL4_CPtr ipc_buffer;
 
     ut_t *sched_context_ut;
@@ -240,6 +240,9 @@ void handle_vm_fault(seL4_CPtr reply) {
         }
     }
 
+    /* Assign the appropriate rights for the frame we are about to map. */
+    seL4_CapRights_t rights = seL4_CapRights_new(0, 0, reg->perms & REGION_RD, (reg->perms >> 1) & 1);
+
     /* Create slot for the frame to load the data into. */
     seL4_CPtr loadee_frame = cspace_alloc_slot(&cspace);
     if (loadee_frame == seL4_CapNull) {
@@ -254,9 +257,6 @@ void handle_vm_fault(seL4_CPtr reply) {
         return;
     }
     l4_pt[l4_index].perms = reg->perms;
-
-    /* Assign the appropriate rights for the frame we are about to map. */
-    seL4_CapRights_t rights = seL4_CapRights_new(0, 0, reg->perms & REGION_RD, (reg->perms >> 1) & 1);
 
     /* Copy the frame capability into the slot we just assigned within the root cspace. */
     seL4_Error err = cspace_copy(&cspace, loadee_frame, &cspace, frame_page(frame_ref), rights);
@@ -564,12 +564,12 @@ bool start_first_process(char *app_name, seL4_CPtr ep)
     user_process.addrspace = as_create();
 
     /* Create an IPC buffer */
-    user_process.ipc_buffer_ut = alloc_retype(&user_process.ipc_buffer, seL4_ARM_SmallPageObject,
-                                                  seL4_PageBits);
-    if (user_process.ipc_buffer_ut == NULL) {
+    user_process.ipc_buffer_frame = alloc_frame();
+    if (user_process.ipc_buffer_frame == NULL) {
         ZF_LOGE("Failed to alloc ipc buffer ut");
         return false;
     }
+    user_process.ipc_buffer = frame_page(user_process.ipc_buffer_frame);
 
     /* allocate a new slot in the target cspace which we will mint a badged endpoint cap into --
      * the badge is used to identify the process, which will come in handy when you have multiple
@@ -601,6 +601,20 @@ bool start_first_process(char *app_name, seL4_CPtr ep)
                              user_process.ipc_buffer);
     if (err != seL4_NoError) {
         ZF_LOGE("Unable to configure new TCB");
+        return false;
+    }
+
+    /* create slot for the frame to load the data into */
+    seL4_CPtr loadee_frame = cspace_alloc_slot(&cspace);
+    if (loadee_frame == seL4_CapNull) {
+        ZF_LOGD("Failed to alloc slot");
+        return false;
+    }
+
+    /* copy the frame cptr into the loadee's address space */
+    err = cspace_copy(&cspace, loadee_frame, &cspace, user_process.ipc_buffer, seL4_AllRights);
+    if (err != seL4_NoError) {
+        ZF_LOGD("Failed to untyped reypte");
         return false;
     }
 
@@ -663,8 +677,8 @@ bool start_first_process(char *app_name, seL4_CPtr ep)
     }
 
     /* Map in the IPC buffer for the thread */
-    err = map_frame(&cspace, user_process.ipc_buffer, user_process.vspace, PROCESS_IPC_BUFFER,
-                    seL4_AllRights, seL4_ARM_Default_VMAttributes);
+    err = sos_map_frame(&cspace, loadee_frame, user_process.ipc_buffer_frame, user_process.vspace,
+                        PROCESS_IPC_BUFFER, seL4_AllRights, user_process.addrspace);
     if (err != 0) {
         ZF_LOGE("Unable to map IPC buffer for user app");
         return false;
