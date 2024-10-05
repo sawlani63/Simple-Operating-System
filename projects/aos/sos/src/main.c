@@ -211,9 +211,6 @@ void handle_vm_fault(seL4_CPtr reply) {
             break;
         }
     }
-    if (fault_addr == 0) {
-        return;
-    }
 
     if (reg == NULL) {
         /* We did not find a valid region for this memory.*/
@@ -796,7 +793,8 @@ NORETURN void *main_continued(UNUSED void *arg)
     network_init(&cspace, timer_vaddr, ntfn);
     console = network_console_init();
     network_console_register_handler(console, enqueue);
-    push_new_file(1, network_console_byte_send, deque, "console");
+    push_new_file(O_WRONLY, network_console_byte_send, deque, "console"); // initialise stdout
+    push_new_file(O_WRONLY, network_console_byte_send, deque, "console"); // initialise stderr
 
 #ifdef CONFIG_SOS_GDB_ENABLED
     /* Initialize the debugger */
@@ -979,7 +977,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 {
-    // ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_WRITE);
+    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_WRITE);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */
@@ -1017,7 +1015,7 @@ static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
 
 static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 {
-    // ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SYS_BRK);
+    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SYS_BRK);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
     mem_region_t *curr = user_process.addrspace->regions;
@@ -1045,6 +1043,6 @@ static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word sys
 static void wakeup(UNUSED uint32_t id, void* data)
 {
     struct task *args = (struct task *) data;
-    seL4_NBSend(args->reply, seL4_MessageInfo_new(0, 0, 0, 1));
+    seL4_NBSend(args->reply, seL4_MessageInfo_new(0, 0, 0, 0));
     free_untype(&args->reply, args->reply_ut);
 }

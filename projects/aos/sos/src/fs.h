@@ -74,9 +74,6 @@ int push_new_file(fmode_t mode, int (*write_handler)(char c), char (*read_handle
         ZF_LOGF_IF(!sem_ut, "No memory for notification");
         sync_bin_sem_init(queue_sem, sem_cptr, 0);
     }
-    if (id == 2) {
-        id += 2;
-    }
     struct file *file = create_file(mode, write_handler, read_handler, path);
     push_file(file);
     return file->fd;
