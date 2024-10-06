@@ -170,6 +170,8 @@ void handle_vm_fault(seL4_CPtr reply) {
         }
     }
 
+    seL4_ARM_VMAttributes attr = seL4_ARM_Default_VMAttributes;
+
     /* If there already exists a valid entry in our page table, reload the Hardware Page Table and
      * unblock the caller with an empty message. */
     if (l4_pt != NULL && l4_pt[l4_index].frame != NULL_FRAME) {
@@ -178,10 +180,13 @@ void handle_vm_fault(seL4_CPtr reply) {
             ZF_LOGE("Trying to write to a read only page");
             return;
         }
+        /* Assign the appropriate rights for the frame we are about to map. */
+        seL4_CapRights_t rights = seL4_CapRights_new(0, 0, entry.perms & REGION_RD, (entry.perms >> 1) & 1);
+        if (entry.perms & REGION_EX) {
+            attr |= seL4_ARM_ExecuteNever;
+        }
         if (map_frame_impl(&cspace, entry.frame, user_process.vspace, fault_addr,
-                           seL4_CapRights_new(0, 0, entry.perms & REGION_RD, (entry.perms >> 1) & 1),
-                           entry.perms & REGION_EX ? seL4_ARM_Default_VMAttributes : seL4_ARM_ExecuteNever,
-                           NULL, NULL, NULL) != 0) {
+                           rights, attr, NULL, NULL, NULL) != 0) {
             ZF_LOGE("Could not map the frame into the two page tables");
             return;
         }
@@ -240,6 +245,9 @@ void handle_vm_fault(seL4_CPtr reply) {
 
     /* Assign the appropriate rights for the frame we are about to map. */
     seL4_CapRights_t rights = seL4_CapRights_new(0, 0, reg->perms & REGION_RD, (reg->perms >> 1) & 1);
+    if (reg->perms & REGION_EX) {
+        attr |= seL4_ARM_ExecuteNever;
+    }
 
     /* Allocate a new frame to be mapped by the shadow page table. */
     frame_ref_t frame_ref = l4_pt[l4_index].frame = alloc_frame();
@@ -249,12 +257,8 @@ void handle_vm_fault(seL4_CPtr reply) {
     }
     l4_pt[l4_index].perms = reg->perms;
 
-    memset(frame_data(frame_ref), 0, PAGE_SIZE_4K);
-
     /* Map the frame into the relevant page tables. */
-    if (sos_map_frame_impl(&cspace, user_process.vspace, fault_addr, rights,
-                           reg->perms & REGION_EX ? seL4_ARM_PageCacheable : seL4_ARM_ExecuteNever | seL4_ARM_PageCacheable,
-                           frame_ref, l1_pt) != 0) {
+    if (sos_map_frame_impl(&cspace, user_process.vspace, fault_addr, rights, attr, frame_ref, l1_pt) != 0) {
         ZF_LOGE("Could not map the frame into the two page tables");
         return;
     }
@@ -394,7 +398,8 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
 
     /* Map in the stack frame for the user app */
     seL4_Error err = sos_map_frame(cspace, user_process.vspace, stack_bottom, seL4_AllRights,
-                        seL4_ARM_ExecuteNever, user_process.stack_frame, user_process.addrspace);
+                                   seL4_ARM_Default_VMAttributes | seL4_ARM_ExecuteNever,
+                                   user_process.stack_frame, user_process.addrspace);
     if (err != 0) {
         ZF_LOGE("Unable to map stack for user app");
         return 0;
@@ -481,8 +486,9 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
             return 0;
         }
 
-        err = sos_map_frame(cspace, user_process.vspace, stack_bottom,
-                        seL4_AllRights, seL4_ARM_ExecuteNever, frame, user_process.addrspace);
+        err = sos_map_frame(cspace, user_process.vspace, stack_bottom, seL4_AllRights,
+                            seL4_ARM_Default_VMAttributes | seL4_ARM_ExecuteNever, frame,
+                            user_process.addrspace);
     }
 
     return stack_top;

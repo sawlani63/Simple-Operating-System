@@ -66,12 +66,12 @@ static void pt_test(void) {
     }
 
     assert((void *) buf1 > (void *) TEST_ADDRESS);
-    fputs("Passed initial assert\n", stdout);
+    printf("Passed initial assert\n");
 
     /* stack test */
     do_pt_test(buf1_ptrs);
 
-    fputs("Passed stack test\n", stdout);
+    printf("Passed stack test\n");
 
     /* heap test */
     for (int b = 0; b < NBLOCKS; b++) {
@@ -82,7 +82,7 @@ static void pt_test(void) {
     for (int b = 0; b < NBLOCKS; b++) {
         free(buf2[b]);
     }
-    fputs("Passed heap test\n", stdout);
+    printf("Passed heap test\n");
 }
 
 static void recursive_stack_test(int counter) {
@@ -129,20 +129,17 @@ int test_buffers(int console_fd) {
         sos_usleep(1000000);
         uint64_t next_seconds = sos_time_stamp();
         assert(next_seconds > prev_seconds);
-        fputs("Tick\n", stdout);
+        printf("Tick\n");
     }
 }
 
 int test_stack_write(int console_fd) {
-   /* test a small string from the code segment */
-   char rip[45];
-   for (int i = 0; i < 44; i++) {
-    rip[i] = 'a';
-   }
-   rip[44] = '\0';
+   char rip[1000];
+   memset(rip, 'a', 999);
+   rip[999] = '\0';
    int result = sos_write(console_fd, rip, strlen(rip));    
    assert(result == strlen(rip));
-   fputs("\nPassed large write test\n", stdout);
+   printf("\nPassed large write test\n");
 }
 
 int main(void)
@@ -163,8 +160,8 @@ int main(void)
     test_stack_write(fd);
 
     test_buffers(fd);
-    fputs("Passed read/write buffer test\n", stdout);
+    printf("Passed read/write buffer test\n");
 
     // recursive_stack_test(0);
-    // fputs("Passed recursive stack test\n", stdout);
+    // printf("Passed recursive stack test\n");
 }

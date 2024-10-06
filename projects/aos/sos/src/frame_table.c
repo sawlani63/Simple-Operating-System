@@ -120,6 +120,9 @@ frame_ref_t alloc_frame(void)
 
     if (frame == NULL) {
         frame = alloc_fresh_frame();
+    } else {
+        /* If the frame wasn't fresh, zero it out for security. */
+        memset(frame_data(ref_from_frame(frame)), 0, PAGE_SIZE_4K);
     }
 
     if (frame != NULL) {
