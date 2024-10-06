@@ -249,9 +249,11 @@ void handle_vm_fault(seL4_CPtr reply) {
     }
     l4_pt[l4_index].perms = reg->perms;
 
+    memset(frame_data(frame_ref), 0, PAGE_SIZE_4K);
+
     /* Map the frame into the relevant page tables. */
     if (sos_map_frame_impl(&cspace, user_process.vspace, fault_addr, rights,
-                           reg->perms & REGION_EX ? seL4_ARM_Default_VMAttributes : seL4_ARM_ExecuteNever,
+                           reg->perms & REGION_EX ? seL4_ARM_PageCacheable : seL4_ARM_ExecuteNever | seL4_ARM_PageCacheable,
                            frame_ref, l1_pt) != 0) {
         ZF_LOGE("Could not map the frame into the two page tables");
         return;

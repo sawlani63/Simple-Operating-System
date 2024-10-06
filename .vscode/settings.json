@@ -59,6 +59,7 @@
         "simple_types.h": "c",
         "macros.h": "c",
         "mapping.h": "c",
-        "stdio.h": "c"
+        "stdio.h": "c",
+        "algorithm": "c"
     }
 }

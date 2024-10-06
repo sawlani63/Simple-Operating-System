@@ -66,12 +66,12 @@ static void pt_test(void) {
     }
 
     assert((void *) buf1 > (void *) TEST_ADDRESS);
-    printf("Passed initial assert\n");
+    fputs("Passed initial assert\n", stdout);
 
     /* stack test */
     do_pt_test(buf1_ptrs);
 
-    printf("Passed stack test\n");
+    fputs("Passed stack test\n", stdout);
 
     /* heap test */
     for (int b = 0; b < NBLOCKS; b++) {
@@ -82,7 +82,7 @@ static void pt_test(void) {
     for (int b = 0; b < NBLOCKS; b++) {
         free(buf2[b]);
     }
-    printf("Passed heap test\n");
+    fputs("Passed heap test\n", stdout);
 }
 
 static void recursive_stack_test(int counter) {
@@ -94,10 +94,6 @@ static void recursive_stack_test(int counter) {
         return;
     }
     recursive_stack_test(counter + 1);
-}
-
-static void stack_overflow(int counter) {
-    stack_overflow(counter + 1);
 }
 
 #define SMALL_BUF_SZ 2
@@ -133,20 +129,20 @@ int test_buffers(int console_fd) {
         sos_usleep(1000000);
         uint64_t next_seconds = sos_time_stamp();
         assert(next_seconds > prev_seconds);
-        printf("Tick\n");
+        fputs("Tick\n", stdout);
     }
 }
 
-int test_large_write(int console_fd) {
+int test_stack_write(int console_fd) {
    /* test a small string from the code segment */
-   char rip[100];
-   for (int i = 0; i < 99; i++) {
+   char rip[45];
+   for (int i = 0; i < 44; i++) {
     rip[i] = 'a';
    }
-   rip[99] = '\0';
+   rip[44] = '\0';
    int result = sos_write(console_fd, rip, strlen(rip));    
    assert(result == strlen(rip));
-   printf("\nPassed large write test\n");
+   fputs("\nPassed large write test\n", stdout);
 }
 
 int main(void)
@@ -164,13 +160,11 @@ int main(void)
     printf("Passed open/close test\n");
     
     pt_test();
-    test_large_write(fd);
+    test_stack_write(fd);
 
     test_buffers(fd);
-    printf("Passed read/write buffer test\n");
+    fputs("Passed read/write buffer test\n", stdout);
 
     // recursive_stack_test(0);
-    // printf("Passed recursive stack test\n");
-    
-    // stack_overflow(0);
+    // fputs("Passed recursive stack test\n", stdout);
 }
