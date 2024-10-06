@@ -38,12 +38,12 @@ int as_define_region(addrspace_t *as, seL4_Word vaddr, size_t memsize, unsigned 
 
 int as_define_ipc_buff(addrspace_t *as, seL4_Word *initipcbuff) {
     *initipcbuff = PROCESS_IPC_BUFFER;
-    return as_define_region(as, PROCESS_IPC_BUFFER, PAGE_SIZE, REGION_RD | REGION_WR);
+    return as_define_region(as, PROCESS_IPC_BUFFER, PAGE_SIZE_4K, REGION_RD | REGION_WR);
 }
 
 int as_define_stack(addrspace_t *as, seL4_Word *initstackptr) {
     *initstackptr = PROCESS_STACK_TOP;
-    return as_define_region(as, PROCESS_STACK_TOP - PAGE_SIZE, PAGE_SIZE, REGION_RD | REGION_WR);
+    return as_define_region(as, PROCESS_STACK_TOP - PAGE_SIZE_4K, PAGE_SIZE_4K, REGION_RD | REGION_WR);
 }
 
 int as_define_heap(addrspace_t *as, seL4_Word *initheapptr) {

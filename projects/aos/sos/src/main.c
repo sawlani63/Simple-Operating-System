@@ -116,11 +116,6 @@ static struct {
     seL4_CPtr stack;
 
     addrspace_t *addrspace;
-
-    char *cache_curr_path;
-    int curr_len;
-    int open_len;
-    int cache_curr_mode;
 } user_process;
 
 struct network_console *console;
@@ -484,32 +479,8 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
             return 0;
         }
 
-        /* allocate a slot to duplicate the stack frame cap so we can map it into the application */
-        seL4_CPtr frame_cptr = cspace_alloc_slot(cspace);
-        if (frame_cptr == seL4_CapNull) {
-            free_frame(frame);
-            ZF_LOGE("Failed to alloc slot for stack extra stack frame");
-            return 0;
-        }
-
-        /* copy the stack frame cap into the slot */
-        err = cspace_copy(cspace, frame_cptr, cspace, frame_page(frame), seL4_AllRights);
-        if (err != seL4_NoError) {
-            cspace_free_slot(cspace, frame_cptr);
-            free_frame(frame);
-            ZF_LOGE("Failed to copy cap");
-            return 0;
-        }
-
-        err = map_frame(cspace, frame_cptr, user_process.vspace, stack_bottom,
-                        seL4_AllRights, seL4_ARM_Default_VMAttributes);
-        if (err != 0) {
-            cspace_delete(cspace, frame_cptr);
-            cspace_free_slot(cspace, frame_cptr);
-            free_frame(frame);
-            ZF_LOGE("Unable to map extra stack frame for user app");
-            return 0;
-        }
+        err = sos_map_frame(cspace, user_process.vspace, stack_bottom,
+                        seL4_AllRights, seL4_ARM_ExecuteNever, frame, user_process.addrspace);
     }
 
     return stack_top;
@@ -648,7 +619,7 @@ bool start_first_process(char *app_name, seL4_CPtr ep)
 
     /* Map in the IPC buffer for the thread */
     err = sos_map_frame(&cspace, user_process.vspace, PROCESS_IPC_BUFFER, seL4_AllRights,
-                        seL4_ARM_ExecuteNever, user_process.ipc_buffer_frame, user_process.addrspace);
+                        seL4_ARM_Default_VMAttributes, user_process.ipc_buffer_frame, user_process.addrspace);
     if (err != 0) {
         ZF_LOGE("Unable to map IPC buffer for user app");
         return false;
@@ -771,8 +742,8 @@ NORETURN void *main_continued(UNUSED void *arg)
     console = network_console_init();
     network_console_register_handler(console, enqueue);
     init_console_sem();
-    push_new_file(O_WRONLY, network_console_byte_send, deque, "console"); // initialise stdout
-    push_new_file(O_WRONLY, network_console_byte_send, deque, "console"); // initialise stderr
+    push_new_file(O_WRONLY, network_console_send, deque, "console"); // initialise stdout
+    push_new_file(O_WRONLY, network_console_send, deque, "console"); // initialise stderr
 
 #ifdef CONFIG_SOS_GDB_ENABLED
     /* Initialize the debugger */
@@ -859,37 +830,55 @@ int main(void)
     UNREACHABLE();
 }
 
+static frame_ref_t get_frame(seL4_Word vaddr) {
+    uint16_t l1_index = (vaddr >> 39) & 0x1FF; /* Top 9 bits */
+    uint16_t l2_index = (vaddr >> 30) & 0x1FF; /* Next 9 bits */
+    uint16_t l3_index = (vaddr >> 21) & 0x1FF; /* Next 9 bits */
+    uint16_t l4_index = (vaddr >> 12) & 0x1FF; /* Next 9 bits */
+    return user_process.addrspace->page_table[l1_index].l2[l2_index].l3[l3_index].l4[l4_index].frame;
+}
+
 static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_task) 
 {
     ZF_LOGE("syscall: thread example made syscall %d!\n", SYSCALL_SOS_OPEN);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
-    if (curr_task->msg[1]) {
-        user_process.open_len = curr_task->msg[3];
-        user_process.curr_len = 0;
-        user_process.cache_curr_mode = curr_task->msg[4];
-        user_process.cache_curr_path = malloc(user_process.open_len);
-    }
+    seL4_Word vaddr = curr_task->msg[1];
+    int path_len = curr_task->msg[2];
+    int mode = curr_task->msg[3];
 
-    user_process.cache_curr_path[user_process.curr_len++] = curr_task->msg[2];
-    if (user_process.curr_len != user_process.open_len) {
-        seL4_SetMR(0, -1);
-        return;
-    }
+    uint16_t offset = vaddr & 0xFFF;
+    size_t bytes_left = path_len;
+    char *target = "console";
 
-    int fd;
-    if (!strcmp(user_process.cache_curr_path, "console")) {
-        if (user_process.cache_curr_mode != O_WRONLY && console_open_for_read) {
+    while (bytes_left > 0) {
+        bytes_left = PAGE_SIZE_4K - offset > bytes_left ? 0 : PAGE_SIZE_4K - offset;
+
+        sync_bin_sem_wait(syscall_sem);
+        char *data = (char *) frame_data(get_frame(vaddr));
+        sync_bin_sem_post(syscall_sem);
+
+        if (strncmp(data + offset, target, PAGE_SIZE_4K - offset)) {
+            seL4_SetMR(0, -1);
+            return;
+        } else if (!bytes_left && console_open_for_read && mode != O_WRONLY) {
             seL4_SetMR(0, -1);
             return;
         }
-        sync_bin_sem_wait(syscall_sem);
-        console_open_for_read = true;
-        fd = push_new_file(user_process.cache_curr_mode, network_console_byte_send,
-                           deque, user_process.cache_curr_path);
-        sync_bin_sem_post(syscall_sem);
+
+        target += (PAGE_SIZE_4K - offset);
+        vaddr += (PAGE_SIZE_4K - offset);
+        offset = 0;  // Offset only applies on the first iteration
     }
+
+
+    /* If we made it here that means the strings are equal. */
+    sync_bin_sem_wait(syscall_sem);
+    console_open_for_read = true;
+    int fd = push_new_file(mode, network_console_send, deque, "console");
+    sync_bin_sem_post(syscall_sem);
+
     seL4_SetMR(0, fd);
 }
 
@@ -910,7 +899,6 @@ static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_t
         console_open_for_read = false;
         sync_bin_sem_post(syscall_sem);
     }
-    free(found->path);
     free(found);
     seL4_SetMR(0, 0);
 }
@@ -922,6 +910,8 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */
     int read_fd = curr_task->msg[1];
+    seL4_Word vaddr = curr_task->msg[2];
+    int nbyte = curr_task->msg[3];
 
     sync_bin_sem_wait(syscall_sem);
     struct file *found = find_file(read_fd);
@@ -929,8 +919,33 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
         /* Set the reply message to be an error value */
         seL4_SetMR(0, -1);
     } else {
+        /* Since this is a bidirectional stream, we will flush any outgoing writes before continuing */
+        // if (found->mode == O_RDWR) {
+        //     fflush(NULL);
+        // }
+
+        /* Perform the read operation. We don't assume that the buffer is only 1 frame long. */
+        char *data = (char *)frame_data(get_frame(vaddr));
+        uint16_t offset = vaddr & 0xFFF;
+        uint16_t i;
+        for (i = 0; i < nbyte; i++) {
+            if (i + offset >= PAGE_SIZE_4K) {
+                data = (char *)frame_data(get_frame(vaddr));
+                offset = 0;
+            }
+
+            /* Write to data buffer */
+            char recv = found->read_handler();
+            data[i + offset] = recv;
+            if (recv == '\n') {
+                i++;
+                break;
+            }
+        }
+        sync_bin_sem_post(syscall_sem);
+
         /* Set the reply message to be the return value of the read_handler */
-        seL4_SetMR(0, found->read_handler());
+        seL4_SetMR(0, i);
     }
     sync_bin_sem_post(syscall_sem);
 }
@@ -938,23 +953,43 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 {
     ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_WRITE);
-    /* construct a reply message of length 1 */
+    /* Construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    /* Receive a fd from sos.c */
-    int write_fd = curr_task->msg[1];
-    /* Receive a byte from sos.c */
-    char receive = curr_task->msg[2];
 
+    /* Receive fd, virtual address, and number of bytes from sos.c */
+    int write_fd = curr_task->msg[1];
+    seL4_Word vaddr = curr_task->msg[2];
+    size_t nbyte = curr_task->msg[3];
+
+    /* Find the file associated with the file descriptor */
     sync_bin_sem_wait(syscall_sem);
     struct file *found = find_file(write_fd);
     if (found == NULL || found->mode == O_RDONLY) {
-        /* Set the reply message to be an error value */
+        /* Set the reply message to be an error value and return early */
         seL4_SetMR(0, -1);
-    } else {
-        /* Set the reply message to be the return value of the write_handler */
-        seL4_SetMR(0, found->write_handler(receive));
+        return;
+    }
+
+    size_t bytes_left = nbyte;
+    int offset = vaddr & 0xFFF;
+
+    /* Perform the write operation. We don't assume that the buffer is only 1 frame long. */
+    while (bytes_left > 0) {
+        char *data = (char *)frame_data(get_frame(vaddr));
+        size_t len = bytes_left > (PAGE_SIZE_4K - offset) ? (PAGE_SIZE_4K - offset) : bytes_left;
+
+        /* Write data */
+        found->write_handler(data + offset, len);
+
+        /* Update offset, virtual address, and bytes left */
+        offset = 0;
+        vaddr += len;
+        bytes_left -= len;
     }
     sync_bin_sem_post(syscall_sem);
+
+    /* Set the reply message to the number of bytes written */
+    seL4_SetMR(0, nbyte - bytes_left);
 }
 
 static void syscall_sos_usleep(bool *have_reply, struct task *curr_task)
