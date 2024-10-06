@@ -48,6 +48,10 @@ int sos_open(const char *path, fmode_t mode)
     seL4_SetMR(2, path[0]);
     seL4_SetMR(3, len);
     seL4_SetMR(4, mode);
+    char t = (mode + '0');
+    sos_debug_print("\n\n", 2);
+    sos_debug_print(&t, 1);
+    sos_debug_print("\n\n", 2);
     seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 5));
     int recv = seL4_GetMR(0);
     for (int i = 1; i < len; i++) {

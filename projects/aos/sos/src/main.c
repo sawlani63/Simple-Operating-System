@@ -624,7 +624,7 @@ bool start_first_process(char *app_name, seL4_CPtr ep)
 
     /* Map in the IPC buffer for the thread */
     err = sos_map_frame(&cspace, user_process.vspace, PROCESS_IPC_BUFFER, seL4_AllRights,
-                        seL4_ARM_ExecuteNever, user_process.ipc_buffer_frame, user_process.addrspace);
+                        seL4_ARM_Default_VMAttributes, user_process.ipc_buffer_frame, user_process.addrspace);
     if (err != 0) {
         ZF_LOGE("Unable to map IPC buffer for user app");
         return false;
