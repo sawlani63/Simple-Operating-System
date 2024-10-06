@@ -182,7 +182,7 @@ void handle_vm_fault(seL4_CPtr reply) {
         }
         /* Assign the appropriate rights for the frame we are about to map. */
         seL4_CapRights_t rights = seL4_CapRights_new(0, 0, entry.perms & REGION_RD, (entry.perms >> 1) & 1);
-        if (entry.perms & REGION_EX) {
+        if (!(entry.perms & REGION_EX)) {
             attr |= seL4_ARM_ExecuteNever;
         }
         if (map_frame_impl(&cspace, entry.frame, user_process.vspace, fault_addr,
@@ -245,7 +245,7 @@ void handle_vm_fault(seL4_CPtr reply) {
 
     /* Assign the appropriate rights for the frame we are about to map. */
     seL4_CapRights_t rights = seL4_CapRights_new(0, 0, reg->perms & REGION_RD, (reg->perms >> 1) & 1);
-    if (reg->perms & REGION_EX) {
+    if (!(reg->perms & REGION_EX)) {
         attr |= seL4_ARM_ExecuteNever;
     }
 
