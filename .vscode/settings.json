@@ -58,6 +58,7 @@
         "networkconsole.h": "c",
         "simple_types.h": "c",
         "macros.h": "c",
-        "mapping.h": "c"
+        "mapping.h": "c",
+        "stdio.h": "c"
     }
 }

@@ -38,33 +38,13 @@ int sos_open(const char *path, fmode_t mode)
     if (path == NULL) {
         return -1;
     }
-    int len = strlen(path);
-    if (len > MAX_IO_BUF) {
-        return -1;
-    }
-
+    
     seL4_SetMR(0, SYSCALL_SOS_OPEN);
-    seL4_SetMR(1, 1);
-    seL4_SetMR(2, path[0]);
-    seL4_SetMR(3, len);
-    seL4_SetMR(4, mode);
-    char t = (mode + '0');
-    sos_debug_print("\n\n", 2);
-    sos_debug_print(&t, 1);
-    sos_debug_print("\n\n", 2);
-    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 5));
-    int recv = seL4_GetMR(0);
-    for (int i = 1; i < len; i++) {
-        if (recv == -2) {
-            return -1;
-        }
-        seL4_SetMR(0, SYSCALL_SOS_OPEN);
-        seL4_SetMR(1, 0);
-        seL4_SetMR(2, path[i]);
-        seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 3));
-        recv = seL4_GetMR(0);
-    }
-    return recv == -2 ? -1 : recv;
+    seL4_SetMR(1, (seL4_Word) path);
+    seL4_SetMR(2, strlen(path));
+    seL4_SetMR(3, mode);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 4));
+    return seL4_GetMR(0);
 }
 
 int sos_close(int file)
@@ -81,20 +61,12 @@ int sos_read(int file, char *buf, size_t nbyte)
         return -1;
     }
 
-    for (int i = 0; i < nbyte; i++) {
-        seL4_SetMR(0, SYSCALL_SOS_READ);
-        seL4_SetMR(1, file);
-        seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 2));
-        char recv = seL4_GetMR(0);
-        if (recv == -1) {
-            return -1;
-        }
-        buf[i] = recv;
-        if (recv == '\n') {
-            return i + 1;
-        }
-    }
-    return nbyte;
+    seL4_SetMR(0, SYSCALL_SOS_READ);
+    seL4_SetMR(1, file);
+    seL4_SetMR(2, (seL4_Word) buf);
+    seL4_SetMR(3, nbyte);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 4));
+    return seL4_GetMR(0);
 }
 
 int sos_write(int file, const char *buf, size_t nbyte)
@@ -103,16 +75,12 @@ int sos_write(int file, const char *buf, size_t nbyte)
         return -1;
     }
 
-    for (int i = 0; i < nbyte; i++) {
-        seL4_SetMR(0, SYSCALL_SOS_WRITE);
-        seL4_SetMR(1, file);
-        seL4_SetMR(2, buf[i]);
-        seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 3));
-        if (seL4_GetMR(0) == -1) {
-            return -1;
-        }
-    }
-    return nbyte;
+    seL4_SetMR(0, SYSCALL_SOS_WRITE);
+    seL4_SetMR(1, file);
+    seL4_SetMR(2, (seL4_Word) buf);
+    seL4_SetMR(3, nbyte);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 4));
+    return seL4_GetMR(0);
 }
 
 int sos_getdirent(int pos, char *name, size_t nbyte)

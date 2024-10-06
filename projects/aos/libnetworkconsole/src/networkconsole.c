@@ -92,12 +92,12 @@ struct network_console *network_console_init(void)
     return &network_console;
 }
 
-int network_console_send(struct network_console *network_console, char *data, int len)
+int network_console_send(char *data, int len)
 {
-    assert(network_console->pico_socket != NULL);
+    assert(network_console.pico_socket != NULL);
     int total_sent = 0;
     while (total_sent < len) {
-        int sent = pico_socket_sendto(network_console->pico_socket, data, len, &network_console->peer, network_console->port);
+        int sent = pico_socket_sendto(network_console.pico_socket, data, len, &network_console.peer, network_console.port);
         if (sent == -1) {
             ZF_LOGE("Pico send failed");
             return -1;
@@ -108,11 +108,6 @@ int network_console_send(struct network_console *network_console, char *data, in
         total_sent += sent;
     }
     return len;
-}
-
-int network_console_byte_send(char c)
-{
-    return network_console_send(&network_console, &c, 1);
 }
 
 int network_console_register_handler(struct network_console *network_console,

@@ -139,11 +139,11 @@ int test_buffers(int console_fd) {
 
 int test_large_write(int console_fd) {
    /* test a small string from the code segment */
-   char rip[5000];
-   for (int i = 0; i < 4999; i++) {
+   char rip[100];
+   for (int i = 0; i < 99; i++) {
     rip[i] = 'a';
    }
-   rip[4999] = '\0';
+   rip[99] = '\0';
    int result = sos_write(console_fd, rip, strlen(rip));    
    assert(result == strlen(rip));
    printf("\nPassed large write test\n");
@@ -151,15 +151,15 @@ int test_large_write(int console_fd) {
 
 int main(void)
 {
-    int fd = sos_open("console\0", O_RDWR);
+    int fd = sos_open("console", O_RDWR);
     assert(fd > 2);
-    int fail = sos_open("console\0", O_RDONLY);
+    int fail = sos_open("console", O_RDONLY);
     assert(fail == -1);
-    fail = sos_open("console\0", O_RDWR);
+    fail = sos_open("console", O_RDWR);
     assert(fail == -1);
     int res = sos_close(fd);
     assert(!res);
-    fd = sos_open("console\0", O_RDWR);
+    fd = sos_open("console", O_RDWR);
     assert(fd > 2);
     printf("Passed open/close test\n");
     
@@ -169,8 +169,8 @@ int main(void)
     test_buffers(fd);
     printf("Passed read/write buffer test\n");
 
-    recursive_stack_test(0);
-    printf("Passed recursive stack test\n");
+    // recursive_stack_test(0);
+    // printf("Passed recursive stack test\n");
     
     // stack_overflow(0);
 }

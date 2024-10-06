@@ -22,7 +22,7 @@ struct network_console *network_console_init(void);
  * Send data over the network to appear on your local "serial" interface.
  * Returns the length of data sent, which may be less than len, or -1 on error.
  */
-int network_console_send(struct network_console *network_console, char *data, int len);
+int network_console_send(char *data, int len);
 
 /* 
  * Register a handler function to be called when the network receives 

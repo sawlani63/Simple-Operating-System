@@ -5,7 +5,7 @@ typedef int fmode_t;
 struct file {
     int fd;
     fmode_t mode;
-    int (*write_handler)(char c);
+    int (*write_handler)(char *data, int len);
     char (*read_handler)(void);
     char* path;
     struct file *next;
@@ -14,7 +14,7 @@ struct file {
 struct file *file_stack = NULL;
 int id = 1;
 
-static struct file *create_file(fmode_t mode, int (*write_handler)(char c), char (*read_handler)(void), char* path) {
+static struct file *create_file(fmode_t mode, int (*write_handler)(char *data, int len), char (*read_handler)(void), char* path) {
     struct file *new_file = malloc(sizeof(struct file));
     new_file->fd = id++;
     new_file->mode = mode;
@@ -30,7 +30,7 @@ static void push_file(struct file *file) {
     file_stack = file;
 }
 
-int push_new_file(fmode_t mode, int (*write_handler)(char c), char (*read_handler)(void), char* path) {
+int push_new_file(fmode_t mode, int (*write_handler)(char *data, int len), char (*read_handler)(void), char* path) {
     struct file *file = create_file(mode, write_handler, read_handler, path);
     push_file(file);
     return file->fd;
