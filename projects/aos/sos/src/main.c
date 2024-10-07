@@ -267,7 +267,8 @@ bool handle_vm_fault(seL4_Word fault_addr) {
             }
             /* Fault occurred in a valid region and permissions line up so we can safely break out. */
             break;
-        } else if (top_of_region == PROCESS_STACK_TOP && fault_addr < top_of_region && fault_addr >= heap_top) {
+        } else if (top_of_region == PROCESS_STACK_TOP
+                   && fault_addr < top_of_region && (fault_addr & ~(PAGE_SIZE_4K - 1)) >= heap_top) {
             /* Expand the stack. */
             reg->base = fault_addr;
             reg->size = PROCESS_STACK_TOP - fault_addr;
@@ -931,10 +932,13 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
     seL4_Word vaddr = curr_task->msg[1];
     int path_len = curr_task->msg[2];
+    sync_bin_sem_wait(syscall_sem);
     if (!loop_vaddr_check(vaddr, path_len)) {
+        sync_bin_sem_post(syscall_sem);
         seL4_SetMR(0, -1);
         return;
     }
+    sync_bin_sem_post(syscall_sem);
     int mode = curr_task->msg[3];
 
     uint16_t offset = vaddr & (PAGE_SIZE_4K - 1);
@@ -946,15 +950,18 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
         sync_bin_sem_wait(syscall_sem);
         char *data = (char *) frame_data(get_frame(vaddr));
-        sync_bin_sem_post(syscall_sem);
 
         if (strncmp(data + offset, target, PAGE_SIZE_4K - offset)) {
+            sync_bin_sem_post(syscall_sem);
             seL4_SetMR(0, -1);
             return;
         } else if (!bytes_left && console_open_for_read && mode != O_WRONLY) {
+            sync_bin_sem_post(syscall_sem);
             seL4_SetMR(0, -1);
             return;
         }
+
+        sync_bin_sem_post(syscall_sem);
 
         target += (PAGE_SIZE_4K - offset);
         vaddr += (PAGE_SIZE_4K - offset);
@@ -1001,12 +1008,13 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
     int read_fd = curr_task->msg[1];
     seL4_Word vaddr = curr_task->msg[2];
     int nbyte = curr_task->msg[3];
+    sync_bin_sem_wait(syscall_sem);
     if (!loop_vaddr_check(vaddr, nbyte)) {
+        sync_bin_sem_post(syscall_sem);
         seL4_SetMR(0, -1);
         return;
     }
 
-    sync_bin_sem_wait(syscall_sem);
     struct file *found = find_file(read_fd);
     if (found == NULL || found->mode == O_WRONLY) {
         /* Set the reply message to be an error value */
@@ -1054,6 +1062,7 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
     struct file *found = find_file(write_fd);
     if (found == NULL || found->mode == O_RDONLY) {
         /* Set the reply message to be an error value and return early */
+        sync_bin_sem_post(syscall_sem);
         seL4_SetMR(0, -1);
         return;
     }
@@ -1066,6 +1075,7 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
         size_t len = bytes_left > (PAGE_SIZE_4K - offset) ? (PAGE_SIZE_4K - offset) : bytes_left;
         
         if (!vaddr_check(vaddr)) {
+            sync_bin_sem_post(syscall_sem);
             seL4_SetMR(0, -1);
             return;
         }
@@ -1108,9 +1118,7 @@ static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_tas
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
     uintptr_t newbrk = curr_task->msg[1];
-    if (!newbrk) {
-        seL4_SetMR(0, PROCESS_HEAP_START);
-    } else if (newbrk >= user_process.stack_reg->base) {
+    if (!newbrk || newbrk >= (user_process.stack_reg->base & ~(PAGE_SIZE_4K - 1))) {
         seL4_SetMR(0, user_process.heap_reg->base + user_process.heap_reg->size);
     } else {
         user_process.heap_reg->size = newbrk - PROCESS_HEAP_START;
