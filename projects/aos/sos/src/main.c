@@ -143,7 +143,7 @@ void handle_vm_fault(seL4_CPtr reply) {
     
     /* A VM Fault is an IPC. Check the seL4 Manual section 6.2.7 for message structure. We also
      * page align the vaddr since the Hardware Page Table expects addresses to be page aligned. */
-    seL4_Word fault_addr = seL4_GetMR(seL4_VMFault_Addr) & ~(PAGE_SIZE_4K - 1);
+    seL4_Word fault_addr = seL4_GetMR(seL4_VMFault_Addr);
 
     if (as == NULL || as->page_table == NULL) {
         ZF_LOGE("Encountered a weird error where the address space or level 1 page table is null");

@@ -84,6 +84,9 @@ seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspac
     uint16_t l2_index = (vaddr >> 30) & 0x1FF; /* Next 9 bits */
     uint16_t l3_index = (vaddr >> 21) & 0x1FF; /* Next 9 bits */
 
+    /* Page align the vaddr */
+    vaddr &= ~(PAGE_SIZE_4K - 1);
+
     /* Attempt the mapping */
     seL4_Error err = seL4_ARM_Page_Map(frame_cap, vspace, vaddr, rights, attr);
     for (size_t i = 0; i < MAPPING_SLOTS && err == seL4_FailedLookup; i++) {
