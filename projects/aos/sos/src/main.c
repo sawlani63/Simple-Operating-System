@@ -751,8 +751,10 @@ NORETURN void *main_continued(UNUSED void *arg)
     console = network_console_init();
     network_console_register_handler(console, enqueue);
     init_console_sem();
-    push_new_file(O_WRONLY, network_console_send, deque, "console"); // initialise stdout
-    push_new_file(O_WRONLY, network_console_send, deque, "console"); // initialise stderr
+    int fd = push_new_file(O_WRONLY, network_console_send, deque, "console"); // initialise stdout
+    ZF_LOGF_IF(fd == -1, "No memory for new file object");
+    fd = push_new_file(O_WRONLY, network_console_send, deque, "console"); // initialise stderr
+    ZF_LOGF_IF(fd == -1, "No memory for new file object");
 
 #ifdef CONFIG_SOS_GDB_ENABLED
     /* Initialize the debugger */
@@ -776,6 +778,7 @@ NORETURN void *main_continued(UNUSED void *arg)
 
     /* Initialise semaphores for synchronisation and console blocking */
     syscall_sem = malloc(sizeof(sync_bin_sem_t));
+    ZF_LOGF_IF(!syscall_sem, "No memory for semaphore object");
     ut_t *sem_ut = alloc_retype(&sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!sem_ut, "No memory for notification");
     sync_bin_sem_init(syscall_sem, sem_cptr, 1);
