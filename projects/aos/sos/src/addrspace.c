@@ -10,7 +10,6 @@ addrspace_t *as_create() {
 	}
 
     as->regions = NULL;
-    as->heap_top = PROCESS_HEAP_START;
     as->page_table = calloc(sizeof(page_upper_directory), PAGE_TABLE_ENTRIES);
     if (as->page_table == NULL) {
         free(as);
@@ -20,10 +19,10 @@ addrspace_t *as_create() {
 	return as;
 }
 
-int as_define_region(addrspace_t *as, seL4_Word vaddr, size_t memsize, unsigned char perms) {
+mem_region_t *as_define_region(addrspace_t *as, seL4_Word vaddr, size_t memsize, unsigned char perms) {
     mem_region_t *region = malloc(sizeof(mem_region_t));
     if (region == NULL) {
-        return -1;
+        return NULL;
     }
     region->base = vaddr;
     region->size = memsize;
@@ -33,20 +32,18 @@ int as_define_region(addrspace_t *as, seL4_Word vaddr, size_t memsize, unsigned 
     as->regions = region;
     as->regions->next = temp;
 
-	return memsize;
+	return region;
 }
 
-int as_define_ipc_buff(addrspace_t *as, seL4_Word *initipcbuff) {
+mem_region_t *as_define_ipc_buff(addrspace_t *as, seL4_Word *initipcbuff) {
     *initipcbuff = PROCESS_IPC_BUFFER;
     return as_define_region(as, PROCESS_IPC_BUFFER, PAGE_SIZE_4K, REGION_RD | REGION_WR);
 }
 
-int as_define_stack(addrspace_t *as, seL4_Word *initstackptr) {
-    *initstackptr = PROCESS_STACK_TOP;
+mem_region_t *as_define_stack(addrspace_t *as) {
     return as_define_region(as, PROCESS_STACK_TOP - PAGE_SIZE_4K, PAGE_SIZE_4K, REGION_RD | REGION_WR);
 }
 
-int as_define_heap(addrspace_t *as, seL4_Word *initheapptr) {
-    *initheapptr = PROCESS_HEAP_START;
+mem_region_t *as_define_heap(addrspace_t *as) {
     return as_define_region(as, PROCESS_HEAP_START, 0, REGION_RD | REGION_WR);
 }

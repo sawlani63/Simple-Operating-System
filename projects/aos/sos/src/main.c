@@ -114,6 +114,9 @@ static struct {
 
     frame_ref_t stack_frame;
     seL4_CPtr stack;
+    mem_region_t *stack_reg;
+
+    mem_region_t *heap_reg;
 
     addrspace_t *addrspace;
 } user_process;
@@ -194,6 +197,7 @@ void handle_vm_fault(seL4_CPtr reply) {
     }
 
     /* Check if the fault occurred in a valid region. */
+    seL4_Word heap_top = user_process.heap_reg->base + user_process.heap_reg->size;
     mem_region_t *reg;
     for (reg = as->regions; reg != NULL; reg = reg->next) {
         seL4_Word top_of_region = reg->base + reg->size;
@@ -207,7 +211,7 @@ void handle_vm_fault(seL4_CPtr reply) {
             }
             /* Fault occurred in a valid region and permissions line up so we can safely break out. */
             break;
-        } else if (top_of_region == PROCESS_STACK_TOP && fault_addr < top_of_region && fault_addr >= as->heap_top) {
+        } else if (top_of_region == PROCESS_STACK_TOP && fault_addr < top_of_region && fault_addr >= heap_top) {
             /* Expand the stack. */
             reg->base = fault_addr;
             reg->size = PROCESS_STACK_TOP - fault_addr;
@@ -374,6 +378,13 @@ static int stack_write(seL4_Word *mapped_stack, int index, uintptr_t val)
  * start up and initialise the C library */
 static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, elf_t *elf_file)
 {
+    /* Allocating a region for the stack */
+    user_process.stack_reg = as_define_stack(user_process.addrspace);
+    if (user_process.stack_reg == NULL) {
+        ZF_LOGD("Failed to alloc stack region");
+        return -1;
+    }
+
     /* Create a stack frame */
     user_process.stack_frame = alloc_frame();
     if (user_process.stack_frame == NULL_FRAME) {
@@ -383,8 +394,8 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
     user_process.stack = frame_page(user_process.stack_frame);
 
     /* virtual addresses in the target process' address space */
-    uintptr_t stack_top;
-    uintptr_t stack_bottom = PROCESS_STACK_TOP - as_define_stack(user_process.addrspace, &stack_top);
+    uintptr_t stack_top = PROCESS_STACK_TOP;
+    uintptr_t stack_bottom = PROCESS_STACK_TOP - PAGE_SIZE_4K;
     /* virtual addresses in the SOS's address space */
     void *local_stack_top  = (seL4_Word *) SOS_SCRATCH;
     uintptr_t local_stack_bottom = SOS_SCRATCH - PAGE_SIZE_4K;
@@ -615,8 +626,12 @@ bool start_first_process(char *app_name, seL4_CPtr ep)
     /* set up the stack */
     seL4_Word sp = init_process_stack(&cspace, seL4_CapInitThreadVSpace, &elf_file);
 
-    /* set up the heap */
-    as_define_heap(user_process.addrspace, &user_process.addrspace->heap_top);
+    /* Allocating a region for the heap */
+    user_process.heap_reg = as_define_heap(user_process.addrspace);
+    if (user_process.stack_reg == NULL) {
+        ZF_LOGD("Failed to alloc heap region");
+        return false;
+    }
 
     /* load the elf image from the cpio file */
     err = elf_load(&cspace, user_process.vspace, &elf_file, user_process.addrspace);
@@ -860,7 +875,7 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
     int path_len = curr_task->msg[2];
     int mode = curr_task->msg[3];
 
-    uint16_t offset = vaddr & 0xFFF;
+    uint16_t offset = vaddr & (PAGE_SIZE_4K - 1);
     size_t bytes_left = path_len;
     char *target = "console";
 
@@ -931,14 +946,9 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
         /* Set the reply message to be an error value */
         seL4_SetMR(0, -1);
     } else {
-        /* Since this is a bidirectional stream, we will flush any outgoing writes before continuing */
-        // if (found->mode == O_RDWR) {
-        //     fflush(NULL);
-        // }
-
         /* Perform the read operation. We don't assume that the buffer is only 1 frame long. */
         char *data = (char *)frame_data(get_frame(vaddr));
-        uint16_t offset = vaddr & 0xFFF;
+        uint16_t offset = vaddr & (PAGE_SIZE_4K - 1);
         uint16_t i;
         for (i = 0; i < nbyte; i++) {
             if (i + offset >= PAGE_SIZE_4K) {
@@ -983,7 +993,7 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
     }
 
     size_t bytes_left = nbyte;
-    int offset = vaddr & 0xFFF;
+    int offset = vaddr & (PAGE_SIZE_4K - 1);
 
     /* Perform the write operation. We don't assume that the buffer is only 1 frame long. */
     while (bytes_left > 0) {
@@ -1025,17 +1035,14 @@ static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_tas
     ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SYS_BRK);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
-    mem_region_t *curr = user_process.addrspace->regions;
-    while (curr != NULL && curr->base != PROCESS_HEAP_START) {
-        curr = curr->next;
-    }
-
     uintptr_t newbrk = curr_task->msg[1];
-    if (curr == NULL || !newbrk) {
+    if (!newbrk) {
         seL4_SetMR(0, PROCESS_HEAP_START);
+    } else if (newbrk >= user_process.stack_reg->base) {
+        seL4_SetMR(0, user_process.heap_reg->base + user_process.heap_reg->size);
     } else {
-        curr->size = newbrk - PROCESS_HEAP_START;
-        seL4_SetMR(0, user_process.addrspace->heap_top = newbrk);
+        user_process.heap_reg->size = newbrk - PROCESS_HEAP_START;
+        seL4_SetMR(0, newbrk);
     }
 }
 
