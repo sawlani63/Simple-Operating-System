@@ -174,7 +174,7 @@ void handle_vm_fault(seL4_CPtr reply) {
 
     /* If there already exists a valid entry in our page table, reload the Hardware Page Table and
      * unblock the caller with an empty message. */
-    if (l4_pt != NULL && l4_pt[l4_index].frame != NULL_FRAME) {
+    if (l4_pt != NULL && l4_pt[l4_index].shadow_frame_ref != NULL_FRAME) {
         pt_entry entry = l4_pt[l4_index];
         if (!debug_is_read_fault() && (entry.perms & REGION_WR) == 0) {
             ZF_LOGE("Trying to write to a read only page");
@@ -185,7 +185,7 @@ void handle_vm_fault(seL4_CPtr reply) {
         if (!(entry.perms & REGION_EX)) {
             attr |= seL4_ARM_ExecuteNever;
         }
-        if (map_frame_impl(&cspace, entry.frame, user_process.vspace, fault_addr,
+        if (map_frame_impl(&cspace, entry.shadow_frame_ref, user_process.vspace, fault_addr,
                            rights, attr, NULL, NULL, NULL) != 0) {
             ZF_LOGE("Could not map the frame into the two page tables");
             return;
@@ -250,7 +250,7 @@ void handle_vm_fault(seL4_CPtr reply) {
     }
 
     /* Allocate a new frame to be mapped by the shadow page table. */
-    frame_ref_t frame_ref = l4_pt[l4_index].frame = alloc_frame();
+    frame_ref_t frame_ref = l4_pt[l4_index].shadow_frame_ref = alloc_frame();
     if (frame_ref == NULL_FRAME) {
         ZF_LOGE("Failed to allocate a frame");
         return;
@@ -258,7 +258,7 @@ void handle_vm_fault(seL4_CPtr reply) {
     l4_pt[l4_index].perms = reg->perms;
 
     /* Map the frame into the relevant page tables. */
-    if (sos_map_frame_impl(&cspace, user_process.vspace, fault_addr, rights, attr, frame_ref, l1_pt) != 0) {
+    if (sos_map_frame_impl(&cspace, user_process.vspace, fault_addr, rights, attr, frame_ref, l1_pt, l4_pt) != 0) {
         ZF_LOGE("Could not map the frame into the two page tables");
         return;
     }
@@ -844,7 +844,7 @@ static frame_ref_t get_frame(seL4_Word vaddr) {
     uint16_t l2_index = (vaddr >> 30) & 0x1FF; /* Next 9 bits */
     uint16_t l3_index = (vaddr >> 21) & 0x1FF; /* Next 9 bits */
     uint16_t l4_index = (vaddr >> 12) & 0x1FF; /* Next 9 bits */
-    return user_process.addrspace->page_table[l1_index].l2[l2_index].l3[l3_index].l4[l4_index].frame;
+    return user_process.addrspace->page_table[l1_index].l2[l2_index].l3[l3_index].l4[l4_index].shadow_frame_ref;
 }
 
 static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_task) 

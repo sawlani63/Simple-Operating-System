@@ -169,10 +169,11 @@ seL4_Error sos_map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr
 }
 
 seL4_Error sos_map_frame_impl(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, seL4_CapRights_t rights,
-                              seL4_ARM_VMAttributes attr, frame_ref_t frame_ref, page_upper_directory *page_table)
+                              seL4_ARM_VMAttributes attr, frame_ref_t frame_ref, page_upper_directory *page_table,
+                              pt_entry *l4_pt)
 {
     /* create slot for the frame to load the data into */
-    seL4_CPtr frame_cap = cspace_alloc_slot(cspace);
+    seL4_CPtr frame_cap = l4_pt[(vaddr >> 12) & 0x1FF].hardware_frame_cap = cspace_alloc_slot(cspace);
     if (frame_cap == seL4_CapNull) {
         ZF_LOGD("Failed to alloc slot");
         return 1;
@@ -208,21 +209,33 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, se
         l1_pt[l1_index].l2 = calloc(PAGE_TABLE_ENTRIES, sizeof(page_directory));
     }
     page_directory *l2_pt = l1_pt[l1_index].l2;
+    if (l2_pt == NULL) {
+        ZF_LOGE("Failed to allocate level 2 page table");
+        return seL4_NotEnoughMemory;
+    }
 
     if (l2_pt[l2_index].l3 == NULL) {
         l2_pt[l2_index].l3 = calloc(PAGE_TABLE_ENTRIES, sizeof(page_table));
     }
     page_table *l3_pt = l2_pt[l2_index].l3;
+    if (l3_pt == NULL) {
+        ZF_LOGE("Failed to allocate level 3 page table");
+        return seL4_NotEnoughMemory;
+    }
 
     if (l3_pt[l3_index].l4 == NULL) {
         l3_pt[l3_index].l4 = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry));
     }
     pt_entry *l4_pt = l3_pt[l3_index].l4;
+    if (l4_pt == NULL) {
+        ZF_LOGE("Failed to allocate level 4 page table");
+        return seL4_NotEnoughMemory;
+    }
 
-    l4_pt[l4_index].frame = frame_ref;
+    l4_pt[l4_index].shadow_frame_ref = frame_ref;
     l4_pt[l4_index].perms = REGION_RD | REGION_WR;
 
-    return sos_map_frame_impl(cspace, vspace, vaddr, rights, attr, frame_ref, l1_pt);
+    return sos_map_frame_impl(cspace, vspace, vaddr, rights, attr, frame_ref, l1_pt, l4_pt);
 }
 
 

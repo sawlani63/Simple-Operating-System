@@ -18,7 +18,8 @@ typedef struct _region {
 } mem_region_t;
 
 typedef struct pt_l4 {
-    frame_ref_t frame;
+    frame_ref_t shadow_frame_ref;
+    seL4_CPtr hardware_frame_cap;
     unsigned char perms;
 } pt_entry;
 
