@@ -1122,8 +1122,10 @@ static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_tas
 
     sync_bin_sem_wait(syscall_sem);
     uintptr_t newbrk = curr_task->msg[1];
-    if (!newbrk || newbrk >= (user_process.stack_reg->base & ~(PAGE_SIZE_4K - 1))) {
-        seL4_SetMR(0, user_process.heap_reg->base + user_process.heap_reg->size);
+    if (!newbrk) {
+        seL4_SetMR(0, PROCESS_HEAP_START);        
+    } else if (newbrk >= (user_process.stack_reg->base & ~(PAGE_SIZE_4K - 1))) {
+        seL4_SetMR(0, 0);
     } else {
         user_process.heap_reg->size = newbrk - PROCESS_HEAP_START;
         seL4_SetMR(0, newbrk);
