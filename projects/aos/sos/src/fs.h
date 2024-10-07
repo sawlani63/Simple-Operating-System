@@ -16,6 +16,9 @@ int id = 1;
 
 static struct file *create_file(fmode_t mode, int (*write_handler)(char *data, int len), char (*read_handler)(void), char* path) {
     struct file *new_file = malloc(sizeof(struct file));
+    if (new_file == NULL) {
+        return NULL;
+    }
     new_file->fd = id++;
     new_file->mode = mode;
     new_file->write_handler = write_handler;
@@ -32,6 +35,9 @@ static void push_file(struct file *file) {
 
 int push_new_file(fmode_t mode, int (*write_handler)(char *data, int len), char (*read_handler)(void), char* path) {
     struct file *file = create_file(mode, write_handler, read_handler, path);
+    if (file == NULL) {
+        return -1;
+    }
     push_file(file);
     return file->fd;
 }

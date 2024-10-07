@@ -96,10 +96,6 @@ static void recursive_stack_test(int counter) {
     recursive_stack_test(counter + 1);
 }
 
-static void stack_overflow(int counter) {
-    stack_overflow(counter + 1);
-}
-
 #define SMALL_BUF_SZ 2
 #define MEDIUM_BUF_SZ 5
 
@@ -116,15 +112,15 @@ int test_buffers(int console_fd) {
     /* make sure you type in at least SMALL_BUF_SZ */
     assert(result == SMALL_BUF_SZ);
 
-    /* test reading into a large on-stack buffer */
-    char stack_buf[MEDIUM_BUF_SZ];
+    /* test reading into a large on-heap buffer */
+    char *heap_buf = malloc(MEDIUM_BUF_SZ);
     /* for this test you'll need to paste a lot of data into
       the console, without newlines */
 
-    result = sos_read(console_fd, stack_buf, MEDIUM_BUF_SZ);
+    result = sos_read(console_fd, heap_buf, MEDIUM_BUF_SZ);
     assert(result == MEDIUM_BUF_SZ);
 
-    result = sos_write(console_fd, stack_buf, MEDIUM_BUF_SZ);
+    result = sos_write(console_fd, heap_buf, MEDIUM_BUF_SZ);
     assert(result == MEDIUM_BUF_SZ);
 
     /* try sleeping */
@@ -137,13 +133,10 @@ int test_buffers(int console_fd) {
     }
 }
 
-int test_large_write(int console_fd) {
-   /* test a small string from the code segment */
-   char rip[100];
-   for (int i = 0; i < 99; i++) {
-    rip[i] = 'a';
-   }
-   rip[99] = '\0';
+int test_stack_write(int console_fd) {
+   char rip[1000];
+   memset(rip, 'a', 999);
+   rip[999] = '\0';
    int result = sos_write(console_fd, rip, strlen(rip));    
    assert(result == strlen(rip));
    printf("\nPassed large write test\n");
@@ -164,13 +157,11 @@ int main(void)
     printf("Passed open/close test\n");
     
     pt_test();
-    test_large_write(fd);
+    test_stack_write(fd);
 
     test_buffers(fd);
     printf("Passed read/write buffer test\n");
 
     // recursive_stack_test(0);
     // printf("Passed recursive stack test\n");
-    
-    // stack_overflow(0);
 }

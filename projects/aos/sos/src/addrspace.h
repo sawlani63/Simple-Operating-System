@@ -18,7 +18,8 @@ typedef struct _region {
 } mem_region_t;
 
 typedef struct pt_l4 {
-    frame_ref_t frame;
+    frame_ref_t shadow_frame_ref;
+    seL4_CPtr hardware_frame_cap;
     unsigned char perms;
 } pt_entry;
 
@@ -43,7 +44,6 @@ typedef struct pt_l1 {
 typedef struct addrspace {
     page_upper_directory *page_table;
     mem_region_t *regions;
-    seL4_Word heap_top;
 } addrspace_t;
 
 /*
@@ -65,9 +65,9 @@ typedef struct addrspace {
  */
 
 addrspace_t *as_create();
-int as_define_region(addrspace_t *as, seL4_Word vaddr, size_t memsize, unsigned char perms);
-int as_define_ipc_buff(addrspace_t *as, seL4_Word *initipcbuff);
-int as_define_stack(addrspace_t *as, seL4_Word *initstackptr);
-int as_define_heap(addrspace_t *as, seL4_Word *initheapptr);
+mem_region_t *as_define_region(addrspace_t *as, seL4_Word vaddr, size_t memsize, unsigned char perms);
+mem_region_t *as_define_ipc_buff(addrspace_t *as, seL4_Word *initipcbuff);
+mem_region_t *as_define_stack(addrspace_t *as);
+mem_region_t *as_define_heap(addrspace_t *as);
 
 #endif

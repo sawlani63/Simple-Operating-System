@@ -13,6 +13,10 @@ struct node *read_queue = NULL;
 
 void enqueue(__attribute__((__unused__)) struct network_console *network_console, char c) {
     struct node *new_node = malloc(sizeof(struct node));
+    if (new_node == NULL) {
+        ZF_LOGF_IF(!new_node, "No memory for new console node object");
+        return;
+    }
     new_node->c = c;
     new_node->next = NULL;
 
@@ -39,6 +43,7 @@ char deque() {
 
 void init_console_sem() {
     queue_sem = malloc(sizeof(sync_bin_sem_t));
+    ZF_LOGF_IF(!queue_sem, "No memory for new semaphore object");
     ut_t *sem_ut = alloc_retype(&sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!sem_ut, "No memory for notification");
     sync_bin_sem_init(queue_sem, sem_cptr, 0);

@@ -3,7 +3,7 @@
 
 #define NUM_THREADS 2
 #define QUEUE_SIZE 4
-#define NUM_MSG_REGISTERS 5
+#define NUM_MSG_REGISTERS 4
 
 struct task {
     ut_t *reply_ut;
