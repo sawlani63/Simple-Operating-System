@@ -940,6 +940,10 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
     }
     sync_bin_sem_post(syscall_sem);
     int mode = curr_task->msg[3];
+    if ((mode != O_WRONLY) && (mode != O_RDONLY) && (mode != O_RDWR)) {
+        seL4_SetMR(0, -1);
+        return;
+    }
 
     uint16_t offset = vaddr & (PAGE_SIZE_4K - 1);
     size_t bytes_left = path_len;
@@ -1038,7 +1042,6 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
                 break;
             }
         }
-        sync_bin_sem_post(syscall_sem);
 
         /* Set the reply message to be the return value of the read_handler */
         seL4_SetMR(0, i);
@@ -1117,6 +1120,7 @@ static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_tas
     ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SYS_BRK);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
+    sync_bin_sem_wait(syscall_sem);
     uintptr_t newbrk = curr_task->msg[1];
     if (!newbrk || newbrk >= (user_process.stack_reg->base & ~(PAGE_SIZE_4K - 1))) {
         seL4_SetMR(0, user_process.heap_reg->base + user_process.heap_reg->size);
@@ -1124,6 +1128,7 @@ static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_tas
         user_process.heap_reg->size = newbrk - PROCESS_HEAP_START;
         seL4_SetMR(0, newbrk);
     }
+    sync_bin_sem_post(syscall_sem);
 }
 
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number)
