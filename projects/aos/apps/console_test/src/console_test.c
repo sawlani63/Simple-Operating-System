@@ -112,15 +112,15 @@ int test_buffers(int console_fd) {
     /* make sure you type in at least SMALL_BUF_SZ */
     assert(result == SMALL_BUF_SZ);
 
-    /* test reading into a large on-stack buffer */
-    char stack_buf[MEDIUM_BUF_SZ];
+    /* test reading into a large on-heap buffer */
+    char *heap_buf = malloc(MEDIUM_BUF_SZ);
     /* for this test you'll need to paste a lot of data into
       the console, without newlines */
 
-    result = sos_read(console_fd, stack_buf, MEDIUM_BUF_SZ);
+    result = sos_read(console_fd, heap_buf, MEDIUM_BUF_SZ);
     assert(result == MEDIUM_BUF_SZ);
 
-    result = sos_write(console_fd, stack_buf, MEDIUM_BUF_SZ);
+    result = sos_write(console_fd, heap_buf, MEDIUM_BUF_SZ);
     assert(result == MEDIUM_BUF_SZ);
 
     /* try sleeping */

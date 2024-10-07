@@ -128,6 +128,8 @@ bool console_open_for_read = false;
 seL4_CPtr sem_cptr;
 sync_bin_sem_t *syscall_sem = NULL;
 
+bool handle_vm_fault(seL4_Word fault_addr);
+
 static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
 static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
 static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
@@ -138,16 +140,70 @@ static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_tas
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
 static void wakeup(UNUSED uint32_t id, void *data);
 
-void handle_vm_fault(seL4_CPtr reply) {
-    addrspace_t *as = user_process.addrspace;
-    
-    /* A VM Fault is an IPC. Check the seL4 Manual section 6.2.7 for message structure. We also
-     * page align the vaddr since the Hardware Page Table expects addresses to be page aligned. */
-    seL4_Word fault_addr = seL4_GetMR(seL4_VMFault_Addr);
+static bool vaddr_is_mapped(seL4_Word vaddr) {
+    /* We assume the top level is mapped. */
+    page_upper_directory *l1_pt = user_process.addrspace->page_table;
 
-    if (as == NULL || as->page_table == NULL) {
-        ZF_LOGE("Encountered a weird error where the address space or level 1 page table is null");
-        return;
+    uint16_t l1_index = (vaddr >> 39) & 0x1FF; /* Top 9 bits */
+    uint16_t l2_index = (vaddr >> 30) & 0x1FF; /* Next 9 bits */
+    uint16_t l3_index = (vaddr >> 21) & 0x1FF; /* Next 9 bits */
+    uint16_t l4_index = (vaddr >> 12) & 0x1FF; /* Next 9 bits */
+
+    page_directory *l2_pt = l1_pt[l1_index].l2;
+    if (l2_pt == NULL) {
+        return false;
+    }
+
+    page_table *l3_pt = l2_pt[l2_index].l3;
+    if (l3_pt == NULL) {
+        return false;
+    }
+
+    pt_entry *l4_pt = l3_pt[l3_index].l4;
+    if (l4_pt == NULL) {
+        return false;
+    }
+
+    if (l4_pt[l4_index].shadow_frame_ref == NULL_FRAME) {
+        return false;
+    }
+
+    return true;
+}
+
+static bool vaddr_check(seL4_Word vaddr) {
+    /* If the vaddr is not in a valid region we error out. Then if the address is not already
+     * mapped and vm_fault returns an error when trying to map it, we also error out.*/
+    return vaddr_is_mapped(vaddr) || handle_vm_fault(vaddr);
+}
+
+static bool loop_vaddr_check(seL4_Word vaddr, size_t len) {
+    size_t bytes_left = len;
+    int offset = vaddr & (PAGE_SIZE_4K - 1);
+
+    /* Check all the necessary vaddrs per frame. */
+    while (bytes_left > 0) {
+        size_t update = bytes_left > (PAGE_SIZE_4K - offset) ? (PAGE_SIZE_4K - offset) : bytes_left;
+
+        if (!vaddr_check(vaddr)) {
+            return false;
+        }
+
+        /* Update offset, virtual address, and bytes left */
+        offset = 0;
+        vaddr += update;
+        bytes_left -= update;
+    }
+
+    return true;
+}
+
+bool handle_vm_fault(seL4_Word fault_addr) {
+    addrspace_t *as = user_process.addrspace;
+
+    if (as == NULL || as->page_table == NULL || fault_addr == 0) {
+        ZF_LOGE("Encountered a weird error where one of the given addresses was null");
+        return false;
     }
 
     /* We use our shadow page table which follows the same structure as the hardware one.
@@ -181,7 +237,7 @@ void handle_vm_fault(seL4_CPtr reply) {
         pt_entry entry = l4_pt[l4_index];
         if (!debug_is_read_fault() && (entry.perms & REGION_WR) == 0) {
             ZF_LOGE("Trying to write to a read only page");
-            return;
+            return false;
         }
         /* Assign the appropriate rights for the frame we are about to map. */
         seL4_CapRights_t rights = seL4_CapRights_new(0, 0, entry.perms & REGION_RD, (entry.perms >> 1) & 1);
@@ -191,23 +247,23 @@ void handle_vm_fault(seL4_CPtr reply) {
         if (map_frame_impl(&cspace, entry.shadow_frame_ref, user_process.vspace, fault_addr,
                            rights, attr, NULL, NULL, NULL) != 0) {
             ZF_LOGE("Could not map the frame into the two page tables");
-            return;
+            return false;
         }
-        seL4_NBSend(reply, seL4_MessageInfo_new(0, 0, 0, 0));
+        return true;
     }
 
-    /* Check if the fault occurred in a valid region. */
-    seL4_Word heap_top = user_process.heap_reg->base + user_process.heap_reg->size;
+    /* Check if we're faulting in a valid region. */
     mem_region_t *reg;
+    seL4_Word heap_top = user_process.heap_reg->base + user_process.heap_reg->size;
     for (reg = as->regions; reg != NULL; reg = reg->next) {
         seL4_Word top_of_region = reg->base + reg->size;
         if (fault_addr >= reg->base && fault_addr < top_of_region) {
             /* We need this permissions check for demand paging that will later occur on the Hardware
-             * Page Table. In the case a page in the HPT gets swapped to disk yet remains on the
-             * Shadow Page Table, we need some way to know if the user is allowed to write to it. */
+            * Page Table. In the case a page in the HPT gets swapped to disk yet remains on the
+            * Shadow Page Table, we need some way to know if the user is allowed to write to it. */
             if (!debug_is_read_fault() && (reg->perms & REGION_WR) == 0) {
                 ZF_LOGE("Trying to write to a read only page");
-                return;
+                return false;
             }
             /* Fault occurred in a valid region and permissions line up so we can safely break out. */
             break;
@@ -220,8 +276,8 @@ void handle_vm_fault(seL4_CPtr reply) {
     }
 
     if (reg == NULL) {
-        ZF_LOGE("Could not find a valid region for  this address");
-        return;
+        ZF_LOGE("Could not find a valid region for this address");
+        return false;
     }
 
     /* Allocate any necessary levels within the shadow page table. */
@@ -229,21 +285,21 @@ void handle_vm_fault(seL4_CPtr reply) {
         l2_pt = l1_pt[l1_index].l2 = calloc(PAGE_TABLE_ENTRIES, sizeof(page_directory));
         if (l2_pt == NULL) {
             ZF_LOGE("Failed to allocate level 2 page table");
-            return;
+            return false;
         }
     }
     if (l3_pt == NULL) {
         l3_pt = l2_pt[l2_index].l3 = calloc(PAGE_TABLE_ENTRIES, sizeof(page_table));
         if (l3_pt == NULL) {
             ZF_LOGE("Failed to allocate level 3 page table");
-            return;
+            return false;
         }
     }
     if (l4_pt == NULL) {
         l4_pt = l3_pt[l3_index].l4 = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry));
         if (l4_pt == NULL) {
             ZF_LOGE("Failed to allocate level 4 page table");
-            return;
+            return false;
         }
     }
 
@@ -257,18 +313,17 @@ void handle_vm_fault(seL4_CPtr reply) {
     frame_ref_t frame_ref = l4_pt[l4_index].shadow_frame_ref = alloc_frame();
     if (frame_ref == NULL_FRAME) {
         ZF_LOGE("Failed to allocate a frame");
-        return;
+        return false;
     }
     l4_pt[l4_index].perms = reg->perms;
 
     /* Map the frame into the relevant page tables. */
     if (sos_map_frame_impl(&cspace, user_process.vspace, fault_addr, rights, attr, frame_ref, l1_pt, l4_pt) != 0) {
         ZF_LOGE("Could not map the frame into the two page tables");
-        return;
+        return false;
     }
 
-    /* Respond with an empty message just to unblock the caller. */
-    seL4_NBSend(reply, seL4_MessageInfo_new(0, 0, 0, 0));
+    return true;
 }
 
 /**
@@ -345,8 +400,8 @@ NORETURN void syscall_loop(seL4_CPtr ep)
             /* Create a new task for one of our worker threads in the thread pool */   
             struct task task = {.reply_ut = reply_ut, .reply = reply};
             seL4_Word msg[NUM_MSG_REGISTERS]
-                = {seL4_GetMR(0), seL4_GetMR(1), seL4_GetMR(2), seL4_GetMR(3), seL4_GetMR(4)};
-            memcpy(task.msg, msg, sizeof(seL4_Word) * 5);
+                = {seL4_GetMR(0), seL4_GetMR(1), seL4_GetMR(2), seL4_GetMR(3)};
+            memcpy(task.msg, msg, sizeof(seL4_Word) * NUM_MSG_REGISTERS);
             submit_task(task);
             
             /* To stop the main thread from overwriting the worker thread's
@@ -356,7 +411,10 @@ NORETURN void syscall_loop(seL4_CPtr ep)
                 ZF_LOGF("Failed to alloc reply object ut");
             }
         } else if (label == seL4_Fault_VMFault) {
-            handle_vm_fault(reply);
+            if (handle_vm_fault(seL4_GetMR(seL4_VMFault_Addr))) {
+                /* Respond with an empty message just to unblock the caller. */
+                seL4_NBSend(reply, seL4_MessageInfo_new(0, 0, 0, 0));
+            }
         } else {
             /* some kind of fault */
             debug_print_fault(message, APP_NAME);
@@ -873,6 +931,10 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
     seL4_Word vaddr = curr_task->msg[1];
     int path_len = curr_task->msg[2];
+    if (!loop_vaddr_check(vaddr, path_len)) {
+        seL4_SetMR(0, -1);
+        return;
+    }
     int mode = curr_task->msg[3];
 
     uint16_t offset = vaddr & (PAGE_SIZE_4K - 1);
@@ -939,6 +1001,10 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
     int read_fd = curr_task->msg[1];
     seL4_Word vaddr = curr_task->msg[2];
     int nbyte = curr_task->msg[3];
+    if (!loop_vaddr_check(vaddr, nbyte)) {
+        seL4_SetMR(0, -1);
+        return;
+    }
 
     sync_bin_sem_wait(syscall_sem);
     struct file *found = find_file(read_fd);
@@ -997,8 +1063,14 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
 
     /* Perform the write operation. We don't assume that the buffer is only 1 frame long. */
     while (bytes_left > 0) {
-        char *data = (char *)frame_data(get_frame(vaddr));
         size_t len = bytes_left > (PAGE_SIZE_4K - offset) ? (PAGE_SIZE_4K - offset) : bytes_left;
+        
+        if (!vaddr_check(vaddr)) {
+            seL4_SetMR(0, -1);
+            return;
+        }
+
+        char *data = (char *)frame_data(get_frame(vaddr));
 
         /* Write data */
         found->write_handler(data + offset, len);
