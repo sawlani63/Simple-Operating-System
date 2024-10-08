@@ -52,7 +52,6 @@
 
 /* File System */
 #include "fs.h"
-#include "open_file.h"
 #include "console.h"
 
 /*
@@ -995,7 +994,7 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
     char err = fdt_put(user_process.fdt, file, &fd);
     sync_bin_sem_post(syscall_sem);
 
-    seL4_SetMR(0, err ? -1 : fd);
+    seL4_SetMR(0, err ? -1 : (int) fd);
 }
 
 static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_task)

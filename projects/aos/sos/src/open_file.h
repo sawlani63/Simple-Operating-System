@@ -1,6 +1,3 @@
-#ifndef OPEN_FILE
-#define OPEN_FILE
-
 #include <stdlib.h>
 
 typedef const char * string;
@@ -29,5 +26,3 @@ open_file *file_create(string path, int mode, wr_handler file_write, rd_handler 
  * @param file A reference to an open file to be deallocated.
  */
 void file_destroy(open_file *file);
-
-#endif
