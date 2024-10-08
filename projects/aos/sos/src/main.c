@@ -1005,7 +1005,7 @@ static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_t
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
     sync_bin_sem_wait(syscall_sem);
-    open_file *found = fdt_get_file(user_process.fdt, curr_task->msg[1]);
+    open_file *found = fdt_get_file(*user_process.fdt, curr_task->msg[1]);
     sync_bin_sem_post(syscall_sem);
     if (found == NULL) {
         seL4_SetMR(0, -1);
@@ -1035,7 +1035,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
         return;
     }
 
-    open_file *found = fdt_get_file(user_process.fdt, read_fd);
+    open_file *found = fdt_get_file(*user_process.fdt, read_fd);
     if (found == NULL || found->mode == O_WRONLY) {
         /* Set the reply message to be an error value */
         seL4_SetMR(0, -1);
@@ -1078,7 +1078,7 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
 
     /* Find the file associated with the file descriptor */
     sync_bin_sem_wait(syscall_sem);
-    open_file *found = fdt_get_file(user_process.fdt, write_fd);
+    open_file *found = fdt_get_file(*user_process.fdt, write_fd);
     if (found == NULL || found->mode == O_RDONLY) {
         /* Set the reply message to be an error value and return early */
         sync_bin_sem_post(syscall_sem);
