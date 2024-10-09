@@ -47,9 +47,12 @@
 #endif /* CONFIG_SOS_GDB_ENABLED */
 
 #include <aos/vsyscall.h>
-#include "fs.h"
 #include "thread_pool.h"
 #include "addrspace.h"
+
+/* File System */
+#include "fs.h"
+#include "console.h"
 
 /*
  * To differentiate between signals from notification objects and and IPC messages,
@@ -119,6 +122,8 @@ static struct {
     mem_region_t *heap_reg;
 
     addrspace_t *addrspace;
+
+    fdt *fdt;
 } user_process;
 
 struct network_console *console;
@@ -819,16 +824,24 @@ NORETURN void *main_continued(UNUSED void *arg)
      * so touching the watchdog timers here is not recommended!) */
     void *timer_vaddr = sos_map_device(&cspace, PAGE_ALIGN_4K(TIMER_MAP_BASE), PAGE_SIZE_4K);
 
+    /* Initialise the per-process file descriptor table */
+    char err;
+    user_process.fdt = fdt_create(&err);
+    ZF_LOGF_IF(err, "Failed to initialise the per-process file descriptor table");
+
     /* Initialise the network hardware. */
     printf("Network init\n");
     network_init(&cspace, timer_vaddr, ntfn);
     console = network_console_init();
     network_console_register_handler(console, enqueue);
     init_console_sem();
-    int fd = push_new_file(O_WRONLY, network_console_send, deque, "console"); // initialise stdout
-    ZF_LOGF_IF(fd == -1, "No memory for new file object");
-    fd = push_new_file(O_WRONLY, network_console_send, deque, "console"); // initialise stderr
-    ZF_LOGF_IF(fd == -1, "No memory for new file object");
+    
+    open_file *file = file_create("console", O_WRONLY, network_console_send, deque);
+    uint32_t fd;
+    err = fdt_put(user_process.fdt, file, &fd); // initialise stdout
+    ZF_LOGF_IF(err, "No memory for new file object");
+    err = fdt_put(user_process.fdt, file, &fd); // initialise stderr
+    ZF_LOGF_IF(err, "No memory for new file object");
 
 #ifdef CONFIG_SOS_GDB_ENABLED
     /* Initialize the debugger */
@@ -976,10 +989,12 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
     /* If we made it here that means the strings are equal. */
     sync_bin_sem_wait(syscall_sem);
     console_open_for_read = true;
-    int fd = push_new_file(mode, network_console_send, deque, "console");
+    open_file *file = file_create("console", mode, network_console_send, deque);
+    uint32_t fd;
+    char err = fdt_put(user_process.fdt, file, &fd);
     sync_bin_sem_post(syscall_sem);
 
-    seL4_SetMR(0, fd);
+    seL4_SetMR(0, err ? -1 : (int) fd);
 }
 
 static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
@@ -989,7 +1004,7 @@ static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_t
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
     sync_bin_sem_wait(syscall_sem);
-    struct file *found = pop_file(curr_task->msg[1]);
+    open_file *found = fdt_get_file(user_process.fdt, curr_task->msg[1]);
     sync_bin_sem_post(syscall_sem);
     if (found == NULL) {
         seL4_SetMR(0, -1);
@@ -999,7 +1014,7 @@ static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_t
         console_open_for_read = false;
         sync_bin_sem_post(syscall_sem);
     }
-    free(found);
+    fdt_remove(user_process.fdt, curr_task->msg[1]);
     seL4_SetMR(0, 0);
 }
 
@@ -1019,7 +1034,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
         return;
     }
 
-    struct file *found = find_file(read_fd);
+    open_file *found = fdt_get_file(user_process.fdt, read_fd);
     if (found == NULL || found->mode == O_WRONLY) {
         /* Set the reply message to be an error value */
         seL4_SetMR(0, -1);
@@ -1035,7 +1050,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
             }
 
             /* Write to data buffer */
-            char recv = found->read_handler();
+            char recv = found->file_read();
             data[i + offset] = recv;
             if (recv == '\n') {
                 i++;
@@ -1062,7 +1077,7 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
 
     /* Find the file associated with the file descriptor */
     sync_bin_sem_wait(syscall_sem);
-    struct file *found = find_file(write_fd);
+    open_file *found = fdt_get_file(user_process.fdt, write_fd);
     if (found == NULL || found->mode == O_RDONLY) {
         /* Set the reply message to be an error value and return early */
         sync_bin_sem_post(syscall_sem);
@@ -1086,7 +1101,7 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
         char *data = (char *)frame_data(get_frame(vaddr));
 
         /* Write data */
-        found->write_handler(data + offset, len);
+        found->file_write(data + offset, len);
 
         /* Update offset, virtual address, and bytes left */
         offset = 0;

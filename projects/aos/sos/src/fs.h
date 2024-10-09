@@ -1,74 +1,61 @@
-#include "console.h"
+#include <stdlib.h>
+#include <stdint.h>
+#include <stdbool.h>
 
-typedef int fmode_t;
+#include "open_file.h"
 
-struct file {
-    int fd;
-    fmode_t mode;
-    int (*write_handler)(char *data, int len);
-    char (*read_handler)(void);
-    char* path;
-    struct file *next;
-};
+#define FDT_SIZE 64         // Starting size of the fd table
 
-struct file *file_stack = NULL;
-int id = 1;
+/* Per-process file descriptor table data structure. */
+typedef struct {
+    open_file **files;      // Array of pointers to open files
+    uint32_t size;          // Maximum number of file descriptors
+    uint32_t *free_list;    // Stack of free file descriptor indices
+    uint32_t free_count;    // Number of free slots available
+} fdt;
 
-static struct file *create_file(fmode_t mode, int (*write_handler)(char *data, int len), char (*read_handler)(void), char* path) {
-    struct file *new_file = malloc(sizeof(struct file));
-    if (new_file == NULL) {
-        return NULL;
-    }
-    new_file->fd = id++;
-    new_file->mode = mode;
-    new_file->write_handler = write_handler;
-    new_file->read_handler = read_handler;
-    new_file->path = path;
-    new_file->next = NULL;
-    return new_file;
-}
+/**
+ * Allocate memory for a per-process file descriptor table.
+ * @param err Set to 0 if no error and set to 1 if calloc failed.
+ * @return A pointer to the file descriptor table.
+ */
+fdt *fdt_create(char *err);
 
-static void push_file(struct file *file) {
-    file->next = file_stack;
-    file_stack = file;
-}
+/**
+ * Frees memory associated with a per-process file descriptor table.
+ * @param fdt A pointer to the per-process file descriptor table.
+ */
+void fdt_destroy(fdt *fdt);
 
-int push_new_file(fmode_t mode, int (*write_handler)(char *data, int len), char (*read_handler)(void), char* path) {
-    struct file *file = create_file(mode, write_handler, read_handler, path);
-    if (file == NULL) {
-        return -1;
-    }
-    push_file(file);
-    return file->fd;
-}
+/**
+ * Checks if the given file descriptor is valid or not.
+ * @param fdt A pointer to the per-process file descriptor table.
+ * @param fd The file descriptor index into the fd table.
+ * @return True if the given fd is valid and false otherwise.
+ */
+bool fdt_validfd(fdt *fdt, uint32_t fd);
 
-struct file *find_file(int fd) {
-    struct file *curr = file_stack;
-    while (curr != NULL) {
-        if (curr->fd == fd) {
-            return curr;
-        }
-        curr = curr->next;
-    }
-    return NULL;
-}
+/**
+ * Returns a reference to the open file indexed by the given fd.
+ * @param fdt A pointer to the per-process file descriptor table.
+ * @param fd The file descriptor index into the fd table.
+ * @return A reference (pointer) to the open file.
+ */
+open_file *fdt_get_file(fdt *fdt, uint32_t fd);
 
-struct file *pop_file(int fd) {
-    struct file *curr = file_stack;
-    if (curr == NULL) {
-        return NULL;
-    } else if (file_stack->fd == fd) {
-        file_stack = file_stack->next;
-        return curr;
-    }
+/**
+ * Puts the given file into the per-process fd table.
+ * @param fdt A pointer to the per-process file descriptor table.
+ * @param file The file you wish to add to the fd table.
+ * @param fd A reference to the file descriptor the function will update.
+ * @return 0 on success and 1 on failure.
+ */
+int fdt_put(fdt *fdt, open_file *file, uint32_t *fd);
 
-    while (curr->next != NULL) {
-        if (curr->next->fd == fd) {
-            struct file *ret = curr->next;
-            curr->next = curr->next->next;
-            return ret;
-        }
-        curr = curr->next;
-    }
-    return NULL;
-}
+/**
+ * Removes a file with a given fd from the per-process fd table.
+ * @param fdt A pointer to the per-process file descriptor table.
+ * @param fd The file descriptor index into the fd table.
+ * @return 0 on success and 1 on failure.
+ */
+int fdt_remove(fdt *fdt, uint32_t fd);

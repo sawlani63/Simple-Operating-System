@@ -67,6 +67,8 @@ add_executable(
     src/threads.c
     src/debugger.c
     src/addrspace.c
+    src/fs.c
+    src/open_file.c
 )
 target_include_directories(sos PRIVATE "include")
 target_link_libraries(
