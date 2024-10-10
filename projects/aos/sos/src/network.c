@@ -47,6 +47,8 @@
 #include "mapping.h"
 #include "irq.h"
 #include "ut.h"
+#include "threads.h"
+#include <sync/bin_sem.h>
 
 
 #ifndef SOS_NFS_DIR
@@ -72,7 +74,11 @@ static uint8_t ip_octet;
 
 sync_bin_sem_t *nfs_mount_sem;
 
-static void nfs_mount_cb(int status, struct nfs_context *nfs, void *data, void *private_data);
+void nfs_mount_cb(int status, UNUSED struct nfs_context *nfs, void *data, UNUSED void *private_data);
+int nfs_open_file(const char* path, int mode, nfs_cb cb, void *private_data);
+int nfs_close_file(void* nfsfh, nfs_cb cb, void *private_data);
+int nfs_read_file(void *nfsfh, uint64_t count, nfs_cb cb, void *private_data);
+int nfs_write_file(void *nfsfh, uint64_t count, const void *buf, nfs_cb cb, void *private_data);
 
 static int pico_eth_send(UNUSED struct pico_device *dev, void *input_buf, int len)
 {
@@ -296,15 +302,33 @@ void network_init(cspace_t *cspace, void *timer_vaddr, seL4_CPtr irq_ntfn, sync_
     ZF_LOGF_IF(ret != 0, "NFS Mount failed: %s", nfs_get_error(nfs));
 }
 
-void nfs_mount_cb(int status, UNUSED struct nfs_context *nfs, void *data,
-                  UNUSED void *private_data)
+void nfs_mount_cb(int status, UNUSED struct nfs_context *nfs, void *data, UNUSED void *private_data)
 {
     if (status < 0) {
         ZF_LOGF("mount/mnt call failed with \"%s\"\n", (char *)data);
     }
-
     printf("Mounted nfs dir %s\n", nfs_dir_buf);
     
     /* Signal open that the nfs has been mounted and it can continue. */
     sync_bin_sem_post(nfs_mount_sem);
+}
+
+int nfs_open_file(const char* path, int mode, nfs_cb cb, void *private_data)
+{
+    return nfs_open_async(nfs, path, O_CREAT | mode, cb, private_data);
+}
+
+int nfs_close_file(void *nfsfh, nfs_cb cb, void *private_data)
+{
+    return nfs_close_async(nfs, nfsfh, cb, private_data);
+}
+
+int nfs_read_file(void *nfsfh, uint64_t count, nfs_cb cb, void *private_data)
+{
+    return nfs_read_async(nfs, nfsfh, count, cb, private_data);
+}
+
+int nfs_write_file(void *nfsfh, uint64_t count, const void *buf, nfs_cb cb, void *private_data)
+{
+    return nfs_write_async(nfs, nfsfh, count, buf, cb, private_data);
 }

@@ -63,6 +63,7 @@
         "algorithm": "c",
         "open_file.h": "c",
         "attribute.h": "c",
-        "network.h": "c"
+        "network.h": "c",
+        "fs.h": "c"
     }
 }
