@@ -6,9 +6,9 @@
 
 #define PAGE_TABLE_ENTRIES 0b1 << seL4_VSpaceIndexBits
 
-#define REGION_RD 0x1
-#define REGION_WR 0x2
-#define REGION_EX 0x4
+#define REGION_RD 0x1u
+#define REGION_WR 0x2u
+#define REGION_EX 0x4u
 
 typedef struct _region {
     seL4_Word base;
@@ -17,11 +17,12 @@ typedef struct _region {
     struct _region *next;
 } mem_region_t;
 
-typedef struct pt_l4 {
-    frame_ref_t shadow_frame_ref;
-    seL4_CPtr hardware_frame_cap;
-    unsigned char perms;
-} pt_entry;
+/* Packs the entire entry into 64 bits.
+ * The lowest 19 bits contain the frame reference,
+ * the next 12 bits contain the frame cap to the hpt,
+ * and the next 3 bits contain the permissions.
+ * The last 30 bits remain unused.*/
+typedef uint64_t pt_entry;
 
 typedef struct pt_l3 {
     pt_entry *l4;

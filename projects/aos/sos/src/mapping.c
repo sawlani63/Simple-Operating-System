@@ -80,9 +80,9 @@ seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspac
     /* We use our shadow page table which follows the same structure as the hardware one.
     * Check the seL4 Manual section 7.1.1 for hardware virtual memory objects. Importantly
     * the top-most 16 bits of the virtual address are unused bits, so we ignore them. */
-    uint16_t l1_index = (vaddr >> 39) & 0x1FF; /* Top 9 bits */
-    uint16_t l2_index = (vaddr >> 30) & 0x1FF; /* Next 9 bits */
-    uint16_t l3_index = (vaddr >> 21) & 0x1FF; /* Next 9 bits */
+    uint16_t l1_index = (vaddr >> 39) & MASK(9); /* Top 9 bits */
+    uint16_t l2_index = (vaddr >> 30) & MASK(9); /* Next 9 bits */
+    uint16_t l3_index = (vaddr >> 21) & MASK(9); /* Next 9 bits */
 
     /* Page align the vaddr */
     vaddr &= ~(PAGE_SIZE_4K - 1);
@@ -176,7 +176,7 @@ seL4_Error sos_map_frame_impl(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vadd
                               pt_entry *l4_pt)
 {
     /* create slot for the frame to load the data into */
-    seL4_CPtr frame_cap = l4_pt[(vaddr >> 12) & 0x1FF].hardware_frame_cap = cspace_alloc_slot(cspace);
+    seL4_CPtr frame_cap = cspace_alloc_slot(cspace);
     if (frame_cap == seL4_CapNull) {
         ZF_LOGD("Failed to alloc slot");
         return 1;
@@ -189,6 +189,8 @@ seL4_Error sos_map_frame_impl(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vadd
         return err;
     }
 
+    l4_pt[(vaddr >> 12) & MASK(9)] |= frame_cap << 19;
+
     return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, page_table);
 }
 
@@ -200,10 +202,10 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, se
     /* We use our shadow page table which follows the same structure as the hardware one.
      * Check the seL4 Manual section 7.1.1 for hardware virtual memory objects. Importantly
      * the top-most 16 bits of the virtual address are unused bits, so we ignore them. */
-    uint16_t l1_index = (vaddr >> 39) & 0x1FF; /* Top 9 bits */
-    uint16_t l2_index = (vaddr >> 30) & 0x1FF; /* Next 9 bits */
-    uint16_t l3_index = (vaddr >> 21) & 0x1FF; /* Next 9 bits */
-    uint16_t l4_index = (vaddr >> 12) & 0x1FF; /* Next 9 bits */
+    uint16_t l1_index = (vaddr >> 39) & MASK(9); /* Top 9 bits */
+    uint16_t l2_index = (vaddr >> 30) & MASK(9); /* Next 9 bits */
+    uint16_t l3_index = (vaddr >> 21) & MASK(9); /* Next 9 bits */
+    uint16_t l4_index = (vaddr >> 12) & MASK(9); /* Next 9 bits */
 
     page_upper_directory *l1_pt = as->page_table;
 
@@ -235,8 +237,7 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, se
         return seL4_NotEnoughMemory;
     }
 
-    l4_pt[l4_index].shadow_frame_ref = frame_ref;
-    l4_pt[l4_index].perms = REGION_RD | REGION_WR;
+    l4_pt[l4_index] = frame_ref | ((REGION_RD | REGION_WR) << 31);
 
     return sos_map_frame_impl(cspace, vspace, vaddr, rights, attr, frame_ref, l1_pt, l4_pt);
 }

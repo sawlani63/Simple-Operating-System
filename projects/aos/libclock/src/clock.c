@@ -19,7 +19,7 @@
 #include "device.h"
 
 #define MIN_HEAP_SIZE 32
-#define MAX_TIMEOUT 65535 * 100
+#define MAX_TIMEOUT 65535
 #define COMPARE_UNSIGNED(a, b) ((a > b) - (a < b))
 #define MINHEAP_TIME_COMPARATOR(x, y) COMPARE_UNSIGNED(y.time_expired, x.time_expired)
 #define MINHEAP_ID_COMPARATOR(x, y) COMPARE_UNSIGNED(y.id, x.id)
@@ -41,8 +41,9 @@ int first_free = 0;
 uint32_t curr_id = 0;
 
 static int remove_from_heap(int index, uint32_t id);
-static void reset_timer_a();
+static void reset_timer();
 static int invoke_callbacks();
+static void write_time(uint64_t delay);
 
 int start_timer(unsigned char *timer_vaddr)
 {
@@ -54,7 +55,8 @@ int start_timer(unsigned char *timer_vaddr)
 
     /* Allocate the min heap for keeping track of timers and configure timer A. */
     min_heap = malloc(sizeof(timer_node) * max_timers);
-    configure_timeout(clock.regs, MESON_TIMER_A, true, false, TIMEOUT_TIMEBASE_100_US, 0);
+    configure_timeout(clock.regs, MESON_TIMER_A, true, false, TIMEOUT_TIMEBASE_10_US, 0);
+    configure_timeout(clock.regs, MESON_TIMER_B, true, false, TIMEOUT_TIMEBASE_100_US, 0);
 
     return min_heap == NULL ? CLOCK_R_UINT : CLOCK_R_OK;
 }
@@ -67,10 +69,10 @@ timestamp_t get_time(void)
 uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
 {
     /* Clamp timer A in case a user specifies too large a value for uint16_t. */
-    if (delay > MAX_TIMEOUT) {
-        delay = MAX_TIMEOUT;
+    if (delay > MAX_TIMEOUT * 100) {
+        delay = MAX_TIMEOUT * 100;
     }
-    uint64_t time_expired = (read_timestamp(clock.regs) + delay) / 100;
+    uint64_t time_expired = read_timestamp(clock.regs) + delay;
     if (SGLIB_HEAP_IS_FULL(first_free, max_timers)) {
         /* Reallocate memory for the heap, doubling its size. */
         timer_node *new_min_heap = realloc(min_heap, sizeof(timer_node) * max_timers * 2);
@@ -81,7 +83,7 @@ uint32_t register_timer(uint64_t delay, timer_callback_t callback, void *data)
         min_heap = new_min_heap;
     } else if (SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)
         || SGLIB_HEAP_GET_MIN(min_heap).time_expired > time_expired) {
-        write_timeout(clock.regs, MESON_TIMER_A, delay / 100);
+        write_time(delay);
     }
     
     /* Create a new timer node with the specified fields and add it to the heap. */
@@ -100,7 +102,7 @@ int remove_timer(uint32_t id)
     if (index == -1 || remove_from_heap(index, id)) {
         return CLOCK_R_FAIL;
     } else if (index == 0) {
-        reset_timer_a();
+        reset_timer();
     }
     return CLOCK_R_OK;
 }
@@ -117,9 +119,17 @@ int timer_irq(void *data, seL4_Word irq, seL4_IRQHandler irq_handler)
     if (invoke_callbacks()) {
         return CLOCK_R_FAIL;
     }
-    reset_timer_a();
+    reset_timer();
     seL4_IRQHandler_Ack(irq_handler);
     return CLOCK_R_OK;
+}
+
+static void write_time(uint64_t delay) {
+    if (delay > MAX_TIMEOUT * 10) {
+        write_timeout(clock.regs, MESON_TIMER_B, delay / 100);
+    } else {
+        write_timeout(clock.regs, MESON_TIMER_A, delay / 10);
+    }
 }
 
 int stop_timer(void)
@@ -129,7 +139,8 @@ int stop_timer(void)
         return CLOCK_R_FAIL;
     }
     /* Stop the timer from producing further interrupts and free the min heap. */
-    configure_timeout(clock.regs, MESON_TIMER_A, false, false, TIMEOUT_TIMEBASE_1_MS, 0);
+    configure_timeout(clock.regs, MESON_TIMER_A, false, false, TIMEOUT_TIMEBASE_10_US, 0);
+    configure_timeout(clock.regs, MESON_TIMER_B, false, false, TIMEOUT_TIMEBASE_100_US, 0);
     free(min_heap);
 
     return CLOCK_R_OK;
@@ -155,12 +166,16 @@ static int remove_from_heap(int index, uint32_t id) {
     return 0;
 }
 
-static void reset_timer_a()
-{
-    /* If the heap isn't empty, set timer A to the next node's delay. */
+static void reset_timer() {
+    while (!SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)
+            && SGLIB_HEAP_GET_MIN(min_heap).time_expired < get_time()) {   
+        timer_node node = SGLIB_HEAP_GET_MIN(min_heap);
+        SGLIB_HEAP_DELETE(timer_node, min_heap, first_free, max_timers, MINHEAP_TIME_COMPARATOR);
+        node.callback(node.id, node.data);
+    }
+
     if (!SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)) {
-        uint64_t new = SGLIB_HEAP_GET_MIN(min_heap).time_expired - read_timestamp(clock.regs) / 100;
-        write_timeout(clock.regs, MESON_TIMER_A, new);
+        write_time(SGLIB_HEAP_GET_MIN(min_heap).time_expired - get_time());
     }
 }
 

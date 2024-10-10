@@ -13,6 +13,7 @@
 
 #include <sel4/types.h>
 #include <cspace/cspace.h>
+#include <sync/bin_sem.h>
 
 /**
  * Initialises the network stack
@@ -24,4 +25,4 @@
  *                       using the SoC's watchdog timer (which is not used by your timer driver
  *                       and has a completely different programming model!)
  */
-void network_init(cspace_t *cspace, void *timer_vaddr, seL4_CPtr irq_ntfn);
+void network_init(cspace_t *cspace, void *timer_vaddr, seL4_CPtr irq_ntfn, sync_bin_sem_t *sem);
