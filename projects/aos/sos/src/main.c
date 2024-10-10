@@ -51,8 +51,8 @@
 #include "addrspace.h"
 
 /* File System */
-#include "fs.h"
 #include "console.h"
+#include "nfs.h"
 
 /*
  * To differentiate between signals from notification objects and and IPC messages,
@@ -966,13 +966,6 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
     seL4_Word vaddr = curr_task->msg[1];
     int path_len = curr_task->msg[2];
-    sync_bin_sem_wait(syscall_sem);
-    if (!loop_vaddr_check(vaddr, path_len)) {
-        sync_bin_sem_post(syscall_sem);
-        seL4_SetMR(0, -1);
-        return;
-    }
-    sync_bin_sem_post(syscall_sem);
     int mode = curr_task->msg[3];
     if ((mode != O_WRONLY) && (mode != O_RDONLY) && (mode != O_RDWR)) {
         seL4_SetMR(0, -1);
@@ -981,40 +974,48 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
     uint16_t offset = vaddr & (PAGE_SIZE_4K - 1);
     size_t bytes_left = path_len;
-    char *target = "console";
-
+    char *file_path = calloc(path_len, sizeof(char));
     while (bytes_left > 0) {
-        bytes_left = PAGE_SIZE_4K - offset > bytes_left ? 0 : PAGE_SIZE_4K - offset;
-
-        sync_bin_sem_wait(syscall_sem);
-        char *data = (char *) frame_data(get_frame(vaddr));
-
-        if (strncmp(data + offset, target, PAGE_SIZE_4K - offset)) {
-            sync_bin_sem_post(syscall_sem);
-            seL4_SetMR(0, -1);
-            return;
-        } else if (!bytes_left && console_open_for_read && mode != O_WRONLY) {
-            sync_bin_sem_post(syscall_sem);
+        if (!vaddr_check(vaddr)) {
             seL4_SetMR(0, -1);
             return;
         }
 
+        size_t len = bytes_left > (PAGE_SIZE_4K - offset) ? (PAGE_SIZE_4K - offset) : bytes_left;
+        sync_bin_sem_wait(syscall_sem);
+        char *data = (char *) frame_data(get_frame(vaddr));
         sync_bin_sem_post(syscall_sem);
+        strcat(file_path, data + offset);
 
-        target += (PAGE_SIZE_4K - offset);
-        vaddr += (PAGE_SIZE_4K - offset);
-        offset = 0;  // Offset only applies on the first iteration
+        vaddr += len;
+        bytes_left -= len;
+        offset = 0;
     }
 
+    open_file *file;
+    if (!strcmp(file_path, "console")) {
+        sync_bin_sem_wait(syscall_sem);
+        if (console_open_for_read && mode != O_WRONLY) {
+            sync_bin_sem_post(syscall_sem);
+            seL4_SetMR(0, -1);
+            return;
+        } else if (mode != O_WRONLY) {
+            console_open_for_read = true;
+        }
+        sync_bin_sem_post(syscall_sem);
+        file = file_create(file_path, mode, network_console_send, deque);
+    } else {
+        nfs_args args;
+        if (nfs_open_file(file_path, mode, nfs_open_cb, &args)) {
+            seL4_SetMR(0, -1);
+            return;
+        }
+        file = file_create(file_path, mode, nfs_write_file, nfs_read_file);
+        file->nfsfh = args.buff;
+    }
 
-    /* If we made it here that means the strings are equal. */
-    sync_bin_sem_wait(syscall_sem);
-    console_open_for_read = true;
-    open_file *file = file_create("console", mode, network_console_send, deque);
     uint32_t fd;
-    char err = fdt_put(user_process.fdt, file, &fd);
-    sync_bin_sem_post(syscall_sem);
-
+    int err = fdt_put(user_process.fdt, file, &fd);
     seL4_SetMR(0, err ? -1 : (int) fd);
 }
 
@@ -1034,6 +1035,21 @@ static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_t
         sync_bin_sem_wait(syscall_sem);
         console_open_for_read = false;
         sync_bin_sem_post(syscall_sem);
+    } else {
+        nfs_args args;
+        sync_bin_sem_wait(syscall_sem);
+        if (nfs_close_file(found->nfsfh, nfs_close_cb, &args)) {
+            sync_bin_sem_post(syscall_sem);
+            seL4_SetMR(0, -1);
+            return;
+        }
+
+        if (args.err) {
+            sync_bin_sem_post(syscall_sem);
+            seL4_SetMR(0, -1);
+            return;
+        }
+        sync_bin_sem_post(syscall_sem);
     }
     fdt_remove(user_process.fdt, curr_task->msg[1]);
     seL4_SetMR(0, 0);
@@ -1048,9 +1064,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
     int read_fd = curr_task->msg[1];
     seL4_Word vaddr = curr_task->msg[2];
     int nbyte = curr_task->msg[3];
-    sync_bin_sem_wait(syscall_sem);
     if (!loop_vaddr_check(vaddr, nbyte)) {
-        sync_bin_sem_post(syscall_sem);
         seL4_SetMR(0, -1);
         return;
     }
@@ -1059,30 +1073,38 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
     if (found == NULL || found->mode == O_WRONLY) {
         /* Set the reply message to be an error value */
         seL4_SetMR(0, -1);
-    } else {
-        /* Perform the read operation. We don't assume that the buffer is only 1 frame long. */
-        char *data = (char *)frame_data(get_frame(vaddr));
-        uint16_t offset = vaddr & (PAGE_SIZE_4K - 1);
-        uint16_t i;
-        for (i = 0; i < nbyte; i++) {
-            if (i + offset >= PAGE_SIZE_4K) {
-                data = (char *)frame_data(get_frame(vaddr));
-                offset = 0;
-            }
+        return;
+    }
 
-            /* Write to data buffer */
-            char recv = found->file_read();
-            data[i + offset] = recv;
-            if (recv == '\n') {
-                i++;
-                break;
-            }
+    size_t bytes_left = nbyte;
+    int offset = vaddr & (PAGE_SIZE_4K - 1);
+
+    /* Perform the read operation. We don't assume that the buffer is only 1 frame long. */
+    while (bytes_left > 0) {
+        size_t len = bytes_left > (PAGE_SIZE_4K - offset) ? (PAGE_SIZE_4K - offset) : bytes_left;
+        
+        if (!vaddr_check(vaddr)) {
+            seL4_SetMR(0, -1);
+            return;
         }
 
-        /* Set the reply message to be the return value of the read_handler */
-        seL4_SetMR(0, i);
+        char *data = (char *)frame_data(get_frame(vaddr));
+
+        /* Read data */
+        size_t read = found->file_read(NULL, len, NULL, data + offset);
+        if (read != len) {
+            bytes_left -= read;
+            break;
+        }
+
+        /* Update offset, virtual address, and bytes left */
+        offset = 0;
+        vaddr += len;
+        bytes_left -= len;
     }
-    sync_bin_sem_post(syscall_sem);
+
+    /* Set the reply message to be the return value of the read_handler */
+    seL4_SetMR(0, nbyte - bytes_left);
 }
 
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
@@ -1122,7 +1144,7 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
         char *data = (char *)frame_data(get_frame(vaddr));
 
         /* Write data */
-        found->file_write(data + offset, len);
+        found->file_write(console, data + offset, len, NULL, NULL);
 
         /* Update offset, virtual address, and bytes left */
         offset = 0;

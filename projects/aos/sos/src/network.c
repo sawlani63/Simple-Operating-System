@@ -73,6 +73,10 @@ static uint8_t ip_octet;
 sync_bin_sem_t *nfs_mount_sem;
 
 static void nfs_mount_cb(int status, struct nfs_context *nfs, void *data, void *private_data);
+int nfs_open_file(const char* path, int mode, nfs_cb cb, void *private_data);
+int nfs_close_file(void *nfsfh, nfs_cb cb, void *private_data);
+int nfs_read_file(void *nfsfh, uint64_t count, void *cb, void *private_data);
+int nfs_write_file(void *nfsfh, char *buf, uint64_t count, void *cb, void *private_data);
 
 static int pico_eth_send(UNUSED struct pico_device *dev, void *input_buf, int len)
 {
@@ -307,4 +311,24 @@ void nfs_mount_cb(int status, UNUSED struct nfs_context *nfs, void *data,
     
     /* Signal open that the nfs has been mounted and it can continue. */
     sync_bin_sem_post(nfs_mount_sem);
+}
+
+int nfs_open_file(const char *path, int mode, nfs_cb cb, void *private_data)
+{
+    return nfs_open_async(nfs, path, O_CREAT | mode, cb, private_data);
+}
+
+int nfs_close_file(void *nfsfh, nfs_cb cb, void *private_data)
+{
+    return nfs_close_async(nfs, nfsfh, cb, private_data);
+}
+
+int nfs_read_file(void *nfsfh, uint64_t count, void *cb, void *private_data)
+{
+    return nfs_read_async(nfs, nfsfh, count, cb, private_data);
+}
+
+int nfs_write_file(void *nfsfh, char *buf, uint64_t count, void *cb, void *private_data)
+{
+    return nfs_write_async(nfs, nfsfh, count, buf, cb, private_data);
 }

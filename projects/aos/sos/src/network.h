@@ -14,6 +14,8 @@
 #include <sel4/types.h>
 #include <cspace/cspace.h>
 #include <sync/bin_sem.h>
+#include <sys/time.h>
+#include <nfsc/libnfs.h>
 
 /**
  * Initialises the network stack
@@ -26,3 +28,8 @@
  *                       and has a completely different programming model!)
  */
 void network_init(cspace_t *cspace, void *timer_vaddr, seL4_CPtr irq_ntfn, sync_bin_sem_t *sem);
+
+int nfs_open_file(const char* path, int mode, nfs_cb cb, void *private_data);
+int nfs_close_file(void *nfsfh, nfs_cb cb, void *private_data);
+int nfs_read_file(void *nfsfh, uint64_t count, void *cb, void *private_data);
+int nfs_write_file(void *nfsfh, char *buf, uint64_t count, void *cb, void *private_data);

@@ -32,13 +32,21 @@ void enqueue(__attribute__((__unused__)) struct network_console *network_console
     sync_bin_sem_post(queue_sem);
 }
 
-char deque() {
-    sync_bin_sem_wait(queue_sem);
-    char ret = read_queue->c;
-    struct node *next = read_queue->next;
-    free(read_queue);
-    read_queue = next;
-    return ret;
+int deque(UNUSED void *handle, uint64_t count, UNUSED void *cb, void *args) {
+    /* We don't use a callback here so we'll just use the args to the callback
+     * as the buffer we will be writing to. */
+    char *buff = (char *) args;
+    for (uint64_t i = 0; i < count; i++) {
+        sync_bin_sem_wait(queue_sem);
+        buff[i] = read_queue->c;
+        struct node *next = read_queue->next;
+        free(read_queue);
+        read_queue = next;
+        if (buff[i] == '\n') {
+            return i + 1;
+        }
+    }
+    return count;
 }
 
 void init_console_sem() {

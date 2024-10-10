@@ -133,6 +133,28 @@ int test_buffers(int console_fd) {
     }
 }
 
+int test_nfs() {
+    /* Open a file, close it and open it again. */
+    int fd = sos_open("Pikachu.txt", O_RDWR);
+    assert(fd > 2);
+    int res = sos_close(fd);
+    assert(!res);
+    fd = sos_open("Pikachu.txt", O_RDWR);
+    assert(fd > 2);
+
+    /* test a small string from the code segment */
+    // int result = sos_write(fd, "Help", 5);
+    // assert(result == 5);
+
+    // char *buffer = malloc(MEDIUM_BUF_SZ);
+
+    // /* test reading to a small buffer */
+    // result = sos_read(fd, buffer, MEDIUM_BUF_SZ);
+    // assert(result == MEDIUM_BUF_SZ);
+
+    // printf("Buffer: %s\n", buffer);
+}
+
 int test_stack_write(int console_fd) {
    char rip[1000];
    memset(rip, 'a', 999);
@@ -154,6 +176,7 @@ int main(void)
     assert(!res);
     fd = sos_open("console", O_RDWR);
     assert(fd > 2);
+    test_nfs();
     printf("Passed open/close test\n");
     
     pt_test();

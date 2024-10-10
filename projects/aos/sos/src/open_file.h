@@ -1,14 +1,16 @@
 #include <stdlib.h>
+#include <stdint.h>
 
 typedef const char * string;
-typedef char (*rd_handler)(void);
-typedef int (*wr_handler)(char *data, int len);
+typedef int (*rd_handler)(void *handle, uint64_t count, void *cb, void *args);
+typedef int (*wr_handler)(void *handle, char *data, uint64_t len, void *callback, void *args);
 
 typedef struct file {
     string path;
     int mode;
     wr_handler file_write;
     rd_handler file_read;
+    void *nfsfh; // i dont like this
 } open_file;
 
 /**
@@ -26,3 +28,5 @@ open_file *file_create(string path, int mode, wr_handler file_write, rd_handler 
  * @param file A reference to an open file to be deallocated.
  */
 void file_destroy(open_file *file);
+
+void nfsfh_init(open_file *file, void *nfsfh);
