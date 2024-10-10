@@ -72,6 +72,8 @@ static int dhcp_status = DHCP_STATUS_WAIT;
 static char nfs_dir_buf[PATH_MAX];
 static uint8_t ip_octet;
 
+sync_bin_sem_t *nfs_mount_sem;
+
 void nfs_mount_cb(int status, UNUSED struct nfs_context *nfs, void *data, UNUSED void *private_data);
 int nfs_open_file(const char* path, int mode, nfs_cb cb, void *private_data);
 int nfs_close_file(void* nfsfh, nfs_cb cb, void *private_data);
@@ -218,8 +220,9 @@ void dhcp_callback(void *cli, int code)
     dhcp_status = DHCP_STATUS_FINISHED;
 }
 
-void network_init(cspace_t *cspace, void *timer_vaddr, seL4_CPtr irq_ntfn)
+void network_init(cspace_t *cspace, void *timer_vaddr, seL4_CPtr irq_ntfn, sync_bin_sem_t *sem)
 {
+    nfs_mount_sem = sem;
     int error;
     ZF_LOGI("\nInitialising network...\n\n");
 
@@ -306,6 +309,9 @@ void nfs_mount_cb(int status, UNUSED struct nfs_context *nfs, void *data, UNUSED
         ZF_LOGF("mount/mnt call failed with \"%s\"\n", (char *)data);
     }
     printf("Mounted nfs dir %s\n", nfs_dir_buf);
+    
+    /* Signal open that the nfs has been mounted and it can continue. */
+    sync_bin_sem_post(nfs_mount_sem);
 }
 
 void callback (int err, struct nfs_context *nfs, void *data, void *private_data) {
