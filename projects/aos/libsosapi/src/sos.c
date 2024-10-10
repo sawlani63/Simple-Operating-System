@@ -95,14 +95,15 @@ int sos_getdirent(int pos, char *name, size_t nbyte)
 
 int sos_stat(const char *path, sos_stat_t *buf)
 {
-    if (buf == NULL) {
+    if (path == NULL || buf == NULL) {
         return -1;
     }
 
     seL4_SetMR(0, SYSCALL_SOS_STAT);
     seL4_SetMR(1, (seL4_Word) path);
     seL4_SetMR(2, (seL4_Word) buf);
-    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 3));
+    seL4_SetMR(3, strlen(path));
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 4));
     return seL4_GetMR(0);
 }
 

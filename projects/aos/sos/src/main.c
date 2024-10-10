@@ -54,6 +54,7 @@
 #include "fs.h"
 #include "console.h"
 
+
 /*
  * To differentiate between signals from notification objects and and IPC messages,
  * we assign a badge to the notification object. The badge that we receive will
@@ -85,6 +86,8 @@
 #define SYSCALL_SOS_USLEEP SYS_nanosleep
 #define SYSCALL_SOS_TIME_STAMP SYS_clock_gettime
 #define SYSCALL_SYS_BRK SYS_brk
+#define SYSCALL_SOS_GETDIRENT SYS_getdents64
+#define SYSCALL_SOS_STAT SYS_statfs
 
 /* The linker will link this symbol to the start address  *
  * of an archive of attached applications.                */
@@ -142,8 +145,12 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
 static void syscall_sos_usleep(bool *have_reply, struct task *curr_task);
 static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg);
 static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
+static void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
+static void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
 static void wakeup(UNUSED uint32_t id, void *data);
+static void nfs_open_cb(int err, struct nfs_context *nfs, void *data, void *private_data);
+static void nfs_close_cb(int err, struct nfs_context *nfs, void *data, void *private_data);
 
 static bool vaddr_is_mapped(seL4_Word vaddr) {
     /* We assume the top level is mapped. */
@@ -370,6 +377,12 @@ void handle_syscall(void *arg)
             break;
         case SYSCALL_SYS_BRK:
             syscall_sys_brk(&reply_msg, curr_task);
+            break;
+        case SYSCALL_SOS_GETDIRENT:
+            syscall_sos_getdirent(&reply_msg, curr_task);
+            break;
+        case SYSCALL_SOS_STAT:
+            syscall_sos_stat(&reply_msg, curr_task);
             break;
         default:
             syscall_unknown_syscall(&reply_msg, syscall_number);
@@ -836,7 +849,8 @@ NORETURN void *main_continued(UNUSED void *arg)
     network_console_register_handler(console, enqueue);
     init_console_sem();
     
-    open_file *file = file_create("console", O_WRONLY, network_console_send, deque);
+    //nfs_open_file("console", O_WRONLY | 0100, nfs_open_cb, NULL);  //think how to do this while nfs mounts
+    open_file *file = file_create("console", O_WRONLY);
     uint32_t fd;
     err = fdt_put(user_process.fdt, file, &fd); // initialise stdout
     ZF_LOGF_IF(err, "No memory for new file object");
@@ -940,7 +954,6 @@ static frame_ref_t get_frame(seL4_Word vaddr) {
 static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_task) 
 {
     ZF_LOGE("syscall: thread example made syscall %d!\n", SYSCALL_SOS_OPEN);
-    /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
     seL4_Word vaddr = curr_task->msg[1];
@@ -960,36 +973,45 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
     uint16_t offset = vaddr & (PAGE_SIZE_4K - 1);
     size_t bytes_left = path_len;
-    char *target = "console";
+
+    char *file_path = (char *) calloc(path_len, sizeof(char));
+    sync_bin_sem_wait(syscall_sem);
 
     while (bytes_left > 0) {
-        bytes_left = PAGE_SIZE_4K - offset > bytes_left ? 0 : PAGE_SIZE_4K - offset;
+        size_t len = bytes_left > (PAGE_SIZE_4K - offset) ? (PAGE_SIZE_4K - offset) : bytes_left;
 
-        sync_bin_sem_wait(syscall_sem);
-        char *data = (char *) frame_data(get_frame(vaddr));
-
-        if (strncmp(data + offset, target, PAGE_SIZE_4K - offset)) {
-            sync_bin_sem_post(syscall_sem);
-            seL4_SetMR(0, -1);
-            return;
-        } else if (!bytes_left && console_open_for_read && mode != O_WRONLY) {
+        if (!vaddr_check(vaddr)) {
             sync_bin_sem_post(syscall_sem);
             seL4_SetMR(0, -1);
             return;
         }
+        char *data = (char *) frame_data(get_frame(vaddr));
+        strcat(file_path, data + offset);
 
-        sync_bin_sem_post(syscall_sem);
-
-        target += (PAGE_SIZE_4K - offset);
-        vaddr += (PAGE_SIZE_4K - offset);
-        offset = 0;  // Offset only applies on the first iteration
+        vaddr += len;
+        offset = 0;
+        bytes_left -= len;
     }
 
+    open_file *file = file_create(file_path, mode);
+    if (!strcmp("console", file_path)) {
+        if (console_open_for_read && mode != O_WRONLY) {
+            // destroy file if not auto freed
+            sync_bin_sem_post(syscall_sem);
+            seL4_SetMR(0, -1);
+            return;
+        } else if (!console_open_for_read && mode != O_WRONLY) {
+            console_open_for_read = true;
+        }
+    } else {
+        if (nfs_open_file(file_path, mode, nfs_open_cb, file)) {
+            // destroy file if not auto freed
+            sync_bin_sem_post(syscall_sem);
+            seL4_SetMR(0, -1);
+            return;
+        }
+    }
 
-    /* If we made it here that means the strings are equal. */
-    sync_bin_sem_wait(syscall_sem);
-    console_open_for_read = true;
-    open_file *file = file_create("console", mode, network_console_send, deque);
     uint32_t fd;
     char err = fdt_put(user_process.fdt, file, &fd);
     sync_bin_sem_post(syscall_sem);
@@ -1005,16 +1027,19 @@ static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_t
 
     sync_bin_sem_wait(syscall_sem);
     open_file *found = fdt_get_file(user_process.fdt, curr_task->msg[1]);
-    sync_bin_sem_post(syscall_sem);
     if (found == NULL) {
+        sync_bin_sem_post(syscall_sem);
         seL4_SetMR(0, -1);
         return;
     } else if (!strcmp(found->path, "console") && found->mode != O_WRONLY) {
-        sync_bin_sem_wait(syscall_sem);
         console_open_for_read = false;
+    } else if (nfs_close_file(found->nfsfh, nfs_close_cb, NULL)) {
         sync_bin_sem_post(syscall_sem);
+        seL4_SetMR(0, -1);
+        return;
     }
     fdt_remove(user_process.fdt, curr_task->msg[1]);
+    sync_bin_sem_post(syscall_sem);
     seL4_SetMR(0, 0);
 }
 
@@ -1050,12 +1075,12 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
             }
 
             /* Write to data buffer */
-            char recv = found->file_read();
-            data[i + offset] = recv;
+            //char recv = found->file_read();
+            /*data[i + offset] = recv;
             if (recv == '\n') {
                 i++;
                 break;
-            }
+            }*/
         }
 
         /* Set the reply message to be the return value of the read_handler */
@@ -1087,6 +1112,7 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
 
     size_t bytes_left = nbyte;
     int offset = vaddr & (PAGE_SIZE_4K - 1);
+    int is_console = file_is_console(found);
 
     /* Perform the write operation. We don't assume that the buffer is only 1 frame long. */
     while (bytes_left > 0) {
@@ -1100,8 +1126,21 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
 
         char *data = (char *)frame_data(get_frame(vaddr));
 
-        /* Write data */
-        found->file_write(data + offset, len);
+        if (!is_console) {
+            int err = network_console_send(data + offset, len);
+            if (err < 0) {
+                sync_bin_sem_post(syscall_sem);
+                seL4_SetMR(0, -1);
+                return;
+            }
+        } else {
+            /* Write data */
+            if (nfs_write_file(found->nfsfh, len, data + offset, NULL) != len) {
+                sync_bin_sem_post(syscall_sem);
+                seL4_SetMR(0, -1);
+                return;
+            }
+        }
 
         /* Update offset, virtual address, and bytes left */
         offset = 0;
@@ -1148,6 +1187,23 @@ static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_tas
     sync_bin_sem_post(syscall_sem);
 }
 
+static void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
+{
+    
+}
+
+static void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
+{
+    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_STAT);
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    seL4_Word path_vaddr = curr_task->msg[1];
+    seL4_Word buf_vaddr = curr_task->msg[2];
+
+    uint16_t offset1 = path_vaddr & (PAGE_SIZE_4K - 1);
+    uint16_t offset2 = buf_vaddr & (PAGE_SIZE_4K - 1);
+    size_t path_bytes = curr_task->msg[3];
+}
+
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number)
 {
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
@@ -1161,4 +1217,20 @@ static void wakeup(UNUSED uint32_t id, void* data)
     struct task *args = (struct task *) data;
     seL4_NBSend(args->reply, seL4_MessageInfo_new(0, 0, 0, 0));
     free_untype(&args->reply, args->reply_ut);
+}
+
+static void nfs_open_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data)
+{
+    if (err) {
+        ZF_LOGE("NFS: Error in opening file, %s\n", (char*) data);
+        return; // if err remove file from fdt (not yet done)
+    }
+    nfsfh_init(private_data, data);
+}
+
+static void nfs_close_cb(int err, struct nfs_context *nfs, void *data, void *private_data)
+{
+    if (err) {
+        ZF_LOGE("NFS: Error in closing file, %s\n", (char*) data); // if err dont remove file from fdt (not yet done)
+    }
 }
