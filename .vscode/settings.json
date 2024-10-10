@@ -61,6 +61,8 @@
         "mapping.h": "c",
         "stdio.h": "c",
         "algorithm": "c",
-        "open_file.h": "c"
+        "open_file.h": "c",
+        "attribute.h": "c",
+        "network.h": "c"
     }
 }

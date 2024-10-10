@@ -130,6 +130,9 @@ struct network_console *console;
 
 bool console_open_for_read = false;
 
+seL4_CPtr nfs_sem_cptr;
+sync_bin_sem_t *nfs_sem = NULL;
+
 seL4_CPtr sem_cptr;
 sync_bin_sem_t *syscall_sem = NULL;
 
@@ -145,14 +148,18 @@ static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_tas
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
 static void wakeup(UNUSED uint32_t id, void *data);
 
+static frame_ref_t l4_frame(pt_entry *l4_pt, uint16_t l4_index) {
+    return (frame_ref_t )(l4_pt[l4_index] & MASK(9));
+}
+
 static bool vaddr_is_mapped(seL4_Word vaddr) {
     /* We assume the top level is mapped. */
     page_upper_directory *l1_pt = user_process.addrspace->page_table;
 
-    uint16_t l1_index = (vaddr >> 39) & 0x1FF; /* Top 9 bits */
-    uint16_t l2_index = (vaddr >> 30) & 0x1FF; /* Next 9 bits */
-    uint16_t l3_index = (vaddr >> 21) & 0x1FF; /* Next 9 bits */
-    uint16_t l4_index = (vaddr >> 12) & 0x1FF; /* Next 9 bits */
+    uint16_t l1_index = (vaddr >> 39) & MASK(9); /* Top 9 bits */
+    uint16_t l2_index = (vaddr >> 30) & MASK(9); /* Next 9 bits */
+    uint16_t l3_index = (vaddr >> 21) & MASK(9); /* Next 9 bits */
+    uint16_t l4_index = (vaddr >> 12) & MASK(9); /* Next 9 bits */
 
     page_directory *l2_pt = l1_pt[l1_index].l2;
     if (l2_pt == NULL) {
@@ -169,7 +176,7 @@ static bool vaddr_is_mapped(seL4_Word vaddr) {
         return false;
     }
 
-    if (l4_pt[l4_index].shadow_frame_ref == NULL_FRAME) {
+    if ((frame_ref_t )(l4_pt[l4_index] & MASK(19)) == NULL_FRAME) {
         return false;
     }
 
@@ -214,10 +221,10 @@ bool handle_vm_fault(seL4_Word fault_addr) {
     /* We use our shadow page table which follows the same structure as the hardware one.
      * Check the seL4 Manual section 7.1.1 for hardware virtual memory objects. Importantly
      * the top-most 16 bits of the virtual address are unused bits, so we ignore them. */
-    uint16_t l1_index = (fault_addr >> 39) & 0x1FF; /* Top 9 bits */
-    uint16_t l2_index = (fault_addr >> 30) & 0x1FF; /* Next 9 bits */
-    uint16_t l3_index = (fault_addr >> 21) & 0x1FF; /* Next 9 bits */
-    uint16_t l4_index = (fault_addr >> 12) & 0x1FF; /* Next 9 bits */
+    uint16_t l1_index = (fault_addr >> 39) & MASK(9); /* Top 9 bits */
+    uint16_t l2_index = (fault_addr >> 30) & MASK(9); /* Next 9 bits */
+    uint16_t l3_index = (fault_addr >> 21) & MASK(9); /* Next 9 bits */
+    uint16_t l4_index = (fault_addr >> 12) & MASK(9); /* Next 9 bits */
 
     /* Cache the related page table entries so we don't have to perform lots of dereferencing. */
     page_upper_directory *l1_pt = as->page_table;
@@ -238,18 +245,18 @@ bool handle_vm_fault(seL4_Word fault_addr) {
 
     /* If there already exists a valid entry in our page table, reload the Hardware Page Table and
      * unblock the caller with an empty message. */
-    if (l4_pt != NULL && l4_pt[l4_index].shadow_frame_ref != NULL_FRAME) {
+    if (l4_pt != NULL && l4_frame(l4_pt, l4_index) != NULL_FRAME) {
         pt_entry entry = l4_pt[l4_index];
-        if (!debug_is_read_fault() && (entry.perms & REGION_WR) == 0) {
+        if (!debug_is_read_fault() && ((entry >> 31) & REGION_WR) == 0) {
             ZF_LOGE("Trying to write to a read only page");
             return false;
         }
         /* Assign the appropriate rights for the frame we are about to map. */
-        seL4_CapRights_t rights = seL4_CapRights_new(0, 0, entry.perms & REGION_RD, (entry.perms >> 1) & 1);
-        if (!(entry.perms & REGION_EX)) {
+        seL4_CapRights_t rights = seL4_CapRights_new(0, 0, (entry >> 31) & REGION_RD, (entry >> 32) & 1);
+        if (!((entry >> 31) & REGION_EX)) {
             attr |= seL4_ARM_ExecuteNever;
         }
-        if (map_frame_impl(&cspace, entry.shadow_frame_ref, user_process.vspace, fault_addr,
+        if (map_frame_impl(&cspace, l4_frame(l4_pt, l4_index), user_process.vspace, fault_addr,
                            rights, attr, NULL, NULL, NULL) != 0) {
             ZF_LOGE("Could not map the frame into the two page tables");
             return false;
@@ -273,7 +280,7 @@ bool handle_vm_fault(seL4_Word fault_addr) {
             /* Fault occurred in a valid region and permissions line up so we can safely break out. */
             break;
         } else if (top_of_region == PROCESS_STACK_TOP
-                   && fault_addr < top_of_region && (fault_addr & ~(PAGE_SIZE_4K - 1)) >= heap_top) {
+                   && fault_addr < top_of_region && ALIGN_DOWN(fault_addr, PAGE_SIZE_4K) >= heap_top) {
             /* Expand the stack. */
             reg->base = fault_addr;
             reg->size = PROCESS_STACK_TOP - fault_addr;
@@ -316,12 +323,12 @@ bool handle_vm_fault(seL4_Word fault_addr) {
     }
 
     /* Allocate a new frame to be mapped by the shadow page table. */
-    frame_ref_t frame_ref = l4_pt[l4_index].shadow_frame_ref = alloc_frame();
+    frame_ref_t frame_ref = alloc_frame();
     if (frame_ref == NULL_FRAME) {
         ZF_LOGE("Failed to allocate a frame");
         return false;
     }
-    l4_pt[l4_index].perms = reg->perms;
+    l4_pt[l4_index] = frame_ref | (reg->perms << 31);
 
     /* Map the frame into the relevant page tables. */
     if (sos_map_frame_impl(&cspace, user_process.vspace, fault_addr, rights, attr, frame_ref, l1_pt, l4_pt) != 0) {
@@ -831,7 +838,12 @@ NORETURN void *main_continued(UNUSED void *arg)
 
     /* Initialise the network hardware. */
     printf("Network init\n");
-    network_init(&cspace, timer_vaddr, ntfn);
+    nfs_sem = malloc(sizeof(sync_bin_sem_t));
+    ut_t *nfs_sem_ut = alloc_retype(&nfs_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!nfs_sem_ut, "No memory for notification");
+    sync_bin_sem_init(nfs_sem, nfs_sem_cptr, 0);
+
+    network_init(&cspace, timer_vaddr, ntfn, nfs_sem);
     console = network_console_init();
     network_console_register_handler(console, enqueue);
     init_console_sem();
@@ -855,6 +867,10 @@ NORETURN void *main_continued(UNUSED void *arg)
     /* Sets up the timer irq */
     seL4_IRQHandler irq_handler;
     int init_irq_err = sos_register_irq_handler(meson_timeout_irq(MESON_TIMER_A), true, timer_irq, NULL, &irq_handler);
+    ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");
+    seL4_IRQHandler_Ack(irq_handler);
+
+    init_irq_err = sos_register_irq_handler(meson_timeout_irq(MESON_TIMER_B), true, timer_irq, NULL, &irq_handler);
     ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");
     seL4_IRQHandler_Ack(irq_handler);
 
@@ -930,15 +946,20 @@ int main(void)
 }
 
 static frame_ref_t get_frame(seL4_Word vaddr) {
-    uint16_t l1_index = (vaddr >> 39) & 0x1FF; /* Top 9 bits */
-    uint16_t l2_index = (vaddr >> 30) & 0x1FF; /* Next 9 bits */
-    uint16_t l3_index = (vaddr >> 21) & 0x1FF; /* Next 9 bits */
-    uint16_t l4_index = (vaddr >> 12) & 0x1FF; /* Next 9 bits */
-    return user_process.addrspace->page_table[l1_index].l2[l2_index].l3[l3_index].l4[l4_index].shadow_frame_ref;
-}
+    uint16_t l1_index = (vaddr >> 39) & MASK(9); /* Top 9 bits */
+    uint16_t l2_index = (vaddr >> 30) & MASK(9); /* Next 9 bits */
+    uint16_t l3_index = (vaddr >> 21) & MASK(9); /* Next 9 bits */
+    uint16_t l4_index = (vaddr >> 12) & MASK(9); /* Next 9 bits */
+    return l4_frame(user_process.addrspace->page_table[l1_index].l2[l2_index].l3[l3_index].l4,
+                    l4_index);
+    }
 
 static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_task) 
 {
+    /* Wait for the nfs to be mounted before continuing with open. */
+    sync_bin_sem_wait(nfs_sem);
+    sync_bin_sem_post(nfs_sem);
+
     ZF_LOGE("syscall: thread example made syscall %d!\n", SYSCALL_SOS_OPEN);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
@@ -1139,7 +1160,7 @@ static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_tas
     uintptr_t newbrk = curr_task->msg[1];
     if (newbrk <= 0) {
         seL4_SetMR(0, PROCESS_HEAP_START);        
-    } else if (newbrk >= (user_process.stack_reg->base & ~(PAGE_SIZE_4K - 1))) {
+    } else if (newbrk >= ALIGN_DOWN(user_process.stack_reg->base, PAGE_SIZE_4K)) {
         seL4_SetMR(0, 0);
     } else {
         user_process.heap_reg->size = newbrk - PROCESS_HEAP_START;
