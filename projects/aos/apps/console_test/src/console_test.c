@@ -104,13 +104,16 @@ char small_buf[SMALL_BUF_SZ];
 
 int test_buffers(int console_fd) {
     /* test a small string from the code segment */
-    //int result = sos_write(console_fd, test_str, strlen(test_str));
-    //assert(result == strlen(test_str));
+    int result = sos_write(console_fd, test_str, strlen(test_str));
+    assert(result == strlen(test_str));
 
     /* test reading to a small buffer */
-    //result = sos_read(console_fd, small_buf, SMALL_BUF_SZ);
+    result = sos_read(console_fd, small_buf, SMALL_BUF_SZ);
     /* make sure you type in at least SMALL_BUF_SZ */
-    //assert(result == SMALL_BUF_SZ);
+    printf("READ RESULT %s\n", small_buf);
+    assert(result == SMALL_BUF_SZ);
+    result = sos_write(console_fd, small_buf, SMALL_BUF_SZ);
+    assert(result == SMALL_BUF_SZ);
 
     /* test reading into a large on-heap buffer */
     //char *heap_buf = malloc(MEDIUM_BUF_SZ);
@@ -144,7 +147,7 @@ int test_stack_write(int console_fd) {
 
 int main(void)
 {
-    int fd = sos_open("console", O_RDWR);
+    int fd = sos_open("chirag.txt", O_RDWR);
     /*assert(fd > 2);
     int fail = sos_open("console", O_RDONLY);
     assert(fail == -1);
@@ -160,6 +163,7 @@ int main(void)
     test_stack_write(fd);*/
 
     test_buffers(fd);
+    printf("REACHED END OF CONSOLE_TEST\n");
     //printf("Passed read/write buffer test\n");
 
     // recursive_stack_test(0);

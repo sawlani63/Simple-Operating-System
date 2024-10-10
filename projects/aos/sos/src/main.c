@@ -139,6 +139,11 @@ sync_bin_sem_t *nfs_sem = NULL;
 seL4_CPtr sem_cptr;
 sync_bin_sem_t *syscall_sem = NULL;
 
+struct arg_struct {
+    open_file *file;
+    int err;
+};
+
 bool handle_vm_fault(seL4_Word fault_addr);
 
 static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
@@ -154,6 +159,8 @@ static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word sys
 static void wakeup(UNUSED uint32_t id, void *data);
 static void nfs_open_cb(int err, struct nfs_context *nfs, void *data, void *private_data);
 static void nfs_close_cb(int err, struct nfs_context *nfs, void *data, void *private_data);
+static void nfs_read_cb(int err, struct nfs_context *nfs, void *data, void *private_data);
+static void nfs_write_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data);
 
 static frame_ref_t l4_frame(pt_entry *l4_pt, uint16_t l4_index) {
     return (frame_ref_t )(l4_pt[l4_index] & MASK(9));
@@ -862,7 +869,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     init_console_sem();
     
     //nfs_open_file("console", O_WRONLY | 0100, nfs_open_cb, NULL);  //think how to do this while nfs mounts
-    open_file *file = file_create("console", O_WRONLY);
+    open_file *file = file_create("console", O_WRONLY, NULL);
     uint32_t fd;
     err = fdt_put(user_process.fdt, file, &fd); // initialise stdout
     ZF_LOGF_IF(err, "No memory for new file object");
@@ -1014,7 +1021,16 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
         bytes_left -= len;
     }
 
-    open_file *file = file_create(file_path, mode);
+    seL4_CPtr file_sem_cptr;
+    sync_bin_sem_t *file_sem = malloc(sizeof(sync_bin_sem_t));
+    ut_t *file_sem_ut = alloc_retype(&file_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!file_sem_ut, "No memory for notification");
+    sync_bin_sem_init(file_sem, file_sem_cptr, 1);
+
+    open_file *file = file_create(file_path, mode, file_sem);
+    struct arg_struct args;
+    args.file = file;
+    args.err = 0;
     if (!strcmp("console", file_path)) {
         if (console_open_for_read && mode != O_WRONLY) {
             // destroy file if not auto freed
@@ -1025,7 +1041,16 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
             console_open_for_read = true;
         }
     } else {
-        if (nfs_open_file(file_path, mode, nfs_open_cb, file)) {
+        sync_bin_sem_wait(file->sem);
+        if (nfs_open_file(file_path, mode, nfs_open_cb, &args)) {
+            // destroy file if not auto freed
+            sync_bin_sem_post(file->sem);
+            sync_bin_sem_post(syscall_sem);
+            seL4_SetMR(0, -1);
+            return;
+        }
+        sync_bin_sem_wait(file->sem);
+        if (args.err) {
             // destroy file if not auto freed
             sync_bin_sem_post(syscall_sem);
             seL4_SetMR(0, -1);
@@ -1054,10 +1079,23 @@ static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_t
         return;
     } else if (!strcmp(found->path, "console") && found->mode != O_WRONLY) {
         console_open_for_read = false;
-    } else if (nfs_close_file(found->nfsfh, nfs_close_cb, NULL)) {
-        sync_bin_sem_post(syscall_sem);
-        seL4_SetMR(0, -1);
-        return;
+    } else {
+        struct arg_struct args;
+        args.file = found;
+        args.err = 0;
+        sync_bin_sem_wait(found->sem);
+        if (nfs_close_file(found->nfsfh, nfs_close_cb, &args)) {
+            sync_bin_sem_post(found->sem);
+            sync_bin_sem_post(syscall_sem);
+            seL4_SetMR(0, -1);
+            return;
+        }
+        sync_bin_sem_wait(found->sem);
+        if (args.err) {
+            sync_bin_sem_post(syscall_sem);
+            seL4_SetMR(0, -1);
+            return;
+        }
     }
     fdt_remove(user_process.fdt, curr_task->msg[1]);
     sync_bin_sem_post(syscall_sem);
@@ -1085,27 +1123,67 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
         /* Set the reply message to be an error value */
         seL4_SetMR(0, -1);
     } else {
+        int is_console = file_is_console(found);
         /* Perform the read operation. We don't assume that the buffer is only 1 frame long. */
-        char *data = (char *)frame_data(get_frame(vaddr));
         uint16_t offset = vaddr & (PAGE_SIZE_4K - 1);
-        uint16_t i;
-        for (i = 0; i < nbyte; i++) {
-            if (i + offset >= PAGE_SIZE_4K) {
-                data = (char *)frame_data(get_frame(vaddr));
-                offset = 0;
+        if (!is_console) {
+            char *data = (char *)frame_data(get_frame(vaddr));
+            uint16_t i;
+            for (i = 0; i < nbyte; i++) {
+                if (i + offset >= PAGE_SIZE_4K) {
+                    data = (char *)frame_data(get_frame(vaddr));
+                    offset = 0;
+                }
+
+                /* Write to data buffer */
+                char recv = deque();
+                data[i + offset] = recv;
+                if (recv == '\n') {
+                    i++;
+                    break;
+                }
             }
 
-            /* Write to data buffer */
-            //char recv = found->file_read();
-            /*data[i + offset] = recv;
-            if (recv == '\n') {
-                i++;
-                break;
-            }*/
-        }
+            /* Set the reply message to be the return value of the read_handler */
+            seL4_SetMR(0, i);
+        } else {
+            size_t bytes_left = nbyte;
+            struct arg_struct args;
+            args.file = found;
+            args.err = 0;
+            while (bytes_left > 0) {
+                size_t len = bytes_left > (PAGE_SIZE_4K - offset) ? (PAGE_SIZE_4K - offset) : bytes_left;
+                
+                if (!vaddr_check(vaddr)) {
+                    sync_bin_sem_post(syscall_sem);
+                    seL4_SetMR(0, -1);
+                    return;
+                }
 
-        /* Set the reply message to be the return value of the read_handler */
-        seL4_SetMR(0, i);
+                char *data = (char *)frame_data(get_frame(vaddr));
+
+                sync_bin_sem_wait(found->sem);
+                if (nfs_read_file(found->nfsfh, len, nfs_read_cb, &args)) {
+                    sync_bin_sem_post(found->sem);
+                    sync_bin_sem_post(syscall_sem);
+                    seL4_SetMR(0, -1);
+                    return;
+                }
+                sync_bin_sem_wait(found->sem);
+                if (args.err <= 0) {
+                    sync_bin_sem_post(syscall_sem);
+                    seL4_SetMR(0, -1);
+                    return;
+                }
+                for (int i = 0; i < args.err; i++) {
+                    data[i + offset] = found->read_buffer[i];
+                } //to be safe, improve this later
+                offset = 0;
+                vaddr += args.err;
+                bytes_left -= args.err;
+            }
+            seL4_SetMR(0, nbyte - bytes_left);
+        }
     }
     sync_bin_sem_post(syscall_sem);
 }
@@ -1135,6 +1213,10 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
     int offset = vaddr & (PAGE_SIZE_4K - 1);
     int is_console = file_is_console(found);
 
+    struct arg_struct args;
+    args.file = found;
+    args.err = 0;
+
     /* Perform the write operation. We don't assume that the buffer is only 1 frame long. */
     while (bytes_left > 0) {
         size_t len = bytes_left > (PAGE_SIZE_4K - offset) ? (PAGE_SIZE_4K - offset) : bytes_left;
@@ -1154,19 +1236,29 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
                 seL4_SetMR(0, -1);
                 return;
             }
+            vaddr += err;
+            bytes_left -= err;
         } else {
             /* Write data */
-            if (nfs_write_file(found->nfsfh, len, data + offset, NULL) != len) {
+            sync_bin_sem_wait(found->sem);
+            if (nfs_write_file(found->nfsfh, len, data + offset, nfs_write_cb, &args)) {
+                sync_bin_sem_post(found->sem);
                 sync_bin_sem_post(syscall_sem);
                 seL4_SetMR(0, -1);
                 return;
             }
+            sync_bin_sem_wait(found->sem);
+            if (args.err <= 0) {
+                sync_bin_sem_post(syscall_sem);
+                seL4_SetMR(0, -1);
+                return;
+            }
+            vaddr += args.err;
+            bytes_left -= args.err;
         }
 
         /* Update offset, virtual address, and bytes left */
         offset = 0;
-        vaddr += len;
-        bytes_left -= len;
     }
     sync_bin_sem_post(syscall_sem);
 
@@ -1242,16 +1334,52 @@ static void wakeup(UNUSED uint32_t id, void* data)
 
 static void nfs_open_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data)
 {
+    struct arg_struct *args = (struct arg_struct *) private_data;
+    open_file *file = args->file;
     if (err) {
         ZF_LOGE("NFS: Error in opening file, %s\n", (char*) data);
-        return; // if err remove file from fdt (not yet done)
+    } else {
+        nfsfh_init(file, data);
     }
-    nfsfh_init(private_data, data);
+    args->err = err;
+    sync_bin_sem_post(file->sem);
+    sync_bin_sem_post(file->sem);
 }
 
 static void nfs_close_cb(int err, struct nfs_context *nfs, void *data, void *private_data)
 {
+    struct arg_struct *args = (struct arg_struct *) private_data;
+    open_file *file = args->file;
     if (err) {
-        ZF_LOGE("NFS: Error in closing file, %s\n", (char*) data); // if err dont remove file from fdt (not yet done)
+        ZF_LOGE("NFS: Error in closing file, %s\n", (char*) data);
     }
+    args->err = err;
+    sync_bin_sem_post(file->sem);
+    sync_bin_sem_post(file->sem);
+}
+
+static void nfs_read_cb(int err, struct nfs_context *nfs, void *data, void *private_data)
+{
+    struct arg_struct *args = (struct arg_struct *) private_data;
+    open_file *file = args->file;
+    if (err < 0) {
+        ZF_LOGE("NFS: Error in reading file, %s\n", (char*) data);
+    } else {
+        file->read_buffer = (char*) data;
+    }
+    args->err = err;
+    sync_bin_sem_post(file->sem);
+    sync_bin_sem_post(file->sem);
+}
+
+static void nfs_write_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data)
+{
+    struct arg_struct *args = (struct arg_struct *) private_data;
+    open_file *file = args->file;
+    if (err < 0) {
+        ZF_LOGE("NFS: Error in writing file, %s\n", (char*) data);
+    }
+    args->err = err;
+    sync_bin_sem_post(file->sem);
+    sync_bin_sem_post(file->sem);
 }

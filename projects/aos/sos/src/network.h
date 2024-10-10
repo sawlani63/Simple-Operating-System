@@ -27,9 +27,9 @@
  *                       using the SoC's watchdog timer (which is not used by your timer driver
  *                       and has a completely different programming model!)
  */
-void network_init(cspace_t *cspace, void *timer_vaddr, seL4_CPtr irq_ntfn);
+void network_init(cspace_t *cspace, void *timer_vaddr, seL4_CPtr irq_ntfn, sync_bin_sem_t *sem);
 
 int nfs_open_file(const char* path, int mode, nfs_cb cb, void *private_data);
 int nfs_close_file(void *nfsfh, nfs_cb cb, void *private_data);
-int nfs_write_file(void *nfsfh, uint64_t count, const void *buf, void *private_data);
-int nfs_stat64_file(const char* path, nfs_cb cb, void *private_data);
+int nfs_read_file(void *nfsfh, uint64_t count, nfs_cb cb, void *private_data);
+int nfs_write_file(void *nfsfh, uint64_t count, const void *buf, nfs_cb cb, void *private_data);

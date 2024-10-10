@@ -78,8 +78,7 @@ void nfs_mount_cb(int status, UNUSED struct nfs_context *nfs, void *data, UNUSED
 int nfs_open_file(const char* path, int mode, nfs_cb cb, void *private_data);
 int nfs_close_file(void* nfsfh, nfs_cb cb, void *private_data);
 int nfs_read_file(void *nfsfh, uint64_t count, nfs_cb cb, void *private_data);
-int nfs_write_file(void *nfsfh, uint64_t count, const void *buf, void *private_data);
-int nfs_stat64_file(const char* path, nfs_cb cb, void* private_data);
+int nfs_write_file(void *nfsfh, uint64_t count, const void *buf, nfs_cb cb, void *private_data);
 
 static int pico_eth_send(UNUSED struct pico_device *dev, void *input_buf, int len)
 {
@@ -314,14 +313,9 @@ void nfs_mount_cb(int status, UNUSED struct nfs_context *nfs, void *data, UNUSED
     sync_bin_sem_post(nfs_mount_sem);
 }
 
-void callback (int err, struct nfs_context *nfs, void *data, void *private_data) {
-
-}
-
 int nfs_open_file(const char* path, int mode, nfs_cb cb, void *private_data)
 {
-    // return nfs_open_async if not creating a new file
-    return nfs_open2_async(nfs, path, O_CREAT, mode, cb, private_data);
+    return nfs_open_async(nfs, path, O_CREAT | mode, cb, private_data);
 }
 
 int nfs_close_file(void *nfsfh, nfs_cb cb, void *private_data)
@@ -334,12 +328,7 @@ int nfs_read_file(void *nfsfh, uint64_t count, nfs_cb cb, void *private_data)
     return nfs_read_async(nfs, nfsfh, count, cb, private_data);
 }
 
-int nfs_write_file(void *nfsfh, uint64_t count, const void *buf, void *private_data)
+int nfs_write_file(void *nfsfh, uint64_t count, const void *buf, nfs_cb cb, void *private_data)
 {
-    return nfs_write_async(nfs, nfsfh, count, buf, callback, private_data);
-}
-
-int nfs_stat64_file(const char* path, nfs_cb cb, void *private_data)
-{
-    return nfs_stat64_async(nfs, path, cb, private_data);
+    return nfs_write_async(nfs, nfsfh, count, buf, cb, private_data);
 }

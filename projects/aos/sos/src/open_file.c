@@ -1,6 +1,6 @@
 #include "open_file.h"
 
-open_file *file_create(string path, int mode) {
+open_file *file_create(string path, int mode, sync_bin_sem_t *sem) {
     if (path == NULL) {
         return NULL;
     }
@@ -11,6 +11,8 @@ open_file *file_create(string path, int mode) {
     file->mode = mode;
     file->path = path;
     file->nfsfh = NULL;
+    file->sem = sem;
+    file->read_buffer = NULL;
     return file;
 }
 
