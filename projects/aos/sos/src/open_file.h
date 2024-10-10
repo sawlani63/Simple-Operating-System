@@ -8,7 +8,7 @@ typedef struct file {
     int mode;
     void *nfsfh;
     sync_bin_sem_t *sem;
-    void *read_offset;
+    uint64_t *read_offset;
     char* read_buffer;
 } open_file;
 

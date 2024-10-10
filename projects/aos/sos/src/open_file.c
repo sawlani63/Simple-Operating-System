@@ -13,6 +13,7 @@ open_file *file_create(string path, int mode, sync_bin_sem_t *sem) {
     file->nfsfh = NULL;
     file->sem = sem;
     file->read_buffer = NULL;
+    file->read_offset = 0;
     return file;
 }
 

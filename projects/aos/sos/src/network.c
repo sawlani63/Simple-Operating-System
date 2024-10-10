@@ -79,6 +79,7 @@ int nfs_open_file(const char* path, int mode, nfs_cb cb, void *private_data);
 int nfs_close_file(void* nfsfh, nfs_cb cb, void *private_data);
 int nfs_read_file(void *nfsfh, uint64_t count, nfs_cb cb, void *private_data);
 int nfs_write_file(void *nfsfh, uint64_t count, const void *buf, nfs_cb cb, void *private_data);
+int nfs_lseek_file(void *nfsfh, int64_t offset, int whence, nfs_cb cb, void *private_data);
 
 static int pico_eth_send(UNUSED struct pico_device *dev, void *input_buf, int len)
 {
@@ -331,4 +332,9 @@ int nfs_read_file(void *nfsfh, uint64_t count, nfs_cb cb, void *private_data)
 int nfs_write_file(void *nfsfh, uint64_t count, const void *buf, nfs_cb cb, void *private_data)
 {
     return nfs_write_async(nfs, nfsfh, count, buf, cb, private_data);
+}
+
+int nfs_lseek_file(void *nfsfh, int64_t offset, int whence, nfs_cb cb, void *private_data)
+{
+    return nfs_lseek_async(nfs, nfsfh, offset, whence, cb, private_data);
 }
