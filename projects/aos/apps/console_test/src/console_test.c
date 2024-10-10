@@ -143,16 +143,16 @@ int test_nfs() {
     assert(fd > 2);
 
     /* test a small string from the code segment */
-    // int result = sos_write(fd, "Help", 5);
-    // assert(result == 5);
+    int result = sos_write(fd, "Help", 5);
+    assert(result == 5);
 
-    // char *buffer = malloc(MEDIUM_BUF_SZ);
+    char *buffer = malloc(MEDIUM_BUF_SZ);
 
-    // /* test reading to a small buffer */
-    // result = sos_read(fd, buffer, MEDIUM_BUF_SZ);
-    // assert(result == MEDIUM_BUF_SZ);
+    /* test reading to a small buffer */
+    result = sos_read(fd, buffer, MEDIUM_BUF_SZ);
+    assert(result == MEDIUM_BUF_SZ);
 
-    // printf("Buffer: %s\n", buffer);
+    printf("Buffer: %s\n", buffer);
 }
 
 int test_stack_write(int console_fd) {

@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <sync/bin_sem.h>
+#include "nfs.h"
 
 sync_bin_sem_t *queue_sem = NULL;
 seL4_CPtr sem_cptr;
@@ -35,7 +36,7 @@ void enqueue(__attribute__((__unused__)) struct network_console *network_console
 int deque(UNUSED void *handle, uint64_t count, UNUSED void *cb, void *args) {
     /* We don't use a callback here so we'll just use the args to the callback
      * as the buffer we will be writing to. */
-    char *buff = (char *) args;
+    char *buff = (char *) ((nfs_args *) args)->buff;
     for (uint64_t i = 0; i < count; i++) {
         sync_bin_sem_wait(queue_sem);
         buff[i] = read_queue->c;

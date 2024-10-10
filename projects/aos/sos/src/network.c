@@ -313,22 +313,40 @@ void nfs_mount_cb(int status, UNUSED struct nfs_context *nfs, void *data,
     sync_bin_sem_post(nfs_mount_sem);
 }
 
+extern sync_bin_sem_t *other_sem;
+
 int nfs_open_file(const char *path, int mode, nfs_cb cb, void *private_data)
 {
-    return nfs_open_async(nfs, path, O_CREAT | mode, cb, private_data);
+    if (nfs_open_async(nfs, path, O_CREAT | mode, cb, private_data)) {
+        return -1;
+    }
+    sync_bin_sem_wait(other_sem);
+    return 0;
 }
 
 int nfs_close_file(void *nfsfh, nfs_cb cb, void *private_data)
 {
-    return nfs_close_async(nfs, nfsfh, cb, private_data);
+    if (nfs_close_async(nfs, nfsfh, cb, private_data)) {
+        return -1;
+    }
+    sync_bin_sem_wait(other_sem);
+    return 0;
 }
 
 int nfs_read_file(void *nfsfh, uint64_t count, void *cb, void *private_data)
 {
-    return nfs_read_async(nfs, nfsfh, count, cb, private_data);
+    if (nfs_read_async(nfs, nfsfh, count, cb, private_data)) {
+        return 0;
+    }
+    sync_bin_sem_wait(other_sem);
+    return count;
 }
 
 int nfs_write_file(void *nfsfh, char *buf, uint64_t count, void *cb, void *private_data)
 {
-    return nfs_write_async(nfs, nfsfh, count, buf, cb, private_data);
+    if (nfs_write_async(nfs, nfsfh, count, buf, cb, private_data)) {
+        return -1;
+    }
+    sync_bin_sem_wait(other_sem);
+    return 0;
 }

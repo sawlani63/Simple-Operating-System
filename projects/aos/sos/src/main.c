@@ -133,6 +133,9 @@ bool console_open_for_read = false;
 seL4_CPtr nfs_sem_cptr;
 sync_bin_sem_t *nfs_sem = NULL;
 
+seL4_CPtr other_cptr;
+sync_bin_sem_t *other_sem = NULL;
+
 seL4_CPtr sem_cptr;
 sync_bin_sem_t *syscall_sem = NULL;
 
@@ -886,6 +889,12 @@ NORETURN void *main_continued(UNUSED void *arg)
     ZF_LOGF_IF(!sem_ut, "No memory for notification");
     sync_bin_sem_init(syscall_sem, sem_cptr, 1);
 
+    other_sem = malloc(sizeof(sync_bin_sem_t));
+    ZF_LOGF_IF(!other_sem, "No memory for semaphore object");
+    ut_t *other_ut = alloc_retype(&other_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!other_ut, "No memory for notification");
+    sync_bin_sem_init(other_sem, sem_cptr, 0);
+
     /* Creating thread pool */
     initialise_thread_pool(handle_syscall);
 
@@ -1005,8 +1014,8 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
         sync_bin_sem_post(syscall_sem);
         file = file_create(file_path, mode, network_console_send, deque);
     } else {
-        nfs_args args;
-        if (nfs_open_file(file_path, mode, nfs_open_cb, &args)) {
+        nfs_args args = {.sem = other_sem};
+        if (nfs_open_file(file_path, mode, nfs_open_cb, &args) < 0) {
             seL4_SetMR(0, -1);
             return;
         }
@@ -1036,9 +1045,9 @@ static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_t
         console_open_for_read = false;
         sync_bin_sem_post(syscall_sem);
     } else {
-        nfs_args args;
+        nfs_args args = {.sem = other_sem};
         sync_bin_sem_wait(syscall_sem);
-        if (nfs_close_file(found->nfsfh, nfs_close_cb, &args)) {
+        if (nfs_close_file(found->nfsfh, nfs_close_cb, &args) < 0) {
             sync_bin_sem_post(syscall_sem);
             seL4_SetMR(0, -1);
             return;
@@ -1091,7 +1100,11 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
         char *data = (char *)frame_data(get_frame(vaddr));
 
         /* Read data */
-        size_t read = found->file_read(NULL, len, NULL, data + offset);
+        nfs_args args = {0, NULL, other_sem};
+        size_t read = found->file_read(found->nfsfh, len, nfs_read_cb, &args);
+        for (int i = 0; i < read; i++) {
+            data[i + offset] = ((char *) args.buff)[i];
+        }
         if (read != len) {
             bytes_left -= read;
             break;
@@ -1121,9 +1134,9 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
     /* Find the file associated with the file descriptor */
     sync_bin_sem_wait(syscall_sem);
     open_file *found = fdt_get_file(user_process.fdt, write_fd);
+    sync_bin_sem_post(syscall_sem);
     if (found == NULL || found->mode == O_RDONLY) {
         /* Set the reply message to be an error value and return early */
-        sync_bin_sem_post(syscall_sem);
         seL4_SetMR(0, -1);
         return;
     }
@@ -1136,22 +1149,31 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
         size_t len = bytes_left > (PAGE_SIZE_4K - offset) ? (PAGE_SIZE_4K - offset) : bytes_left;
         
         if (!vaddr_check(vaddr)) {
-            sync_bin_sem_post(syscall_sem);
             seL4_SetMR(0, -1);
             return;
         }
 
+        sync_bin_sem_wait(syscall_sem);
         char *data = (char *)frame_data(get_frame(vaddr));
-
+        nfs_args args = {0, data, other_sem};
         /* Write data */
-        found->file_write(console, data + offset, len, NULL, NULL);
+        if (found->file_write(found->nfsfh, data + offset, len, nfs_write_cb, &args) < 0) {
+            sync_bin_sem_post(syscall_sem);
+            seL4_SetMR(0, -1);
+            return;
+        }
+        sync_bin_sem_post(syscall_sem);
+
+        if (args.err < 0) {
+            seL4_SetMR(0, -1);
+            return;
+        }
 
         /* Update offset, virtual address, and bytes left */
         offset = 0;
         vaddr += len;
         bytes_left -= len;
     }
-    sync_bin_sem_post(syscall_sem);
 
     /* Set the reply message to the number of bytes written */
     seL4_SetMR(0, nbyte - bytes_left);

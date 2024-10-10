@@ -1,6 +1,10 @@
 {
     "files.associations": {
         "libnfs.h": "c",
-        "open_file.h": "c"
+        "open_file.h": "c",
+        "array": "c",
+        "string": "c",
+        "string_view": "c",
+        "*.tcc": "cpp"
     }
 }
