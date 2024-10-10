@@ -1100,9 +1100,9 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
         char *data = (char *)frame_data(get_frame(vaddr));
 
         /* Read data */
-        nfs_args args = {0, NULL, other_sem};
+        nfs_args args = {0, data + offset, other_sem};
         size_t read = found->file_read(found->nfsfh, len, nfs_read_cb, &args);
-        for (int i = 0; i < read; i++) {
+        for (size_t i = 0; i < read; i++) { // waste of time for console?
             data[i + offset] = ((char *) args.buff)[i];
         }
         if (read != len) {
