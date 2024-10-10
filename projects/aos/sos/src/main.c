@@ -142,6 +142,7 @@ sync_bin_sem_t *syscall_sem = NULL;
 struct arg_struct {
     open_file *file;
     int err;
+    char* buf;
 };
 
 bool handle_vm_fault(seL4_Word fault_addr);
@@ -162,6 +163,9 @@ static void nfs_close_cb(int err, struct nfs_context *nfs, void *data, void *pri
 static void nfs_read_cb(int err, struct nfs_context *nfs, void *data, void *private_data);
 static void nfs_write_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data);
 static void nfs_lseek_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data);
+
+// Helper functions
+static int change_seek_pointer(open_file *found, size_t byte, struct arg_struct args);
 
 static frame_ref_t l4_frame(pt_entry *l4_pt, uint16_t l4_index) {
     return (frame_ref_t )(l4_pt[l4_index] & MASK(9));
@@ -1127,7 +1131,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
         int is_console = file_is_console(found);
         /* Perform the read operation. We don't assume that the buffer is only 1 frame long. */
         uint16_t offset = vaddr & (PAGE_SIZE_4K - 1);
-        if (!is_console) {
+        if (is_console) {
             char *data = (char *)frame_data(get_frame(vaddr));
             uint16_t i;
             for (i = 0; i < nbyte; i++) {
@@ -1152,6 +1156,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
             struct arg_struct args;
             args.file = found;
             args.err = 0;
+            change_seek_pointer(found, found->read_offset, args);
             while (bytes_left > 0) {
                 size_t len = bytes_left > (PAGE_SIZE_4K - offset) ? (PAGE_SIZE_4K - offset) : bytes_left;
                 
@@ -1161,7 +1166,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
                     return;
                 }
 
-                char *data = (char *)frame_data(get_frame(vaddr));
+                char* data = (char *)frame_data(get_frame(vaddr));
 
                 sync_bin_sem_wait(found->sem);
                 if (nfs_read_file(found->nfsfh, len, nfs_read_cb, &args)) {
@@ -1176,28 +1181,17 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
                     seL4_SetMR(0, -1);
                     return;
                 } else if (!args.err) {
-                    sync_bin_sem_wait(found->sem);
-                    if (nfs_lseek_file(found->nfsfh, 0, SEEK_SET, nfs_lseek_cb, &args)) {
-                        sync_bin_sem_post(found->sem);
-                        sync_bin_sem_post(syscall_sem);
-                        seL4_SetMR(0, -1);
-                        return;
-                    }
-                    sync_bin_sem_wait(found->sem);
-                    if (args.err < 0) {
-                        sync_bin_sem_post(syscall_sem);
-                        seL4_SetMR(0, -1);
-                        return;
-                    }
+                    change_seek_pointer(found, 0, args);
                 } else {
                     for (int i = 0; i < args.err; i++) {
-                        data[i + offset] = found->read_buffer[i];
+                        data[i + offset] = args.buf[i];
                     } //to be safe, improve this later
                     offset = 0;
                     vaddr += args.err;
                     bytes_left -= args.err;
                 }
             }
+            found->read_offset += nbyte;
             seL4_SetMR(0, nbyte - bytes_left);
         }
     }
@@ -1233,6 +1227,10 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
     args.file = found;
     args.err = 0;
 
+    if (!is_console) {
+        change_seek_pointer(found, 0, args);
+    }
+
     /* Perform the write operation. We don't assume that the buffer is only 1 frame long. */
     while (bytes_left > 0) {
         size_t len = bytes_left > (PAGE_SIZE_4K - offset) ? (PAGE_SIZE_4K - offset) : bytes_left;
@@ -1245,7 +1243,7 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
 
         char *data = (char *)frame_data(get_frame(vaddr));
 
-        if (!is_console) {
+        if (is_console) {
             int err = network_console_send(data + offset, len);
             if (err < 0) {
                 sync_bin_sem_post(syscall_sem);
@@ -1255,7 +1253,6 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
             vaddr += err;
             bytes_left -= err;
         } else {
-            /* Write data */
             sync_bin_sem_wait(found->sem);
             if (nfs_write_file(found->nfsfh, len, data + offset, nfs_write_cb, &args)) {
                 sync_bin_sem_post(found->sem);
@@ -1381,7 +1378,7 @@ static void nfs_read_cb(int err, struct nfs_context *nfs, void *data, void *priv
     if (err < 0) {
         ZF_LOGE("NFS: Error in reading file, %s\n", (char*) data);
     } else {
-        file->read_buffer = (char*) data;
+        args->buf = (char*) data;
     }
     args->err = err;
     sync_bin_sem_post(file->sem);
@@ -1406,10 +1403,28 @@ static void nfs_lseek_cb(int err, UNUSED struct nfs_context *nfs, void *data, vo
     open_file *file = args->file;
     if (err < 0) {
         ZF_LOGE("NFS: Error in seeking read pointer, %s\n", (char*) data);
-    } else {
-        file->read_offset = (uint64_t *) data;
     }
     args->err = err;
     sync_bin_sem_post(file->sem);
     sync_bin_sem_post(file->sem);
+}
+
+// Helper functions
+
+static int change_seek_pointer(open_file *found, size_t byte, struct arg_struct args)
+{
+    sync_bin_sem_wait(found->sem);
+    if (nfs_lseek_file(found->nfsfh, byte, SEEK_SET, nfs_lseek_cb, &args)) {
+        sync_bin_sem_post(found->sem);
+        sync_bin_sem_post(syscall_sem);
+        seL4_SetMR(0, -1);
+        return -1;
+    }
+    sync_bin_sem_wait(found->sem);
+    if (args.err < 0) {
+        sync_bin_sem_post(syscall_sem);
+        seL4_SetMR(0, -1);
+        return -1;
+    }
+    found->read_offset = byte;
 }

@@ -12,7 +12,6 @@ open_file *file_create(string path, int mode, sync_bin_sem_t *sem) {
     file->path = path;
     file->nfsfh = NULL;
     file->sem = sem;
-    file->read_buffer = NULL;
     file->read_offset = 0;
     return file;
 }
@@ -29,5 +28,8 @@ void nfsfh_init(open_file *file, void *nfsfh) {
 }
 
 int file_is_console(open_file *file) {
-    return strcmp("console", file->path);
+    if (strcmp("console", file->path) == 0) {
+        return 1;
+    }
+    return 0;
 }
