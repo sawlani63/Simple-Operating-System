@@ -51,8 +51,8 @@
 #include "addrspace.h"
 
 /* File System */
-#include "fs.h"
 #include "console.h"
+#include "nfs.h"
 
 
 /*
@@ -135,6 +135,9 @@ bool console_open_for_read = false;
 
 seL4_CPtr nfs_sem_cptr;
 sync_bin_sem_t *nfs_sem = NULL;
+
+seL4_CPtr other_cptr;
+sync_bin_sem_t *other_sem = NULL;
 
 seL4_CPtr sem_cptr;
 sync_bin_sem_t *syscall_sem = NULL;
@@ -912,6 +915,12 @@ NORETURN void *main_continued(UNUSED void *arg)
     ZF_LOGF_IF(!sem_ut, "No memory for notification");
     sync_bin_sem_init(syscall_sem, sem_cptr, 1);
 
+    other_sem = malloc(sizeof(sync_bin_sem_t));
+    ZF_LOGF_IF(!other_sem, "No memory for semaphore object");
+    ut_t *other_ut = alloc_retype(&other_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!other_ut, "No memory for notification");
+    sync_bin_sem_init(other_sem, sem_cptr, 0);
+
     /* Creating thread pool */
     initialise_thread_pool(handle_syscall);
 
@@ -991,13 +1000,6 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
     seL4_Word vaddr = curr_task->msg[1];
     int path_len = curr_task->msg[2];
-    sync_bin_sem_wait(syscall_sem);
-    if (!loop_vaddr_check(vaddr, path_len)) {
-        sync_bin_sem_post(syscall_sem);
-        seL4_SetMR(0, -1);
-        return;
-    }
-    sync_bin_sem_post(syscall_sem);
     int mode = curr_task->msg[3];
     if ((mode != O_WRONLY) && (mode != O_RDONLY) && (mode != O_RDWR)) {
         seL4_SetMR(0, -1);
@@ -1006,67 +1008,50 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
     uint16_t offset = vaddr & (PAGE_SIZE_4K - 1);
     size_t bytes_left = path_len;
-
-    char *file_path = (char *) calloc(path_len, sizeof(char));
-    sync_bin_sem_wait(syscall_sem);
-
+    char *file_path = calloc(path_len, sizeof(char));
     while (bytes_left > 0) {
-        size_t len = bytes_left > (PAGE_SIZE_4K - offset) ? (PAGE_SIZE_4K - offset) : bytes_left;
-
         if (!vaddr_check(vaddr)) {
-            sync_bin_sem_post(syscall_sem);
             seL4_SetMR(0, -1);
             return;
         }
         char *data = (char *) frame_data(get_frame(vaddr));
         strcat(file_path, data + offset);
 
+        size_t len = bytes_left > (PAGE_SIZE_4K - offset) ? (PAGE_SIZE_4K - offset) : bytes_left;
+        sync_bin_sem_wait(syscall_sem);
+        char *data = (char *) frame_data(get_frame(vaddr));
+        sync_bin_sem_post(syscall_sem);
+        strcat(file_path, data + offset);
+
         vaddr += len;
-        offset = 0;
         bytes_left -= len;
+        offset = 0;
     }
 
-    seL4_CPtr file_sem_cptr;
-    sync_bin_sem_t *file_sem = malloc(sizeof(sync_bin_sem_t));
-    ut_t *file_sem_ut = alloc_retype(&file_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
-    ZF_LOGF_IF(!file_sem_ut, "No memory for notification");
-    sync_bin_sem_init(file_sem, file_sem_cptr, 1);
-
-    open_file *file = file_create(file_path, mode, file_sem);
-    struct arg_struct args;
-    args.file = file;
-    args.err = 0;
-    if (!strcmp("console", file_path)) {
+    open_file *file;
+    if (!strcmp(file_path, "console")) {
+        sync_bin_sem_wait(syscall_sem);
         if (console_open_for_read && mode != O_WRONLY) {
-            // destroy file if not auto freed
             sync_bin_sem_post(syscall_sem);
             seL4_SetMR(0, -1);
             return;
-        } else if (!console_open_for_read && mode != O_WRONLY) {
+        } else if (mode != O_WRONLY) {
             console_open_for_read = true;
         }
+        sync_bin_sem_post(syscall_sem);
+        file = file_create(file_path, mode, network_console_send, deque);
     } else {
-        sync_bin_sem_wait(file->sem);
-        if (nfs_open_file(file_path, mode, nfs_open_cb, &args)) {
-            // destroy file if not auto freed
-            sync_bin_sem_post(file->sem);
-            sync_bin_sem_post(syscall_sem);
+        nfs_args args = {.sem = other_sem};
+        if (nfs_open_file(file_path, mode, nfs_open_cb, &args) < 0) {
             seL4_SetMR(0, -1);
             return;
         }
-        sync_bin_sem_wait(file->sem);
-        if (args.err) {
-            // destroy file if not auto freed
-            sync_bin_sem_post(syscall_sem);
-            seL4_SetMR(0, -1);
-            return;
-        }
+        file = file_create(file_path, mode, nfs_write_file, nfs_read_file);
+        file->nfsfh = args.buff;
     }
 
     uint32_t fd;
-    char err = fdt_put(user_process.fdt, file, &fd);
-    sync_bin_sem_post(syscall_sem);
-
+    int err = fdt_put(user_process.fdt, file, &fd);
     seL4_SetMR(0, err ? -1 : (int) fd);
 }
 
@@ -1084,23 +1069,22 @@ static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_t
         return;
     } else if (!strcmp(found->path, "console") && found->mode != O_WRONLY) {
         console_open_for_read = false;
+        sync_bin_sem_post(syscall_sem);
     } else {
-        struct arg_struct args;
-        args.file = found;
-        args.err = 0;
-        sync_bin_sem_wait(found->sem);
-        if (nfs_close_file(found->nfsfh, nfs_close_cb, &args)) {
-            sync_bin_sem_post(found->sem);
+        nfs_args args = {.sem = other_sem};
+        sync_bin_sem_wait(syscall_sem);
+        if (nfs_close_file(found->nfsfh, nfs_close_cb, &args) < 0) {
             sync_bin_sem_post(syscall_sem);
             seL4_SetMR(0, -1);
             return;
         }
-        sync_bin_sem_wait(found->sem);
+
         if (args.err) {
             sync_bin_sem_post(syscall_sem);
             seL4_SetMR(0, -1);
             return;
         }
+        sync_bin_sem_post(syscall_sem);
     }
     fdt_remove(user_process.fdt, curr_task->msg[1]);
     sync_bin_sem_post(syscall_sem);
@@ -1116,9 +1100,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
     int read_fd = curr_task->msg[1];
     seL4_Word vaddr = curr_task->msg[2];
     int nbyte = curr_task->msg[3];
-    sync_bin_sem_wait(syscall_sem);
     if (!loop_vaddr_check(vaddr, nbyte)) {
-        sync_bin_sem_post(syscall_sem);
         seL4_SetMR(0, -1);
         return;
     }
@@ -1127,75 +1109,42 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
     if (found == NULL || found->mode == O_WRONLY) {
         /* Set the reply message to be an error value */
         seL4_SetMR(0, -1);
-    } else {
-        int is_console = file_is_console(found);
-        /* Perform the read operation. We don't assume that the buffer is only 1 frame long. */
-        uint16_t offset = vaddr & (PAGE_SIZE_4K - 1);
-        if (is_console) {
-            char *data = (char *)frame_data(get_frame(vaddr));
-            uint16_t i;
-            for (i = 0; i < nbyte; i++) {
-                if (i + offset >= PAGE_SIZE_4K) {
-                    data = (char *)frame_data(get_frame(vaddr));
-                    offset = 0;
-                }
-
-                /* Write to data buffer */
-                char recv = deque();
-                data[i + offset] = recv;
-                if (recv == '\n') {
-                    i++;
-                    break;
-                }
-            }
-
-            /* Set the reply message to be the return value of the read_handler */
-            seL4_SetMR(0, i);
-        } else {
-            size_t bytes_left = nbyte;
-            struct arg_struct args;
-            args.file = found;
-            args.err = 0;
-            change_seek_pointer(found, found->read_offset, args);
-            while (bytes_left > 0) {
-                size_t len = bytes_left > (PAGE_SIZE_4K - offset) ? (PAGE_SIZE_4K - offset) : bytes_left;
-                
-                if (!vaddr_check(vaddr)) {
-                    sync_bin_sem_post(syscall_sem);
-                    seL4_SetMR(0, -1);
-                    return;
-                }
-
-                char* data = (char *)frame_data(get_frame(vaddr));
-
-                sync_bin_sem_wait(found->sem);
-                if (nfs_read_file(found->nfsfh, len, nfs_read_cb, &args)) {
-                    sync_bin_sem_post(found->sem);
-                    sync_bin_sem_post(syscall_sem);
-                    seL4_SetMR(0, -1);
-                    return;
-                }
-                sync_bin_sem_wait(found->sem);
-                if (args.err < 0) {
-                    sync_bin_sem_post(syscall_sem);
-                    seL4_SetMR(0, -1);
-                    return;
-                } else if (!args.err) {
-                    change_seek_pointer(found, 0, args);
-                } else {
-                    for (int i = 0; i < args.err; i++) {
-                        data[i + offset] = args.buf[i];
-                    } //to be safe, improve this later
-                    offset = 0;
-                    vaddr += args.err;
-                    bytes_left -= args.err;
-                }
-            }
-            found->read_offset += nbyte;
-            seL4_SetMR(0, nbyte - bytes_left);
-        }
+        return;
     }
-    sync_bin_sem_post(syscall_sem);
+
+    size_t bytes_left = nbyte;
+    int offset = vaddr & (PAGE_SIZE_4K - 1);
+
+    /* Perform the read operation. We don't assume that the buffer is only 1 frame long. */
+    while (bytes_left > 0) {
+        size_t len = bytes_left > (PAGE_SIZE_4K - offset) ? (PAGE_SIZE_4K - offset) : bytes_left;
+        
+        if (!vaddr_check(vaddr)) {
+            seL4_SetMR(0, -1);
+            return;
+        }
+
+        char *data = (char *)frame_data(get_frame(vaddr));
+
+        /* Read data */
+        nfs_args args = {0, data + offset, other_sem};
+        size_t read = found->file_read(found->nfsfh, len, nfs_read_cb, &args);
+        for (size_t i = 0; i < read; i++) { // waste of time for console?
+            data[i + offset] = ((char *) args.buff)[i];
+        }
+        if (read != len) {
+            bytes_left -= read;
+            break;
+        }
+
+        /* Update offset, virtual address, and bytes left */
+        offset = 0;
+        vaddr += len;
+        bytes_left -= len;
+    }
+
+    /* Set the reply message to be the return value of the read_handler */
+    seL4_SetMR(0, nbyte - bytes_left);
 }
 
 static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
@@ -1212,9 +1161,9 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
     /* Find the file associated with the file descriptor */
     sync_bin_sem_wait(syscall_sem);
     open_file *found = fdt_get_file(user_process.fdt, write_fd);
+    sync_bin_sem_post(syscall_sem);
     if (found == NULL || found->mode == O_RDONLY) {
         /* Set the reply message to be an error value and return early */
-        sync_bin_sem_post(syscall_sem);
         seL4_SetMR(0, -1);
         return;
     }
@@ -1236,44 +1185,29 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
         size_t len = bytes_left > (PAGE_SIZE_4K - offset) ? (PAGE_SIZE_4K - offset) : bytes_left;
         
         if (!vaddr_check(vaddr)) {
-            sync_bin_sem_post(syscall_sem);
             seL4_SetMR(0, -1);
             return;
         }
 
+        sync_bin_sem_wait(syscall_sem);
         char *data = (char *)frame_data(get_frame(vaddr));
+        nfs_args args = {0, data, other_sem};
+        /* Write data */
+        if (found->file_write(found->nfsfh, data + offset, len, nfs_write_cb, &args) < 0) {
+            sync_bin_sem_post(syscall_sem);
+            seL4_SetMR(0, -1);
+            return;
+        }
+        sync_bin_sem_post(syscall_sem);
 
-        if (is_console) {
-            int err = network_console_send(data + offset, len);
-            if (err < 0) {
-                sync_bin_sem_post(syscall_sem);
-                seL4_SetMR(0, -1);
-                return;
-            }
-            vaddr += err;
-            bytes_left -= err;
-        } else {
-            sync_bin_sem_wait(found->sem);
-            if (nfs_write_file(found->nfsfh, len, data + offset, nfs_write_cb, &args)) {
-                sync_bin_sem_post(found->sem);
-                sync_bin_sem_post(syscall_sem);
-                seL4_SetMR(0, -1);
-                return;
-            }
-            sync_bin_sem_wait(found->sem);
-            if (args.err <= 0) {
-                sync_bin_sem_post(syscall_sem);
-                seL4_SetMR(0, -1);
-                return;
-            }
-            vaddr += args.err;
-            bytes_left -= args.err;
+        if (args.err < 0) {
+            seL4_SetMR(0, -1);
+            return;
         }
 
         /* Update offset, virtual address, and bytes left */
         offset = 0;
     }
-    sync_bin_sem_post(syscall_sem);
 
     /* Set the reply message to the number of bytes written */
     seL4_SetMR(0, nbyte - bytes_left);

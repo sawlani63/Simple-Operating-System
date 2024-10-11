@@ -92,7 +92,8 @@ struct network_console *network_console_init(void)
     return &network_console;
 }
 
-int network_console_send(char *data, int len)
+int network_console_send(UNUSED void *handle, char *data, uint64_t len,
+                         UNUSED void *callback, UNUSED void *args)
 {
     assert(network_console.pico_socket != NULL);
     int total_sent = 0;

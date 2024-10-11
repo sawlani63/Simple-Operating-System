@@ -10,9 +10,9 @@ open_file *file_create(string path, int mode, sync_bin_sem_t *sem) {
     }
     file->mode = mode;
     file->path = path;
+    file->file_read = file_read;
+    file->file_write = file_write;
     file->nfsfh = NULL;
-    file->sem = sem;
-    file->read_offset = 0;
     return file;
 }
 
@@ -25,11 +25,4 @@ void file_destroy(open_file *file) {
 
 void nfsfh_init(open_file *file, void *nfsfh) {
     file->nfsfh = nfsfh;
-}
-
-int file_is_console(open_file *file) {
-    if (strcmp("console", file->path) == 0) {
-        return 1;
-    }
-    return 0;
 }

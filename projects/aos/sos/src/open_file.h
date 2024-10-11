@@ -1,14 +1,16 @@
 #include <stdlib.h>
-#include <sync/bin_sem.h>
+#include <stdint.h>
 
 typedef const char * string;
+typedef int (*rd_handler)(void *handle, uint64_t count, void *cb, void *args);
+typedef int (*wr_handler)(void *handle, char *data, uint64_t len, void *callback, void *args);
 
 typedef struct file {
     string path;
     int mode;
-    void *nfsfh;
-    sync_bin_sem_t *sem;
-    size_t read_offset;
+    wr_handler file_write;
+    rd_handler file_read;
+    void *nfsfh; // i dont like this
 } open_file;
 
 /**
@@ -26,4 +28,3 @@ open_file *file_create(string path, int mode, sync_bin_sem_t *sem);
 void file_destroy(open_file *file);
 
 void nfsfh_init(open_file *file, void *nfsfh);
-int file_is_console(open_file *file);
