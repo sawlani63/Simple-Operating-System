@@ -4,9 +4,6 @@
 #include <stdlib.h>
 #include <sync/bin_sem.h>
 
-#include "fs.h"
-#include "network.h"
-
 #define ST_FILE    1    /* plain file */
 #define ST_SPECIAL 2    /* special (console) file */
 
@@ -77,18 +74,6 @@ void nfs_stat_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *priv
         sos_stat->st_size = stat->nfs_size;
         sos_stat->st_atime = stat->nfs_atime;
         sos_stat->st_ctime = stat->nfs_ctime;
-    }
-    args->err = err;
-    sync_bin_sem_post(args->sem);
-}
-
-void nfs_lseek_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data)
-{
-    nfs_args *args = (nfs_args *) private_data;
-    if (err < 0) {
-        ZF_LOGE("NFS: Error in seeking read pointer, %s\n", (char*) data);
-    } else {
-        // update offset
     }
     args->err = err;
     sync_bin_sem_post(args->sem);

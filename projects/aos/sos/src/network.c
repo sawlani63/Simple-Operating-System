@@ -48,7 +48,6 @@
 #include "irq.h"
 #include "ut.h"
 
-
 #ifndef SOS_NFS_DIR
 #  ifdef CONFIG_SOS_NFS_DIR
 #    define SOS_NFS_DIR CONFIG_SOS_NFS_DIR
@@ -71,6 +70,12 @@ static char nfs_dir_buf[PATH_MAX];
 static uint8_t ip_octet;
 
 sync_bin_sem_t *nfs_mount_sem;
+
+typedef struct nfs_args {
+    int err;
+    void *buff;
+    sync_bin_sem_t *sem;
+} nfs_args;
 
 static void nfs_mount_cb(int status, struct nfs_context *nfs, void *data, void *private_data);
 
@@ -331,11 +336,11 @@ int nfs_close_file(void *nfsfh, nfs_cb cb, void *private_data)
 
 int nfs_read_file(void *nfsfh, uint64_t count, void *cb, void *private_data)
 {
-    if (nfs_read_async(nfs, nfsfh, count, cb, private_data) < 0) {
-        return 0;
+    if (nfs_read_async(nfs, nfsfh, count, cb, private_data)) {
+        return -1;
     }
     sync_bin_sem_wait(other_sem);
-    return count;
+    return ((nfs_args *) private_data)->err;
 }
 
 int nfs_write_file(void *nfsfh, char *buf, uint64_t count, void *cb, void *private_data)
@@ -344,21 +349,12 @@ int nfs_write_file(void *nfsfh, char *buf, uint64_t count, void *cb, void *priva
         return -1;
     }
     sync_bin_sem_wait(other_sem);
-    return 0;
+    return ((nfs_args *) private_data)->err;
 }
 
 int nfs_stat_file(const char *path, nfs_cb cb, void *private_data)
 {
     if (nfs_stat64_async(nfs, path, cb, private_data) < 0) {
-        return -1;
-    }
-    sync_bin_sem_wait(other_sem);
-    return 0;
-}
-
-int nfs_lseek_file(void *nfsfh, int64_t offset, int whence, nfs_cb cb, void *private_data)
-{
-    if (nfs_lseek_async(nfs, nfsfh, offset, whence, cb, private_data) < 0) {
         return -1;
     }
     sync_bin_sem_wait(other_sem);
