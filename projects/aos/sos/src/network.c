@@ -313,7 +313,7 @@ extern sync_bin_sem_t *other_sem;
 
 int nfs_open_file(const char *path, int mode, nfs_cb cb, void *private_data)
 {
-    if (nfs_open_async(nfs, path, O_CREAT | mode, cb, private_data)) {
+    if (nfs_open_async(nfs, path, O_CREAT | mode, cb, private_data) < 0) {
         return -1;
     }
     sync_bin_sem_wait(other_sem);
@@ -322,7 +322,7 @@ int nfs_open_file(const char *path, int mode, nfs_cb cb, void *private_data)
 
 int nfs_close_file(void *nfsfh, nfs_cb cb, void *private_data)
 {
-    if (nfs_close_async(nfs, nfsfh, cb, private_data)) {
+    if (nfs_close_async(nfs, nfsfh, cb, private_data) < 0) {
         return -1;
     }
     sync_bin_sem_wait(other_sem);
@@ -331,7 +331,7 @@ int nfs_close_file(void *nfsfh, nfs_cb cb, void *private_data)
 
 int nfs_read_file(void *nfsfh, uint64_t count, void *cb, void *private_data)
 {
-    if (nfs_read_async(nfs, nfsfh, count, cb, private_data)) {
+    if (nfs_read_async(nfs, nfsfh, count, cb, private_data) < 0) {
         return 0;
     }
     sync_bin_sem_wait(other_sem);
@@ -340,7 +340,16 @@ int nfs_read_file(void *nfsfh, uint64_t count, void *cb, void *private_data)
 
 int nfs_write_file(void *nfsfh, char *buf, uint64_t count, void *cb, void *private_data)
 {
-    if (nfs_write_async(nfs, nfsfh, count, buf, cb, private_data)) {
+    if (nfs_write_async(nfs, nfsfh, count, buf, cb, private_data) < 0) {
+        return -1;
+    }
+    sync_bin_sem_wait(other_sem);
+    return 0;
+}
+
+int nfs_stat_file(const char *path, nfs_cb cb, void *private_data)
+{
+    if (nfs_stat64_async(nfs, path, cb, private_data) < 0) {
         return -1;
     }
     sync_bin_sem_wait(other_sem);
@@ -349,7 +358,7 @@ int nfs_write_file(void *nfsfh, char *buf, uint64_t count, void *cb, void *priva
 
 int nfs_lseek_file(void *nfsfh, int64_t offset, int whence, nfs_cb cb, void *private_data)
 {
-    if (nfs_lseek_async(nfs, nfsfh, offset, whence, cb, private_data)) {
+    if (nfs_lseek_async(nfs, nfsfh, offset, whence, cb, private_data) < 0) {
         return -1;
     }
     sync_bin_sem_wait(other_sem);

@@ -10,7 +10,7 @@ typedef struct file {
     int mode;
     wr_handler file_write;
     rd_handler file_read;
-    void *nfsfh; // i dont like this
+    void *handle; // i dont like this
 } open_file;
 
 /**

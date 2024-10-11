@@ -12,7 +12,7 @@ open_file *file_create(string path, int mode, wr_handler file_write, rd_handler 
     file->path = path;
     file->file_read = file_read;
     file->file_write = file_write;
-    file->nfsfh = NULL;
+    file->handle = NULL;
     return file;
 }
 
@@ -21,8 +21,4 @@ void file_destroy(open_file *file) {
      * either they explicitly free it, or it will be freed when the page
      * table gets cleared / swapped to disk. */
     free(file);
-}
-
-void nfsfh_init(open_file *file, void *nfsfh) {
-    file->nfsfh = nfsfh;
 }

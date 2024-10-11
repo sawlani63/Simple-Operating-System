@@ -155,10 +155,6 @@ static void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
 static void wakeup(UNUSED uint32_t id, void *data);
 
-static int file_write(open_file *file, uint_64t len) {
-
-}
-
 static frame_ref_t l4_frame(pt_entry *l4_pt, uint16_t l4_index) {
     return (frame_ref_t )(l4_pt[l4_index] & MASK(9));
 }
@@ -388,6 +384,9 @@ void handle_syscall(void *arg)
             break;
         case SYSCALL_SYS_BRK:
             syscall_sys_brk(&reply_msg, curr_task);
+            break;
+        case SYSCALL_SOS_STAT:
+            syscall_sos_stat(&reply_msg, curr_task);
             break;
         default:
             syscall_unknown_syscall(&reply_msg, syscall_number);
@@ -1028,7 +1027,7 @@ static void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
             return;
         }
         file = file_create(file_path, mode, nfs_write_file, nfs_read_file);
-        file->nfsfh = args.buff;
+        file->handle = args.buff;
     }
 
     uint32_t fd;
@@ -1055,7 +1054,7 @@ static void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_t
     } else {
         nfs_args args = {.sem = other_sem};
         sync_bin_sem_wait(syscall_sem);
-        if (nfs_close_file(found->nfsfh, nfs_close_cb, &args) < 0) {
+        if (nfs_close_file(found->handle, nfs_close_cb, &args) < 0) {
             sync_bin_sem_post(syscall_sem);
             seL4_SetMR(0, -1);
             return;
@@ -1109,7 +1108,7 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
         /* Read data */
         nfs_args args = {0, data + offset, other_sem};
-        size_t read = found->file_read(found->nfsfh, len, nfs_read_cb, &args);
+        size_t read = found->file_read(found->handle, len, nfs_read_cb, &args);
         for (size_t i = 0; i < read; i++) { // waste of time for console?
             data[i + offset] = ((char *) args.buff)[i];
         }
@@ -1165,7 +1164,7 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
         char *data = (char *)frame_data(get_frame(vaddr));
         nfs_args args = {0, data, other_sem};
         /* Write data */
-        if (found->file_write(found->nfsfh, data + offset, len, nfs_write_cb, &args) < 0) {
+        if (found->file_write(found->handle, data + offset, len, nfs_write_cb, &args) < 0) {
             sync_bin_sem_post(syscall_sem);
             seL4_SetMR(0, -1);
             return;
@@ -1242,10 +1241,74 @@ static void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     seL4_Word path_vaddr = curr_task->msg[1];
     seL4_Word buf_vaddr = curr_task->msg[2];
+    size_t path_len = curr_task->msg[3];
 
-    uint16_t offset1 = path_vaddr & (PAGE_SIZE_4K - 1);
-    uint16_t offset2 = buf_vaddr & (PAGE_SIZE_4K - 1);
-    size_t path_bytes = curr_task->msg[3];
+    /* Perform stat operation. We don't assume it's only on 1 page */
+    uint16_t offset = path_vaddr & (PAGE_SIZE_4K - 1);
+    size_t bytes_left = path_len;
+    char *file_path = calloc(path_len, sizeof(char));
+    while (bytes_left > 0) {
+        if (!vaddr_check(path_vaddr)) {
+            seL4_SetMR(0, -1);
+            return;
+        }
+
+        size_t len = bytes_left > (PAGE_SIZE_4K - offset) ? (PAGE_SIZE_4K - offset) : bytes_left;
+        sync_bin_sem_wait(syscall_sem);
+        char *data = (char *) frame_data(get_frame(path_vaddr));
+        sync_bin_sem_post(syscall_sem);
+        strcat(file_path, data + offset);
+
+        path_vaddr += len;
+        bytes_left -= len;
+        offset = 0;
+    }
+
+    sos_stat_t stat;
+    if (!strcmp(file_path, "console")) {
+        stat.st_type = ST_SPECIAL;
+        stat.st_fmode = 0;
+        stat.st_size = 0;
+        stat.st_ctime = 0;
+        stat.st_atime = 0;
+    } else {
+        nfs_args args = {0, &stat, other_sem};
+        if (nfs_stat_file(file_path, nfs_stat_cb, &args)) {
+            seL4_SetMR(0, -1);
+            return;
+        }
+        if (args.err < 0) {
+            seL4_SetMR(0, -1);
+            return;
+        }
+    }
+
+    bytes_left = sizeof(sos_stat_t);
+    offset = buf_vaddr & (PAGE_SIZE_4K - 1);
+
+    /* Perform the read operation. We don't assume that the buffer is only 1 frame long. */
+    while (bytes_left > 0) {
+        size_t len = bytes_left > (PAGE_SIZE_4K - offset) ? (PAGE_SIZE_4K - offset) : bytes_left;
+        
+        if (!vaddr_check(buf_vaddr)) {
+            seL4_SetMR(0, -1);
+            return;
+        }
+
+        char *data = (char *)frame_data(get_frame(buf_vaddr));
+
+        /* Read data */
+        for (size_t i = 0; i < len; i++) {
+            data[i + offset] = ((char *) &stat)[i];
+        }
+
+        /* Update offset, virtual address, and bytes left */
+        offset = 0;
+        buf_vaddr += len;
+        bytes_left -= len;
+    }
+
+    seL4_SetMR(0, 0);
 }
 
 static void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, struct task *curr_task)

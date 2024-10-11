@@ -141,6 +141,11 @@ int test_nfs() {
     int fd = sos_open(file, O_RDWR);
     assert(fd > 2);
 
+    sos_stat_t stat;
+    sos_stat(file, &stat);
+    printf("From stat - type: %d, mode: %d, size: %u, atime: %ld, ctime: %ld\n",
+           stat.st_type, stat.st_fmode, stat.st_size, stat.st_atime, stat.st_ctime);
+
     char *buffer = malloc(MEDIUM_BUF_SZ);
 
     /* should be garbage / nothing */
@@ -162,6 +167,10 @@ int test_nfs() {
     result = sos_read(fd, buffer, MEDIUM_BUF_SZ);
     assert(result == MEDIUM_BUF_SZ);
     assert(!strcmp(buffer, "Help"));
+
+    sos_stat(file, &stat);
+    printf("From stat - type: %d, mode: %d, size: %u, atime: %ld, ctime: %ld\n",
+           stat.st_type, stat.st_fmode, stat.st_size, stat.st_atime, stat.st_ctime);
 }
 
 int test_stack_write(int console_fd) {
