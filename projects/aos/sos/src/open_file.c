@@ -1,7 +1,7 @@
 #include "open_file.h"
 
-open_file *file_create(string path, int mode, wr_handler file_write, rd_handler file_read) {
-    if (path == NULL || file_write == NULL || file_read == NULL) {
+open_file *file_create(string path, int mode, sync_bin_sem_t *sem) {
+    if (path == NULL) {
         return NULL;
     }
     open_file *file = malloc(sizeof(open_file));

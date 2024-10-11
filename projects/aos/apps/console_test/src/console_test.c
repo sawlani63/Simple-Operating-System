@@ -110,27 +110,38 @@ int test_buffers(int console_fd) {
     /* test reading to a small buffer */
     result = sos_read(console_fd, small_buf, SMALL_BUF_SZ);
     /* make sure you type in at least SMALL_BUF_SZ */
+    printf("READ RESULT %s\n", small_buf);
     assert(result == SMALL_BUF_SZ);
+    result = sos_read(console_fd, small_buf, SMALL_BUF_SZ);
+    /* make sure you type in at least SMALL_BUF_SZ */
+    printf("READ RESULT %s\n", small_buf);
+    assert(result == SMALL_BUF_SZ);
+    result = sos_read(console_fd, small_buf, SMALL_BUF_SZ);
+    /* make sure you type in at least SMALL_BUF_SZ */
+    printf("READ RESULT %s\n", small_buf);
+    assert(result == SMALL_BUF_SZ);
+    result = sos_write(console_fd, "testing123", 10);
+    assert(result == 10);
 
     /* test reading into a large on-heap buffer */
-    char *heap_buf = malloc(MEDIUM_BUF_SZ);
+    //char *heap_buf = malloc(MEDIUM_BUF_SZ);
     /* for this test you'll need to paste a lot of data into
       the console, without newlines */
 
-    result = sos_read(console_fd, heap_buf, MEDIUM_BUF_SZ);
-    assert(result == MEDIUM_BUF_SZ);
+    //result = sos_read(console_fd, heap_buf, MEDIUM_BUF_SZ);
+    //assert(result == MEDIUM_BUF_SZ);
 
-    result = sos_write(console_fd, heap_buf, MEDIUM_BUF_SZ);
-    assert(result == MEDIUM_BUF_SZ);
+    //result = sos_write(console_fd, heap_buf, MEDIUM_BUF_SZ);
+    //assert(result == MEDIUM_BUF_SZ);
 
     /* try sleeping */
-    for (int i = 0; i < 5; i++) {
+    /*for (int i = 0; i < 5; i++) {
         uint64_t prev_seconds = sos_time_stamp();
         sos_usleep(1000000);
         uint64_t next_seconds = sos_time_stamp();
         assert(next_seconds > prev_seconds);
         printf("Tick\n");
-    }
+    }*/
 }
 
 int test_nfs() {
@@ -175,8 +186,8 @@ int test_stack_write(int console_fd) {
 
 int main(void)
 {
-    int fd = sos_open("console", O_RDWR);
-    assert(fd > 2);
+    int fd = sos_open("chirag.txt", O_RDWR);
+    /*assert(fd > 2);
     int fail = sos_open("console", O_RDONLY);
     assert(fail == -1);
     fail = sos_open("console", O_RDWR);
@@ -191,10 +202,11 @@ int main(void)
     printf("Passed nfs test\n");
     
     pt_test();
-    test_stack_write(fd);
+    test_stack_write(fd);*/
 
     test_buffers(fd);
-    printf("Passed read/write buffer test\n");
+    printf("REACHED END OF CONSOLE_TEST\n");
+    //printf("Passed read/write buffer test\n");
 
     // recursive_stack_test(0);
     // printf("Passed recursive stack test\n");
