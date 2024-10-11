@@ -155,6 +155,10 @@ static void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
 static void wakeup(UNUSED uint32_t id, void *data);
 
+static int file_write(open_file *file, uint_64t len) {
+
+}
+
 static frame_ref_t l4_frame(pt_entry *l4_pt, uint16_t l4_index) {
     return (frame_ref_t )(l4_pt[l4_index] & MASK(9));
 }
