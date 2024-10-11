@@ -8,7 +8,6 @@ typedef int (*wr_handler)(void *handle, char *data, uint64_t len, void *callback
 typedef struct file {
     string path;
     int mode;
-    uint64_t offset;
     wr_handler file_write;
     rd_handler file_read;
     void *nfsfh; // i dont like this
