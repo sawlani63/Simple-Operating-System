@@ -85,6 +85,8 @@
 #define SYSCALL_SOS_USLEEP SYS_nanosleep
 #define SYSCALL_SOS_TIME_STAMP SYS_clock_gettime
 #define SYSCALL_SYS_BRK SYS_brk
+#define SYSCALL_SOS_GETDIRENT SYS_getdents64
+#define SYSCALL_SOS_STAT SYS_statfs
 
 /* The linker will link this symbol to the start address  *
  * of an archive of attached applications.                */
@@ -148,6 +150,8 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
 static void syscall_sos_usleep(bool *have_reply, struct task *curr_task);
 static void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg);
 static void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
+static void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
+static void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
 static void wakeup(UNUSED uint32_t id, void *data);
 
@@ -1087,6 +1091,8 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
     size_t bytes_left = nbyte;
     int offset = vaddr & (PAGE_SIZE_4K - 1);
+    nfs_args args = {0, found, other_sem};
+    nfs_lseek_file(found->nfsfh, found->offset, SEEK_SET, nfs_lseek_cb, &args);
 
     /* Perform the read operation. We don't assume that the buffer is only 1 frame long. */
     while (bytes_left > 0) {
@@ -1170,9 +1176,9 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
         }
 
         /* Update offset, virtual address, and bytes left */
-        offset = 0;
-        vaddr += len;
         bytes_left -= len;
+        vaddr += len;
+        offset = 0;
     }
 
     /* Set the reply message to the number of bytes written */
@@ -1226,4 +1232,21 @@ static void wakeup(UNUSED uint32_t id, void* data)
     struct task *args = (struct task *) data;
     seL4_NBSend(args->reply, seL4_MessageInfo_new(0, 0, 0, 0));
     free_untype(&args->reply, args->reply_ut);
+}
+
+static void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
+{
+    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_STAT);
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    seL4_Word path_vaddr = curr_task->msg[1];
+    seL4_Word buf_vaddr = curr_task->msg[2];
+
+    uint16_t offset1 = path_vaddr & (PAGE_SIZE_4K - 1);
+    uint16_t offset2 = buf_vaddr & (PAGE_SIZE_4K - 1);
+    size_t path_bytes = curr_task->msg[3];
+}
+
+static void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
+{
+    
 }

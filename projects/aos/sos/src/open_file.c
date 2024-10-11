@@ -10,6 +10,7 @@ open_file *file_create(string path, int mode, wr_handler file_write, rd_handler 
     }
     file->mode = mode;
     file->path = path;
+    file->offset = 0;
     file->file_read = file_read;
     file->file_write = file_write;
     file->nfsfh = NULL;

@@ -153,6 +153,7 @@ int test_nfs() {
     assert(result == MEDIUM_BUF_SZ);
 
     printf("Buffer: %s\n", buffer);
+    assert(!strcmp(buffer, "Help"));
 }
 
 int test_stack_write(int console_fd) {
@@ -176,8 +177,10 @@ int main(void)
     assert(!res);
     fd = sos_open("console", O_RDWR);
     assert(fd > 2);
-    test_nfs();
     printf("Passed open/close test\n");
+
+    test_nfs();
+    printf("Passed nfs test\n");
     
     pt_test();
     test_stack_write(fd);
