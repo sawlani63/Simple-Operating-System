@@ -143,8 +143,8 @@ int test_nfs() {
     assert(fd > 2);
 
     /* test a small string from the code segment */
-    int result = sos_write(fd, "Help", 5);
-    assert(result == 5);
+    int result = sos_write(fd, "Help", MEDIUM_BUF_SZ);
+    assert(result == MEDIUM_BUF_SZ);
 
     char *buffer = malloc(MEDIUM_BUF_SZ);
 
