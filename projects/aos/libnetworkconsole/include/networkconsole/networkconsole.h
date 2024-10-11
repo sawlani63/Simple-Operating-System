@@ -31,5 +31,3 @@ int network_console_send(UNUSED void *handle, char *data, uint64_t len,
  */
 int network_console_register_handler(struct network_console *network_console,
                         void (*handler)(struct network_console *network_console, char c));
-
-int network_console_byte_send(char c);

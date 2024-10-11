@@ -1206,6 +1206,8 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
         }
 
         /* Update offset, virtual address, and bytes left */
+        bytes_left -= len;
+        vaddr += len;
         offset = 0;
     }
 
@@ -1279,86 +1281,19 @@ static void wakeup(UNUSED uint32_t id, void* data)
     free_untype(&args->reply, args->reply_ut);
 }
 
-static void nfs_open_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data)
+static void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 {
-    struct arg_struct *args = (struct arg_struct *) private_data;
-    open_file *file = args->file;
-    if (err) {
-        ZF_LOGE("NFS: Error in opening file, %s\n", (char*) data);
-    } else {
-        nfsfh_init(file, data);
-    }
-    args->err = err;
-    sync_bin_sem_post(file->sem);
-    sync_bin_sem_post(file->sem);
+    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_STAT);
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    seL4_Word path_vaddr = curr_task->msg[1];
+    seL4_Word buf_vaddr = curr_task->msg[2];
+
+    uint16_t offset1 = path_vaddr & (PAGE_SIZE_4K - 1);
+    uint16_t offset2 = buf_vaddr & (PAGE_SIZE_4K - 1);
+    size_t path_bytes = curr_task->msg[3];
 }
 
-static void nfs_close_cb(int err, struct nfs_context *nfs, void *data, void *private_data)
+static void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 {
-    struct arg_struct *args = (struct arg_struct *) private_data;
-    open_file *file = args->file;
-    if (err) {
-        ZF_LOGE("NFS: Error in closing file, %s\n", (char*) data);
-    }
-    args->err = err;
-    sync_bin_sem_post(file->sem);
-    sync_bin_sem_post(file->sem);
-}
-
-static void nfs_read_cb(int err, struct nfs_context *nfs, void *data, void *private_data)
-{
-    struct arg_struct *args = (struct arg_struct *) private_data;
-    open_file *file = args->file;
-    if (err < 0) {
-        ZF_LOGE("NFS: Error in reading file, %s\n", (char*) data);
-    } else {
-        args->buf = (char*) data;
-    }
-    args->err = err;
-    sync_bin_sem_post(file->sem);
-    sync_bin_sem_post(file->sem);
-}
-
-static void nfs_write_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data)
-{
-    struct arg_struct *args = (struct arg_struct *) private_data;
-    open_file *file = args->file;
-    if (err < 0) {
-        ZF_LOGE("NFS: Error in writing file, %s\n", (char*) data);
-    }
-    args->err = err;
-    sync_bin_sem_post(file->sem);
-    sync_bin_sem_post(file->sem);
-}
-
-static void nfs_lseek_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data)
-{
-    struct arg_struct *args = (struct arg_struct *) private_data;
-    open_file *file = args->file;
-    if (err < 0) {
-        ZF_LOGE("NFS: Error in seeking read pointer, %s\n", (char*) data);
-    }
-    args->err = err;
-    sync_bin_sem_post(file->sem);
-    sync_bin_sem_post(file->sem);
-}
-
-// Helper functions
-
-static int change_seek_pointer(open_file *found, size_t byte, struct arg_struct args)
-{
-    sync_bin_sem_wait(found->sem);
-    if (nfs_lseek_file(found->nfsfh, byte, SEEK_SET, nfs_lseek_cb, &args)) {
-        sync_bin_sem_post(found->sem);
-        sync_bin_sem_post(syscall_sem);
-        seL4_SetMR(0, -1);
-        return -1;
-    }
-    sync_bin_sem_wait(found->sem);
-    if (args.err < 0) {
-        sync_bin_sem_post(syscall_sem);
-        seL4_SetMR(0, -1);
-        return -1;
-    }
-    found->read_offset = byte;
+    
 }

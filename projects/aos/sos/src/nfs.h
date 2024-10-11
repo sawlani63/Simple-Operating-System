@@ -53,4 +53,16 @@ void nfs_write_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *pri
     sync_bin_sem_post(args->sem);
 }
 
+void nfs_lseek_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data)
+{
+    nfs_args *args = (nfs_args *) private_data;
+    if (err < 0) {
+        ZF_LOGE("NFS: Error in seeking read pointer, %s\n", (char*) data);
+    } else {
+        ((open_file *) args->buff)->offset = *((uint64_t *) data);
+    }
+    args->err = err;
+    sync_bin_sem_post(args->sem);
+}
+
 #endif
