@@ -112,8 +112,16 @@ int test_buffers(int console_fd) {
     /* make sure you type in at least SMALL_BUF_SZ */
     printf("READ RESULT %s\n", small_buf);
     assert(result == SMALL_BUF_SZ);
-    result = sos_write(console_fd, small_buf, SMALL_BUF_SZ);
+    result = sos_read(console_fd, small_buf, SMALL_BUF_SZ);
+    /* make sure you type in at least SMALL_BUF_SZ */
+    printf("READ RESULT %s\n", small_buf);
     assert(result == SMALL_BUF_SZ);
+    result = sos_read(console_fd, small_buf, SMALL_BUF_SZ);
+    /* make sure you type in at least SMALL_BUF_SZ */
+    printf("READ RESULT %s\n", small_buf);
+    assert(result == SMALL_BUF_SZ);
+    result = sos_write(console_fd, "testing123", 10);
+    assert(result == 10);
 
     /* test reading into a large on-heap buffer */
     //char *heap_buf = malloc(MEDIUM_BUF_SZ);
