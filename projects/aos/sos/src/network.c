@@ -47,6 +47,8 @@
 #include "mapping.h"
 #include "irq.h"
 #include "ut.h"
+#include "threads.h"
+#include <sync/bin_sem.h>
 
 
 #ifndef SOS_NFS_DIR
@@ -300,13 +302,11 @@ void network_init(cspace_t *cspace, void *timer_vaddr, seL4_CPtr irq_ntfn, sync_
     ZF_LOGF_IF(ret != 0, "NFS Mount failed: %s", nfs_get_error(nfs));
 }
 
-void nfs_mount_cb(int status, UNUSED struct nfs_context *nfs, void *data,
-                  UNUSED void *private_data)
+void nfs_mount_cb(int status, UNUSED struct nfs_context *nfs, void *data, UNUSED void *private_data)
 {
     if (status < 0) {
         ZF_LOGF("mount/mnt call failed with \"%s\"\n", (char *)data);
     }
-
     printf("Mounted nfs dir %s\n", nfs_dir_buf);
     
     /* Signal open that the nfs has been mounted and it can continue. */
