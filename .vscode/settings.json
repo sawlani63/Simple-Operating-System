@@ -6,6 +6,8 @@
         "string": "c",
         "string_view": "c",
         "*.tcc": "cpp",
-        "functional": "c"
+        "functional": "c",
+        "console.h": "c",
+        "fs.h": "c"
     }
 }

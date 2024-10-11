@@ -53,6 +53,7 @@
 /* File System */
 #include "console.h"
 #include "nfs.h"
+#include "fs.h"
 
 /*
  * To differentiate between signals from notification objects and and IPC messages,
@@ -154,10 +155,6 @@ static void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, struct task *cu
 static void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
 static void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
 static void wakeup(UNUSED uint32_t id, void *data);
-
-static int file_write(open_file *file, uint_64t len) {
-
-}
 
 static frame_ref_t l4_frame(pt_entry *l4_pt, uint16_t l4_index) {
     return (frame_ref_t )(l4_pt[l4_index] & MASK(9));
@@ -1105,23 +1102,32 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
             return;
         }
 
+        sync_bin_sem_wait(syscall_sem);
         char *data = (char *)frame_data(get_frame(vaddr));
 
         /* Read data */
         nfs_args args = {0, data + offset, other_sem};
-        size_t read = found->file_read(found->nfsfh, len, nfs_read_cb, &args);
-        for (size_t i = 0; i < read; i++) { // waste of time for console?
-            data[i + offset] = ((char *) args.buff)[i];
-        }
-        if (read != len) {
-            bytes_left -= read;
+        args.err = found->file_read(found->nfsfh, len, nfs_read_cb, &args);
+        sync_bin_sem_post(syscall_sem);
+        if (args.err < 0) {
+            seL4_SetMR(0, -1);
+            return;
+        } else if (!args.err) {
             break;
+        } else {
+            for (size_t i = 0; i < args.err; i++) { // waste of time for console?
+                data[i + offset] = ((char *) args.buff)[i];
+            }
+            if (args.err != len) {
+                bytes_left -= args.err; // dont like this if statement
+                break;
+            }
         }
 
         /* Update offset, virtual address, and bytes left */
         offset = 0;
-        vaddr += len;
-        bytes_left -= len;
+        vaddr += args.err;
+        bytes_left -= args.err;
     }
 
     /* Set the reply message to be the return value of the read_handler */
@@ -1165,21 +1171,18 @@ static void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_t
         char *data = (char *)frame_data(get_frame(vaddr));
         nfs_args args = {0, data, other_sem};
         /* Write data */
-        if (found->file_write(found->nfsfh, data + offset, len, nfs_write_cb, &args) < 0) {
-            sync_bin_sem_post(syscall_sem);
-            seL4_SetMR(0, -1);
-            return;
-        }
+        args.err = found->file_write(found->nfsfh, data + offset, len, nfs_write_cb, &args);
         sync_bin_sem_post(syscall_sem);
-
         if (args.err < 0) {
             seL4_SetMR(0, -1);
             return;
+        } else if (!args.err) {
+            break;
         }
 
         /* Update offset, virtual address, and bytes left */
-        bytes_left -= len;
-        vaddr += len;
+        bytes_left -= args.err;
+        vaddr += args.err;
         offset = 0;
     }
 

@@ -145,11 +145,11 @@ int test_nfs() {
 
     /* should be garbage / nothing */
     int result = sos_read(fd, buffer, MEDIUM_BUF_SZ);
-    assert(result == MEDIUM_BUF_SZ);
+    assert(result == 0);
     printf("Garbage Buffer: %s\n", buffer);
 
     /* test a small string from the code segment */
-    result = sos_write(fd, "Help", MEDIUM_BUF_SZ);
+    result = sos_write(fd, "HelpB", MEDIUM_BUF_SZ);
     assert(result == MEDIUM_BUF_SZ);
     
     /* Close and reopen the file so we reset the offset. */
@@ -161,7 +161,7 @@ int test_nfs() {
     /* test reading to a small buffer */
     result = sos_read(fd, buffer, MEDIUM_BUF_SZ);
     assert(result == MEDIUM_BUF_SZ);
-    assert(!strcmp(buffer, "Help"));
+    assert(!strcmp(buffer, "HelpB"));
 }
 
 int test_stack_write(int console_fd) {
