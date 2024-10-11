@@ -5,6 +5,7 @@
         "array": "c",
         "string": "c",
         "string_view": "c",
-        "*.tcc": "cpp"
+        "*.tcc": "cpp",
+        "functional": "c"
     }
 }

@@ -134,25 +134,33 @@ int test_buffers(int console_fd) {
 }
 
 int test_nfs() {
-    /* Open a file, close it and open it again. */
-    int fd = sos_open("Pikachu.txt", O_RDWR);
-    assert(fd > 2);
-    int res = sos_close(fd);
-    assert(!res);
-    fd = sos_open("Pikachu.txt", O_RDWR);
-    assert(fd > 2);
+    /* IMPORTANT: NEED TO CHANGE FILE EVERY TIME
+     * WE RERUN TEST SINCE NFS IS PERSISTENT STORAGE*/
+    char *file = "Pikachu5.txt";
 
-    /* test a small string from the code segment */
-    int result = sos_write(fd, "Help", MEDIUM_BUF_SZ);
-    assert(result == MEDIUM_BUF_SZ);
+    int fd = sos_open(file, O_RDWR);
+    assert(fd > 2);
 
     char *buffer = malloc(MEDIUM_BUF_SZ);
+
+    /* should be garbage / nothing */
+    int result = sos_read(fd, buffer, MEDIUM_BUF_SZ);
+    assert(result == MEDIUM_BUF_SZ);
+    printf("Garbage Buffer: %s\n", buffer);
+
+    /* test a small string from the code segment */
+    result = sos_write(fd, "Help", MEDIUM_BUF_SZ);
+    assert(result == MEDIUM_BUF_SZ);
+    
+    /* Close and reopen the file so we reset the offset. */
+    int res = sos_close(fd);
+    assert(!res);
+    fd = sos_open(file, O_RDWR);
+    assert(fd > 2);
 
     /* test reading to a small buffer */
     result = sos_read(fd, buffer, MEDIUM_BUF_SZ);
     assert(result == MEDIUM_BUF_SZ);
-
-    printf("Buffer: %s\n", buffer);
     assert(!strcmp(buffer, "Help"));
 }
 

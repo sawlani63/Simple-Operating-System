@@ -1091,8 +1091,6 @@ static void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_ta
 
     size_t bytes_left = nbyte;
     int offset = vaddr & (PAGE_SIZE_4K - 1);
-    nfs_args args = {0, found, other_sem};
-    nfs_lseek_file(found->nfsfh, found->offset, SEEK_SET, nfs_lseek_cb, &args);
 
     /* Perform the read operation. We don't assume that the buffer is only 1 frame long. */
     while (bytes_left > 0) {
