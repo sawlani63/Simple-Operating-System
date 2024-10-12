@@ -86,7 +86,6 @@ static int perform_io(size_t nbyte, uintptr_t vaddr, open_file *file,
         nfs_args args = {len, data + offset, other_sem};
         if (op & READ_IO) {
             args.err = file->file_read(file->handle, data + offset, len, callback, &args);
-            memcpy(data + offset, args.buff, args.err);
         } else if (op & WRITE_IO) {
             args.err = file->file_write(file->handle, data + offset, len, callback, &args);
         }

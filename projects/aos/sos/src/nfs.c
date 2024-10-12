@@ -27,7 +27,7 @@ void nfs_async_read_cb(int err, UNUSED struct nfs_context *nfs, void *data, void
     if (err < 0) {
         ZF_LOGE("NFS: Error in reading file, %s\n", (char*) data);
     } else {
-        args->buff = data;
+        memcpy(args->buff, data, args->err);
     }
     args->err = err;
     sync_bin_sem_post(args->sem);
