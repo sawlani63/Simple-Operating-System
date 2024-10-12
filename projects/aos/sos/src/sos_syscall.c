@@ -303,14 +303,8 @@ void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
         return;
     }
 
-    sos_stat_t stat;
-    if (!strcmp(file_path, "console")) {
-        stat.st_type = ST_SPECIAL;
-        stat.st_fmode = 0;
-        stat.st_size = 0;
-        stat.st_ctime = 0;
-        stat.st_atime = 0;
-    } else {
+    sos_stat_t stat = {ST_SPECIAL, 0, 0, 0, 0};
+    if (strcmp(file_path, "console")) {
         nfs_args args = {0, &stat, other_sem};
         sync_bin_sem_wait(syscall_sem);
         if (nfs_stat_file(file_path, nfs_async_stat_cb, &args)) {
