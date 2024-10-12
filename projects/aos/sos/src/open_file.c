@@ -1,6 +1,6 @@
 #include "open_file.h"
 
-open_file *file_create(string path, int mode, wr_handler file_write, rd_handler file_read) {
+open_file *file_create(string path, int mode, execute_io file_write, execute_io file_read) {
     if (path == NULL || file_write == NULL || file_read == NULL) {
         return NULL;
     }

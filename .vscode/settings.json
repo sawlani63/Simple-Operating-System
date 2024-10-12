@@ -11,6 +11,18 @@
         "utility": "c",
         "stdlib.h": "c",
         "networkconsole.h": "c",
-        "string.h": "c"
+        "string.h": "c",
+        "sos_syscall.h": "c",
+        "autoconf.h": "c",
+        "util.h": "c",
+        "elf.h": "c",
+        "network.h": "c",
+        "cspace.h": "c",
+        "sel4_zf_logif.h": "c",
+        "tests.h": "c",
+        "buffer": "c",
+        "internet": "c",
+        "socket": "c",
+        "deque": "c"
     }
 }
