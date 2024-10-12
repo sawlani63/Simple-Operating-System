@@ -63,6 +63,8 @@
 #define DHCP_STATUS_FINISHED    1
 #define DHCP_STATUS_ERR         2
 
+#define NFS_ROOT "/"
+
 static struct pico_device pico_dev;
 static struct nfs_context *nfs = NULL;
 static int dhcp_status = DHCP_STATUS_WAIT;
@@ -334,7 +336,7 @@ int nfs_close_file(void *nfsfh, nfs_cb cb, void *private_data)
     return 0;
 }
 
-int nfs_read_file(void *nfsfh, uint64_t count, void *cb, void *private_data)
+int nfs_read_file(void *nfsfh, UNUSED char *data, uint64_t count, void *cb, void *private_data)
 {
     if (nfs_read_async(nfs, nfsfh, count, cb, private_data)) {
         return -1;
@@ -359,4 +361,23 @@ int nfs_stat_file(const char *path, nfs_cb cb, void *private_data)
     }
     sync_bin_sem_wait(other_sem);
     return 0;
+}
+
+int nfs_open_dir(nfs_cb cb, void* private_data)
+{
+    if (nfs_opendir_async(nfs, NFS_ROOT, cb, private_data)) {
+        return -1;
+    }
+    sync_bin_sem_wait(other_sem);
+    return 0;
+}
+
+void nfs_close_dir(struct nfsdir *nfsdir)
+{
+    nfs_closedir(nfs, nfsdir);
+}
+
+struct nfsdirent *nfs_read_dir(struct nfsdir *nfsdir)
+{
+    return nfs_readdir(nfs, nfsdir);
 }

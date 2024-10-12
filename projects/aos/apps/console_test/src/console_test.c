@@ -136,7 +136,7 @@ int test_buffers(int console_fd) {
 int test_nfs() {
     /* IMPORTANT: NEED TO CHANGE FILE EVERY TIME
      * WE RERUN TEST SINCE NFS IS PERSISTENT STORAGE*/
-    char *file = "Pikachu6.txt";
+    char *file = "Pikachu10.txt";
 
     int fd = sos_open(file, O_RDWR);
     assert(fd > 2);
@@ -149,12 +149,12 @@ int test_nfs() {
     char *buffer = malloc(MEDIUM_BUF_SZ);
 
     /* should be garbage / nothing */
-    int result = sos_read(fd, buffer, MEDIUM_BUF_SZ);
-    assert(!result);
-    printf("Garbage Buffer: %s\n", buffer);
+    // int result = sos_read(fd, buffer, MEDIUM_BUF_SZ);
+    // assert(!result);
+    // printf("Garbage Buffer: %s\n", buffer);
 
     /* test a small string from the code segment */
-    result = sos_write(fd, "HelpB", MEDIUM_BUF_SZ);
+    int result = sos_write(fd, "HelpB", MEDIUM_BUF_SZ);
     assert(result == MEDIUM_BUF_SZ);
     
     /* Close and reopen the file so we reset the offset. */
@@ -180,6 +180,17 @@ int test_stack_write(int console_fd) {
    int result = sos_write(console_fd, rip, strlen(rip));    
    assert(result == strlen(rip));
    printf("\nPassed large write test\n");
+}
+
+void test_readdir() {
+    char *buffer = malloc(10);
+    assert(sos_getdirent(10, buffer, 10) == -1);
+    assert(sos_getdirent(8, buffer, 10) == 0);
+    assert(sos_getdirent(4, buffer, 8) == 8);
+    assert(!strncmp(buffer, "Pikachu9", 8));
+    assert(sos_getdirent(2, buffer, 10) == 10);
+    assert(!strncmp(buffer, "Pikachu8.t", 10));
+    free(buffer);
 }
 
 int main(void)

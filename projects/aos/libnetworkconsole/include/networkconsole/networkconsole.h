@@ -1,3 +1,5 @@
+#include <utils/util.h>
+
 /*
  * Copyright 2019, Data61
  * Commonwealth Scientific and Industrial Research Organisation (CSIRO)

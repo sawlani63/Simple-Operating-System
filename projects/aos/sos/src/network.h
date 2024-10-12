@@ -31,7 +31,9 @@ void network_init(cspace_t *cspace, void *timer_vaddr, seL4_CPtr irq_ntfn, sync_
 
 int nfs_open_file(const char* path, int mode, nfs_cb cb, void *private_data);
 int nfs_close_file(void *nfsfh, nfs_cb cb, void *private_data);
-int nfs_read_file(void *nfsfh, uint64_t count, void *cb, void *private_data);
+int nfs_read_file(void *nfsfh, UNUSED char *data, uint64_t count, void *cb, void *private_data);
 int nfs_write_file(void *nfsfh, char *buf, uint64_t count, void *cb, void *private_data);
 int nfs_stat_file(const char *path, nfs_cb cb, void *private_data);
-int nfs_lseek_file(void *nfsfh, int64_t offset, int whence, nfs_cb cb, void *private_data);
+int nfs_open_dir(nfs_cb cb, void* private_data);
+void nfs_close_dir(struct nfsdir *nfsdir);
+struct nfsdirent *nfs_read_dir(struct nfsdir *nfsdir);

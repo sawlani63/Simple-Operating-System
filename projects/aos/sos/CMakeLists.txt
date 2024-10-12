@@ -69,6 +69,10 @@ add_executable(
     src/addrspace.c
     src/fs.c
     src/open_file.c
+    src/sos_syscall.c
+    src/nfs.c
+    src/thread_pool.c
+    src/console.c
 )
 target_include_directories(sos PRIVATE "include")
 target_link_libraries(

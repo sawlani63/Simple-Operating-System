@@ -1,15 +1,16 @@
+#pragma once
+
 #include <stdlib.h>
 #include <stdint.h>
 
 typedef const char * string;
-typedef int (*rd_handler)(void *handle, uint64_t count, void *cb, void *args);
-typedef int (*wr_handler)(void *handle, char *data, uint64_t len, void *callback, void *args);
+typedef int (*execute_io)(void *handle, char *data, uint64_t len, void *cb, void *args);
 
 typedef struct file {
     string path;
     int mode;
-    wr_handler file_write;
-    rd_handler file_read;
+    execute_io file_write;
+    execute_io file_read;
     void *handle; // i dont like this
 } open_file;
 
@@ -21,7 +22,7 @@ typedef struct file {
  * @param file_read A function pointer used as the read callback.
  * @return The value of the file open file.
  */
-open_file *file_create(string path, int mode, wr_handler file_write, rd_handler file_read);
+open_file *file_create(string path, int mode, execute_io file_write, execute_io file_read);
 
 /**
  * Deallocates memory for the given file.
