@@ -53,7 +53,7 @@ static bool vaddr_check(seL4_Word vaddr) {
 }
 
 static frame_ref_t l4_frame(pt_entry *l4_pt, uint16_t l4_index) {
-    return (frame_ref_t )(l4_pt[l4_index] & MASK(9));
+    return (frame_ref_t)(l4_pt[l4_index] & MASK(19));
 }
 
 static frame_ref_t get_frame(seL4_Word vaddr) {
