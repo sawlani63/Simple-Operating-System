@@ -199,6 +199,10 @@ static int dir(int argc, char **argv)
 
     while (1) {
         r = sos_getdirent(i, buf, BUF_SIZ);
+        if (r == -2) {
+            i++;
+            continue;
+        }
         if (r < 0) {
             printf("dirent(%d) failed: %d\n", i, r);
             break;
