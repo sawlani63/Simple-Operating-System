@@ -86,13 +86,13 @@ static int perform_io(size_t nbyte, uintptr_t vaddr, open_file *file,
 
         sync_bin_sem_wait(data_sem);
         char *data = (char *)frame_data(get_frame(vaddr));
-        sync_bin_sem_post(data_sem);
         nfs_args args = {len, data + offset, nfs_sem};
         if (op & READ_IO) {
             args.err = file->file_read(file->handle, data + offset, len, callback, &args);
         } else if (op & WRITE_IO) {
             args.err = file->file_write(file->handle, data + offset, len, callback, &args);
         }
+        sync_bin_sem_post(data_sem);
 
         if (args.err < 0) {
             return -1;
