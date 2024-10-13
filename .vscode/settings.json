@@ -26,6 +26,9 @@
         "deque": "c",
         "sel4.h": "c",
         "sos.h": "c",
-        "condition_var.h": "c"
+        "condition_var.h": "c",
+        "console.h": "c",
+        "vector": "c",
+        "ut.h": "c"
     }
 }

@@ -61,6 +61,7 @@ void initialise_thread_pool(void (*input_func)(void *arg)) {
     sync_bin_sem_init(tpool_sem, tpool_sem_cptr, 1);
 
     signal_cv = malloc(sizeof(sync_cv_t));
+    ZF_LOGF_IF(!signal_cv, "No memory for new cv object");
     ut = alloc_retype(&signal_cv_cptr, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!ut, "No memory for notification");
     sync_cv_init(signal_cv, signal_cv_cptr);

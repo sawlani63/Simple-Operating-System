@@ -347,6 +347,9 @@ void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, struct task *curr_task
     } else if (i < pos && nfsdirent->next == NULL) {
         seL4_SetMR(0, -1);
         return;
+    } else if (!strcmp(nfsdirent->name, "..") || !strcmp(nfsdirent->name, ".")) {
+        seL4_SetMR(0, 1);
+        return;
     }
 
     int offset = vaddr & (PAGE_SIZE_4K - 1);

@@ -3,73 +3,66 @@
 #include "utils.h"
 #include <stdlib.h>
 #include <sync/bin_sem.h>
+#include <sync/condition_var.h>
 
-/* CHANGE QUEUE_SEM TO COND VAR LATER */
-sync_bin_sem_t *queue_sem = NULL;
+#define QUEUE_SIZE 1024 // TODO: MAKE DYNAMIC?
+
+struct {
+    char chars[QUEUE_SIZE];
+    int front;
+    int rear;
+    int size;
+} read_queue = {.front = 0, .rear = 0, .size = 0};
+
 seL4_CPtr queue_sem_cptr;
+sync_bin_sem_t *queue_sem = NULL;
 
-sync_bin_sem_t *sync_sem = NULL;
-seL4_CPtr sync_sem_cptr;
-
-struct node {
-    char c;
-    struct node *next;
-};
-
-struct node *read_queue = NULL;
+seL4_CPtr signal_cv_console_cptr;
+sync_cv_t *signal_cv_console = NULL;
 
 void enqueue(UNUSED struct network_console *network_console, char c) {
-    struct node *new_node = malloc(sizeof(struct node));
-    if (new_node == NULL) {
-        ZF_LOGF_IF(!new_node, "No memory for new console node object");
-        return;
+    sync_bin_sem_wait(queue_sem);
+    if (read_queue.size == QUEUE_SIZE) {
+        printf("Tried to add to a full console queue!\n");
     }
-    new_node->c = c;
-    new_node->next = NULL;
-
-    sync_bin_sem_wait(sync_sem);
-    if (read_queue == NULL) {
-        read_queue = new_node;
-    } else {
-        struct node *curr = read_queue;
-        while (curr->next != NULL) {
-            curr = curr->next;
-        }
-        curr->next = new_node;
-    }
-    sync_bin_sem_post(sync_sem);
+    read_queue.chars[read_queue.rear] = c;
+    read_queue.rear = (read_queue.rear + 1) % QUEUE_SIZE;
+    read_queue.size++;
     sync_bin_sem_post(queue_sem);
+    sync_cv_signal(signal_cv_console);
 }
 
 int deque(UNUSED void *handle, UNUSED char *data, uint64_t count, UNUSED void *cb, void *args) {
-    /* We don't use a callback here so we'll just use the args to the callback
-     * as the buffer we will be writing to. */
+    sync_bin_sem_wait(queue_sem);
     char *buff = (char *) ((nfs_args *) args)->buff;
     for (uint64_t i = 0; i < count; i++) {
-        sync_bin_sem_wait(queue_sem);
-        sync_bin_sem_wait(sync_sem);
-        buff[i] = read_queue->c;
-        struct node *next = read_queue->next;
-        free(read_queue);
-        read_queue = next;
-        sync_bin_sem_post(sync_sem);
+        while (read_queue.size == 0) {
+            sync_cv_wait(queue_sem, signal_cv_console);
+        }
+        char c = read_queue.chars[read_queue.front];
+        read_queue.front = (read_queue.front + 1) % QUEUE_SIZE;
+        read_queue.size--;
+        buff[i] = c;
         if (buff[i] == '\n') {
+            sync_bin_sem_post(queue_sem);
             return i + 1;
         }
     }
+    sync_bin_sem_post(queue_sem);
+
     return count;
 }
 
 void init_console_sem() {
     queue_sem = malloc(sizeof(sync_bin_sem_t));
     ZF_LOGF_IF(!queue_sem, "No memory for new semaphore object");
-    ut_t *sem_ut = alloc_retype(&queue_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
-    ZF_LOGF_IF(!sem_ut, "No memory for notification");
-    sync_bin_sem_init(queue_sem, queue_sem_cptr, 0);
+    ut_t *ut = alloc_retype(&queue_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!ut, "No memory for notification");
+    sync_bin_sem_init(queue_sem, queue_sem_cptr, 1);
 
-    sync_sem = malloc(sizeof(sync_bin_sem_t));
-    ZF_LOGF_IF(!sync_sem, "No memory for new semaphore object");
-    sem_ut = alloc_retype(&sync_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
-    ZF_LOGF_IF(!sem_ut, "No memory for notification");
-    sync_bin_sem_init(sync_sem, sync_sem_cptr, 1);
+    signal_cv_console = malloc(sizeof(sync_cv_t));
+    ZF_LOGF_IF(!signal_cv_console, "No memory for new cv object");
+    ut = alloc_retype(&signal_cv_console_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!ut, "No memory for notification");
+    sync_cv_init(signal_cv_console, signal_cv_console_cptr);
 }
