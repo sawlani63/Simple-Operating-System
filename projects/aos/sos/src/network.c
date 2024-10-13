@@ -47,6 +47,7 @@
 #include "mapping.h"
 #include "irq.h"
 #include "ut.h"
+#include "utils.h"
 
 #ifndef SOS_NFS_DIR
 #  ifdef CONFIG_SOS_NFS_DIR
@@ -316,68 +317,102 @@ void nfs_mount_cb(int status, UNUSED struct nfs_context *nfs, void *data,
     sync_bin_sem_post(nfs_mount_sem);
 }
 
-extern sync_bin_sem_t *other_sem;
+extern sync_bin_sem_t *nfs_sem;
+
+sync_bin_sem_t *net_sync_sem = NULL;
+seL4_CPtr net_sync_sem_cptr;
+
+void init_nfs_sem(void) {
+    net_sync_sem = malloc(sizeof(sync_bin_sem_t));
+    ZF_LOGF_IF(!net_sync_sem, "No memory for new semaphore object");
+    ut_t *sem_ut = alloc_retype(&net_sync_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!sem_ut, "No memory for notification");
+    sync_bin_sem_init(net_sync_sem, net_sync_sem_cptr, 1);
+}
 
 int nfs_open_file(const char *path, int mode, nfs_cb cb, void *private_data)
 {
-    if (nfs_open_async(nfs, path, O_CREAT | mode, cb, private_data) < 0) {
+    sync_bin_sem_wait(net_sync_sem);
+    int res = nfs_open_async(nfs, path, O_CREAT | mode, cb, private_data);
+    sync_bin_sem_post(net_sync_sem);
+    if (res < 0) {
         return -1;
     }
-    sync_bin_sem_wait(other_sem);
+    sync_bin_sem_wait(nfs_sem);
     return 0;
 }
 
 int nfs_close_file(void *nfsfh, nfs_cb cb, void *private_data)
 {
-    if (nfs_close_async(nfs, nfsfh, cb, private_data) < 0) {
+    sync_bin_sem_wait(net_sync_sem);
+    int res = nfs_close_async(nfs, nfsfh, cb, private_data);
+    sync_bin_sem_post(net_sync_sem);
+    if (res < 0) {
         return -1;
     }
-    sync_bin_sem_wait(other_sem);
+    sync_bin_sem_wait(nfs_sem);
     return 0;
 }
 
 int nfs_read_file(void *nfsfh, UNUSED char *data, uint64_t count, void *cb, void *private_data)
 {
-    if (nfs_read_async(nfs, nfsfh, count, cb, private_data)) {
+    sync_bin_sem_wait(net_sync_sem);
+    int res = nfs_read_async(nfs, nfsfh, count, cb, private_data);
+    sync_bin_sem_post(net_sync_sem);
+    if (res < 0) {
         return -1;
     }
-    sync_bin_sem_wait(other_sem);
+    sync_bin_sem_wait(nfs_sem);
     return ((nfs_args *) private_data)->err;
 }
 
 int nfs_write_file(void *nfsfh, char *buf, uint64_t count, void *cb, void *private_data)
 {
-    if (nfs_write_async(nfs, nfsfh, count, buf, cb, private_data) < 0) {
+    sync_bin_sem_wait(net_sync_sem);
+    int res = nfs_write_async(nfs, nfsfh, count, buf, cb, private_data);
+    sync_bin_sem_post(net_sync_sem);
+    if (res < 0) {
         return -1;
     }
-    sync_bin_sem_wait(other_sem);
+    sync_bin_sem_wait(nfs_sem);
     return ((nfs_args *) private_data)->err;
 }
 
 int nfs_stat_file(const char *path, nfs_cb cb, void *private_data)
 {
-    if (nfs_stat64_async(nfs, path, cb, private_data) < 0) {
+    sync_bin_sem_wait(net_sync_sem);
+    int res = nfs_stat64_async(nfs, path, cb, private_data);
+    sync_bin_sem_post(net_sync_sem);
+    if (res < 0) {
         return -1;
     }
-    sync_bin_sem_wait(other_sem);
+    sync_bin_sem_wait(nfs_sem);
     return 0;
 }
 
 int nfs_open_dir(nfs_cb cb, void* private_data)
 {
-    if (nfs_opendir_async(nfs, NFS_ROOT, cb, private_data)) {
+    sync_bin_sem_wait(net_sync_sem);
+    int res = nfs_opendir_async(nfs, NFS_ROOT, cb, private_data);
+    sync_bin_sem_post(net_sync_sem);
+    if (res) {
         return -1;
     }
-    sync_bin_sem_wait(other_sem);
+    sync_bin_sem_wait(nfs_sem);
     return 0;
 }
 
 void nfs_close_dir(struct nfsdir *nfsdir)
 {
+    sync_bin_sem_wait(net_sync_sem);
     nfs_closedir(nfs, nfsdir);
+    sync_bin_sem_post(net_sync_sem);
 }
 
 struct nfsdirent *nfs_read_dir(struct nfsdir *nfsdir)
 {
-    return nfs_readdir(nfs, nfsdir);
+    sync_bin_sem_wait(net_sync_sem);
+    struct nfsdirent *ret = nfs_readdir(nfs, nfsdir);
+    sync_bin_sem_post(net_sync_sem);
+    return ret;
 }

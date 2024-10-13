@@ -23,6 +23,9 @@
         "buffer": "c",
         "internet": "c",
         "socket": "c",
-        "deque": "c"
+        "deque": "c",
+        "sel4.h": "c",
+        "sos.h": "c",
+        "condition_var.h": "c"
     }
 }

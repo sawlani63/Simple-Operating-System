@@ -1,6 +1,8 @@
 #include "thread_pool.h"
 
 #include <sync/bin_sem.h>
+#include "utils.h"
+#include "threads.h"
 #include <sync/condition_var.h>
 
 struct {

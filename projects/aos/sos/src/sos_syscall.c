@@ -8,11 +8,14 @@
 extern struct user_process user_process;
 bool console_open_for_read = false;
 
-seL4_CPtr sem_cptr;
-sync_bin_sem_t *syscall_sem = NULL;
+seL4_CPtr data_sem_cptr;
+sync_bin_sem_t *data_sem = NULL;
 
-seL4_CPtr other_cptr;
-sync_bin_sem_t *other_sem = NULL;
+seL4_CPtr file_sem_cptr;
+sync_bin_sem_t *file_sem = NULL;
+
+seL4_CPtr nfs_sem_cptr;
+sync_bin_sem_t *nfs_sem = NULL;
 
 bool handle_vm_fault(seL4_Word fault_addr);
 
@@ -50,7 +53,7 @@ static bool vaddr_check(seL4_Word vaddr) {
 }
 
 static frame_ref_t l4_frame(pt_entry *l4_pt, uint16_t l4_index) {
-    return (frame_ref_t )(l4_pt[l4_index] & MASK(9));
+    return (frame_ref_t)(l4_pt[l4_index] & MASK(19));
 }
 
 static frame_ref_t get_frame(seL4_Word vaddr) {
@@ -81,15 +84,15 @@ static int perform_io(size_t nbyte, uintptr_t vaddr, open_file *file,
             return -1;
         }
 
-        sync_bin_sem_wait(syscall_sem);
+        sync_bin_sem_wait(data_sem);
         char *data = (char *)frame_data(get_frame(vaddr));
-        nfs_args args = {len, data + offset, other_sem};
+        nfs_args args = {len, data + offset, nfs_sem};
         if (op & READ_IO) {
             args.err = file->file_read(file->handle, data + offset, len, callback, &args);
         } else if (op & WRITE_IO) {
             args.err = file->file_write(file->handle, data + offset, len, callback, &args);
         }
-        sync_bin_sem_post(syscall_sem);
+        sync_bin_sem_post(data_sem);
 
         if (args.err < 0) {
             return -1;
@@ -100,13 +103,13 @@ static int perform_io(size_t nbyte, uintptr_t vaddr, open_file *file,
             break;
         }
 
-        sync_bin_sem_wait(syscall_sem);
+        sync_bin_sem_wait(data_sem);
         if (op & DATA_TO_BUFF) {
             memcpy(buff + (nbyte - len), data + offset, len);
         } else if (op & BUFF_TO_DATA) {
             memcpy(data + offset, buff + (nbyte - len), len);
         }
-        sync_bin_sem_post(syscall_sem);
+        sync_bin_sem_post(data_sem);
 
         // Update offset, virtual address, and bytes left
         bytes_left -= len;
@@ -119,9 +122,9 @@ static int perform_io(size_t nbyte, uintptr_t vaddr, open_file *file,
 void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_task) 
 {
     /* Wait for the nfs to be mounted before continuing with open. */
-    extern sync_bin_sem_t *nfs_sem;
-    sync_bin_sem_wait(nfs_sem);
-    sync_bin_sem_post(nfs_sem);
+    extern sync_bin_sem_t *nfs_open_sem;
+    sync_bin_sem_wait(nfs_open_sem);
+    sync_bin_sem_post(nfs_open_sem);
 
     ZF_LOGE("syscall: thread example made syscall %d!\n", SYSCALL_SOS_OPEN);
     /* construct a reply message of length 1 */
@@ -144,25 +147,22 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 
     open_file *file;
     if (!strcmp(file_path, "console")) {
-        sync_bin_sem_wait(syscall_sem);
+        sync_bin_sem_wait(file_sem);
         if (console_open_for_read && mode != O_WRONLY) {
-            sync_bin_sem_post(syscall_sem);
+            sync_bin_sem_post(file_sem);
             seL4_SetMR(0, -1);
             return;
         } else if (mode != O_WRONLY) {
             console_open_for_read = true;
         }
-        sync_bin_sem_post(syscall_sem);
+        sync_bin_sem_post(file_sem);
         file = file_create(file_path, mode, network_console_send, deque);
     } else {
-        nfs_args args = {.sem = other_sem};
-        sync_bin_sem_wait(syscall_sem);
+        nfs_args args = {.sem = nfs_sem};
         if (nfs_open_file(file_path, mode, nfs_async_open_cb, &args) < 0) {
-            sync_bin_sem_wait(syscall_sem);
             seL4_SetMR(0, -1);
             return;
         }
-        sync_bin_sem_post(syscall_sem);
         file = file_create(file_path, mode, nfs_write_file, nfs_read_file);
         file->handle = args.buff;
     }
@@ -178,25 +178,22 @@ void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
-    sync_bin_sem_wait(syscall_sem);
+    sync_bin_sem_wait(file_sem);
     open_file *found = fdt_get_file(user_process.fdt, curr_task->msg[1]);
-    sync_bin_sem_post(syscall_sem);
+    sync_bin_sem_post(file_sem);
     if (found == NULL) {
         seL4_SetMR(0, -1);
         return;
     } else if (!strcmp(found->path, "console") && found->mode != O_WRONLY) {
-        sync_bin_sem_wait(syscall_sem);
+        sync_bin_sem_wait(file_sem);
         console_open_for_read = false;
-        sync_bin_sem_post(syscall_sem);
+        sync_bin_sem_post(file_sem);
     } else {
-        nfs_args args = {.sem = other_sem};
-        sync_bin_sem_wait(syscall_sem);
+        nfs_args args = {.sem = nfs_sem};
         if (nfs_close_file(found->handle, nfs_async_close_cb, &args) < 0) {
-            sync_bin_sem_post(syscall_sem);
             seL4_SetMR(0, -1);
             return;
         }
-        sync_bin_sem_post(syscall_sem);
 
         if (args.err) {
             seL4_SetMR(0, -1);
@@ -217,9 +214,9 @@ void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
     seL4_Word vaddr = curr_task->msg[2];
     int nbyte = curr_task->msg[3];
 
-    sync_bin_sem_wait(syscall_sem);
+    sync_bin_sem_wait(file_sem);
     open_file *found = fdt_get_file(user_process.fdt, read_fd);
-    sync_bin_sem_post(syscall_sem);
+    sync_bin_sem_post(file_sem);
     if (found == NULL || found->mode == O_WRONLY) {
         /* Set the reply message to be an error value */
         seL4_SetMR(0, -1);
@@ -242,9 +239,9 @@ void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
     size_t nbyte = curr_task->msg[3];
 
     /* Find the file associated with the file descriptor */
-    sync_bin_sem_wait(syscall_sem);
+    sync_bin_sem_wait(file_sem);
     open_file *found = fdt_get_file(user_process.fdt, write_fd);
-    sync_bin_sem_post(syscall_sem);
+    sync_bin_sem_post(file_sem);
     if (found == NULL || found->mode == O_RDONLY) {
         /* Set the reply message to be an error value and return early */
         seL4_SetMR(0, -1);
@@ -305,14 +302,11 @@ void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
 
     sos_stat_t stat = {ST_SPECIAL, 0, 0, 0, 0};
     if (strcmp(file_path, "console")) {
-        nfs_args args = {0, &stat, other_sem};
-        sync_bin_sem_wait(syscall_sem);
+        nfs_args args = {0, &stat, nfs_sem};
         if (nfs_stat_file(file_path, nfs_async_stat_cb, &args)) {
-            sync_bin_sem_wait(syscall_sem);
             seL4_SetMR(0, -1);
             return;
         }
-        sync_bin_sem_post(syscall_sem);
         if (args.err < 0) {
             seL4_SetMR(0, -1);
             return;
@@ -320,7 +314,7 @@ void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
     }
     
     res = perform_io(sizeof(sos_stat_t), buf_vaddr, NULL, NULL, BUFF_TO_DATA, &stat);
-    seL4_SetMR(0, res != 0 ? -1 : 0);
+    seL4_SetMR(0, res < 0 ? res : 0);
 }
 
 void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
@@ -331,22 +325,17 @@ void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, struct task *curr_task
     seL4_Word vaddr = curr_task->msg[2];
     size_t nbyte = curr_task->msg[3];
 
-    nfs_args args = {.err = 0, .sem = other_sem};
-    sync_bin_sem_wait(syscall_sem);
+    nfs_args args = {.err = 0, .sem = nfs_sem};
     if (nfs_open_dir(nfs_async_opendir_cb, &args)) {
-        sync_bin_sem_post(syscall_sem);
         seL4_SetMR(0, -1);
         return;
     }
-    sync_bin_sem_post(syscall_sem);
     if (args.err) {
         seL4_SetMR(0, -1);
         return;
     }
 
-    sync_bin_sem_wait(syscall_sem);
     struct nfsdirent *nfsdirent = nfs_read_dir(args.buff);
-    sync_bin_sem_post(syscall_sem);
     int i = 0;
     while (nfsdirent->next != NULL && i < pos) {
         nfsdirent = nfsdirent->next;
@@ -361,11 +350,11 @@ void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, struct task *curr_task
     }
 
     int offset = vaddr & (PAGE_SIZE_4K - 1);
-    sync_bin_sem_wait(syscall_sem);
+    sync_bin_sem_wait(data_sem);
     char *data = (char *)frame_data(get_frame(vaddr));
     memcpy(data + offset, nfsdirent->name, nbyte);
+    sync_bin_sem_post(data_sem);
     nfs_close_dir(args.buff);
-    sync_bin_sem_post(syscall_sem);
     
     seL4_SetMR(0, nbyte);
 }
@@ -378,18 +367,22 @@ void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_nu
     seL4_SetMR(0, -1);
 }
 
-void syscall_sem_init(void) {
-    syscall_sem = malloc(sizeof(sync_bin_sem_t));
-    ZF_LOGF_IF(!syscall_sem, "No memory for semaphore object");
-    ut_t *sem_ut = alloc_retype(&sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+void init_semaphores(void) {
+    data_sem = malloc(sizeof(sync_bin_sem_t));
+    ZF_LOGF_IF(!data_sem, "No memory for semaphore object");
+    ut_t *sem_ut = alloc_retype(&data_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!sem_ut, "No memory for notification");
-    sync_bin_sem_init(syscall_sem, sem_cptr, 1);
-}
+    sync_bin_sem_init(data_sem, data_sem_cptr, 1);
 
-void other_sem_init(void) {
-    other_sem = malloc(sizeof(sync_bin_sem_t));
-    ZF_LOGF_IF(!other_sem, "No memory for semaphore object");
-    ut_t *other_ut = alloc_retype(&other_cptr, seL4_NotificationObject, seL4_NotificationBits);
-    ZF_LOGF_IF(!other_ut, "No memory for notification");
-    sync_bin_sem_init(other_sem, other_cptr, 0);
+    file_sem = malloc(sizeof(sync_bin_sem_t));
+    ZF_LOGF_IF(!file_sem, "No memory for semaphore object");
+    ut_t *data_ut = alloc_retype(&file_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!data_ut, "No memory for notification");
+    sync_bin_sem_init(file_sem, file_sem_cptr, 1);
+
+    nfs_sem = malloc(sizeof(sync_bin_sem_t));
+    ZF_LOGF_IF(!nfs_sem, "No memory for semaphore object");
+    ut_t *nfs_ut = alloc_retype(&nfs_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!nfs_ut, "No memory for notification");
+    sync_bin_sem_init(nfs_sem, nfs_sem_cptr, 0);
 }

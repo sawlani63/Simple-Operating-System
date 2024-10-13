@@ -29,6 +29,8 @@
  */
 void network_init(cspace_t *cspace, void *timer_vaddr, seL4_CPtr irq_ntfn, sync_bin_sem_t *sem);
 
+void init_nfs_sem(void);
+
 int nfs_open_file(const char* path, int mode, nfs_cb cb, void *private_data);
 int nfs_close_file(void *nfsfh, nfs_cb cb, void *private_data);
 int nfs_read_file(void *nfsfh, UNUSED char *data, uint64_t count, void *cb, void *private_data);
