@@ -341,9 +341,10 @@ void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, struct task *curr_task
         nfsdirent = nfsdirent->next;
         i++;
     }
-    if (!strcmp(nfsdirent->name, "..") || !strcmp(nfsdirent->name, ".")) {
-        seL4_SetMR(0, -2);
-        return;
+
+    char* name = nfsdirent->name;
+    if (!strcmp(nfsdirent->name, "..")) {
+        name = "console";
     } else if (i + 1 == pos && nfsdirent->next == NULL) {
         seL4_SetMR(0, 0);
         return;
@@ -352,9 +353,9 @@ void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, struct task *curr_task
         return;
     }
 
-    size_t path_len = strlen(nfsdirent->name);
+    size_t path_len = strlen(name);
     size_t size = nbyte < path_len ? nbyte : path_len;
-    int res = perform_io(size, vaddr, NULL, NULL, BUFF_TO_DATA, nfsdirent->name);
+    int res = perform_io(size, vaddr, NULL, NULL, BUFF_TO_DATA, name);
 
     seL4_Word new_vaddr = vaddr + size;
     unsigned char *data = frame_data(get_frame(new_vaddr));
