@@ -310,7 +310,7 @@ void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
             seL4_SetMR(0, -1);
             return;
         }
-        stat.st_fmode = (stat.st_fmode & ~0100000) >> 6;
+        stat.st_fmode >>= 6;
     }
     
     res = perform_io(sizeof(sos_stat_t), buf_vaddr, NULL, NULL, BUFF_TO_DATA, &stat);
