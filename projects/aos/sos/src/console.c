@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <sync/bin_sem.h>
 
+/* CHANGE QUEUE_SEM TO COND VAR LATER */
 sync_bin_sem_t *queue_sem = NULL;
 seL4_CPtr queue_sem_cptr;
 
@@ -44,19 +45,18 @@ int deque(UNUSED void *handle, UNUSED char *data, uint64_t count, UNUSED void *c
     /* We don't use a callback here so we'll just use the args to the callback
      * as the buffer we will be writing to. */
     char *buff = (char *) ((nfs_args *) args)->buff;
-    sync_bin_sem_wait(sync_sem);
     for (uint64_t i = 0; i < count; i++) {
         sync_bin_sem_wait(queue_sem);
+        sync_bin_sem_wait(sync_sem);
         buff[i] = read_queue->c;
         struct node *next = read_queue->next;
         free(read_queue);
         read_queue = next;
+        sync_bin_sem_post(sync_sem);
         if (buff[i] == '\n') {
-            sync_bin_sem_post(sync_sem);
             return i + 1;
         }
     }
-    sync_bin_sem_post(sync_sem);
     return count;
 }
 
