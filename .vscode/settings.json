@@ -29,6 +29,11 @@
         "condition_var.h": "c",
         "console.h": "c",
         "vector": "c",
-        "ut.h": "c"
+        "ut.h": "c",
+        "bin_sem.h": "c",
+        "stat.h": "c",
+        "process.h": "c",
+        "stdio.h": "c",
+        "fs.h": "c"
     }
 }

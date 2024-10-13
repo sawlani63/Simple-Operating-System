@@ -247,7 +247,6 @@ void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
         seL4_SetMR(0, -1);
         return;
     }
-
     int res = perform_io(nbyte, vaddr, found, nfs_async_write_cb, WRITE_IO, NULL);
     seL4_SetMR(0, res);
 }
@@ -311,6 +310,7 @@ void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
             seL4_SetMR(0, -1);
             return;
         }
+        stat.st_fmode = (stat.st_fmode & ~0100000) >> 6;
     }
     
     res = perform_io(sizeof(sos_stat_t), buf_vaddr, NULL, NULL, BUFF_TO_DATA, &stat);
@@ -341,21 +341,23 @@ void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, struct task *curr_task
         nfsdirent = nfsdirent->next;
         i++;
     }
-    if (i + 1 == pos && nfsdirent->next == NULL) {
+    if (!strcmp(nfsdirent->name, "..") || !strcmp(nfsdirent->name, ".")) {
+        seL4_SetMR(0, -2);
+        return;
+    } else if (i + 1 == pos && nfsdirent->next == NULL) {
         seL4_SetMR(0, 0);
         return;
     } else if (i < pos && nfsdirent->next == NULL) {
         seL4_SetMR(0, -1);
         return;
-    } else if (!strcmp(nfsdirent->name, "..") || !strcmp(nfsdirent->name, ".")) {
-        seL4_SetMR(0, 1);
-        return;
     }
+
+    // int res = perform_io(nbyte, vaddr, NULL, NULL, BUFF_TO_DATA, nfsdirent->name);
 
     int offset = vaddr & (PAGE_SIZE_4K - 1);
     sync_bin_sem_wait(data_sem);
     char *data = (char *)frame_data(get_frame(vaddr));
-    memcpy(data + offset, nfsdirent->name, nbyte);
+    strncpy(data + offset, nfsdirent->name, nbyte);
     sync_bin_sem_post(data_sem);
     nfs_close_dir(args.buff);
     
