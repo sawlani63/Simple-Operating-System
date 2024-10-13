@@ -34,6 +34,7 @@
         "stat.h": "c",
         "process.h": "c",
         "stdio.h": "c",
-        "fs.h": "c"
+        "fs.h": "c",
+        "typeinfo": "c"
     }
 }
