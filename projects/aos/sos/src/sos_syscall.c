@@ -352,16 +352,16 @@ void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, struct task *curr_task
         return;
     }
 
-    // int res = perform_io(nbyte, vaddr, NULL, NULL, BUFF_TO_DATA, nfsdirent->name);
+    size_t path_len = strlen(nfsdirent->name);
+    size_t size = nbyte < path_len ? nbyte : path_len;
+    int res = perform_io(size, vaddr, NULL, NULL, BUFF_TO_DATA, nfsdirent->name);
 
-    int offset = vaddr & (PAGE_SIZE_4K - 1);
-    sync_bin_sem_wait(data_sem);
-    char *data = (char *)frame_data(get_frame(vaddr));
-    strncpy(data + offset, nfsdirent->name, nbyte);
-    sync_bin_sem_post(data_sem);
+    seL4_Word new_vaddr = vaddr + size;
+    unsigned char *data = frame_data(get_frame(new_vaddr));
+    data[new_vaddr & (PAGE_SIZE_4K - 1)] = 0;
     nfs_close_dir(args.buff);
     
-    seL4_SetMR(0, nbyte);
+    seL4_SetMR(0, res);
 }
 
 void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number)
