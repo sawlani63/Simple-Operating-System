@@ -28,5 +28,4 @@ void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
 void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
 void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
 
-void syscall_sem_init(void);
-void other_sem_init(void);
+void init_semaphores(void);

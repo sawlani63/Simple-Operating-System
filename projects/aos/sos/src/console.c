@@ -7,6 +7,9 @@
 sync_bin_sem_t *queue_sem = NULL;
 seL4_CPtr queue_sem_cptr;
 
+sync_bin_sem_t *sync_sem = NULL;
+seL4_CPtr sync_sem_cptr;
+
 struct node {
     char c;
     struct node *next;
@@ -23,6 +26,7 @@ void enqueue(UNUSED struct network_console *network_console, char c) {
     new_node->c = c;
     new_node->next = NULL;
 
+    sync_bin_sem_wait(sync_sem);
     if (read_queue == NULL) {
         read_queue = new_node;
     } else {
@@ -32,6 +36,7 @@ void enqueue(UNUSED struct network_console *network_console, char c) {
         }
         curr->next = new_node;
     }
+    sync_bin_sem_post(sync_sem);
     sync_bin_sem_post(queue_sem);
 }
 
@@ -39,6 +44,7 @@ int deque(UNUSED void *handle, UNUSED char *data, uint64_t count, UNUSED void *c
     /* We don't use a callback here so we'll just use the args to the callback
      * as the buffer we will be writing to. */
     char *buff = (char *) ((nfs_args *) args)->buff;
+    sync_bin_sem_wait(sync_sem);
     for (uint64_t i = 0; i < count; i++) {
         sync_bin_sem_wait(queue_sem);
         buff[i] = read_queue->c;
@@ -46,9 +52,11 @@ int deque(UNUSED void *handle, UNUSED char *data, uint64_t count, UNUSED void *c
         free(read_queue);
         read_queue = next;
         if (buff[i] == '\n') {
+            sync_bin_sem_post(sync_sem);
             return i + 1;
         }
     }
+    sync_bin_sem_post(sync_sem);
     return count;
 }
 
@@ -58,4 +66,10 @@ void init_console_sem() {
     ut_t *sem_ut = alloc_retype(&queue_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!sem_ut, "No memory for notification");
     sync_bin_sem_init(queue_sem, queue_sem_cptr, 0);
+
+    sync_sem = malloc(sizeof(sync_bin_sem_t));
+    ZF_LOGF_IF(!sync_sem, "No memory for new semaphore object");
+    sem_ut = alloc_retype(&sync_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!sem_ut, "No memory for notification");
+    sync_bin_sem_init(sync_sem, sync_sem_cptr, 1);
 }

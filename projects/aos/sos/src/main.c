@@ -23,7 +23,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "console_test"
+#define APP_NAME             "sosh"
 #define APP_PRIORITY         (0)
 #define APP_EP_BADGE         (101)
 
@@ -49,8 +49,8 @@ struct user_process user_process;
 
 struct network_console *console;
 
-seL4_CPtr nfs_sem_cptr;
-sync_bin_sem_t *nfs_sem = NULL;
+seL4_CPtr nfs_open_sem_cptr;
+sync_bin_sem_t *nfs_open_sem = NULL;
 
 bool handle_vm_fault(seL4_Word fault_addr);
 
@@ -692,12 +692,12 @@ NORETURN void *main_continued(UNUSED void *arg)
 
     /* Initialise the network hardware. */
     printf("Network init\n");
-    nfs_sem = malloc(sizeof(sync_bin_sem_t));
-    ut_t *nfs_sem_ut = alloc_retype(&nfs_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    nfs_open_sem = malloc(sizeof(sync_bin_sem_t));
+    ut_t *nfs_sem_ut = alloc_retype(&nfs_open_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!nfs_sem_ut, "No memory for notification");
-    sync_bin_sem_init(nfs_sem, nfs_sem_cptr, 0);
+    sync_bin_sem_init(nfs_open_sem, nfs_open_sem_cptr, 0);
 
-    network_init(&cspace, timer_vaddr, ntfn, nfs_sem);
+    network_init(&cspace, timer_vaddr, ntfn, nfs_open_sem);
     console = network_console_init();
     network_console_register_handler(console, enqueue);
     init_console_sem();
@@ -734,8 +734,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     ZF_LOGF_IF(!success, "Failed to start first process");
 
     /* Initialise semaphores for synchronisation and console blocking */
-    syscall_sem_init();
-    other_sem_init();
+    init_semaphores();
 
     /* Creating thread pool */
     initialise_thread_pool(handle_syscall);
