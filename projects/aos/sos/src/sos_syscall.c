@@ -314,7 +314,7 @@ void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
     }
     
     res = perform_io(sizeof(sos_stat_t), buf_vaddr, NULL, NULL, BUFF_TO_DATA, &stat);
-    seL4_SetMR(0, res != 0 ? -1 : 0);
+    seL4_SetMR(0, res < 0 ? res : 0);
 }
 
 void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
