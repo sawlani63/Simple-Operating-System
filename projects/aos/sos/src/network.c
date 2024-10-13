@@ -322,7 +322,7 @@ extern sync_bin_sem_t *nfs_sem;
 sync_bin_sem_t *net_sync_sem = NULL;
 seL4_CPtr net_sync_sem_cptr;
 
-void init_nfs_sem() {
+void init_nfs_sem(void) {
     net_sync_sem = malloc(sizeof(sync_bin_sem_t));
     ZF_LOGF_IF(!net_sync_sem, "No memory for new semaphore object");
     ut_t *sem_ut = alloc_retype(&net_sync_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);

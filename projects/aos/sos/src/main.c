@@ -733,7 +733,8 @@ NORETURN void *main_continued(UNUSED void *arg)
     bool success = start_first_process(APP_NAME, ipc_ep);
     ZF_LOGF_IF(!success, "Failed to start first process");
 
-    /* Initialise semaphores for synchronisation and console blocking */
+    /* Initialise semaphores for synchronisation */
+    init_nfs_sem();
     init_semaphores();
 
     /* Creating thread pool */
