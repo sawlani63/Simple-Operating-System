@@ -6,7 +6,7 @@
 
 #include "open_file.h"
 
-#define FDT_SIZE 64         // Starting size of the fd table
+#define FDT_SIZE 16         // Starting size of the fd table
 
 /* Per-process file descriptor table data structure. */
 typedef struct {

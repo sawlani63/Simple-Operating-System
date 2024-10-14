@@ -5,7 +5,7 @@
 #include <sync/bin_sem.h>
 #include <sync/condition_var.h>
 
-#define QUEUE_SIZE 1024 // TODO: MAKE DYNAMIC?
+#define QUEUE_SIZE 4096 // TODO: MAKE DYNAMIC?
 
 struct {
     char chars[QUEUE_SIZE];
