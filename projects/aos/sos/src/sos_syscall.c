@@ -184,10 +184,12 @@ void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
     if (found == NULL) {
         seL4_SetMR(0, -1);
         return;
-    } else if (!strcmp(found->path, "console") && found->mode != O_WRONLY) {
-        sync_bin_sem_wait(file_sem);
-        console_open_for_read = false;
-        sync_bin_sem_post(file_sem);
+    } else if (!strcmp(found->path, "console")) {
+        if (found->mode != O_WRONLY) {
+            sync_bin_sem_wait(file_sem);
+            console_open_for_read = false;
+            sync_bin_sem_post(file_sem);
+        }
     } else {
         nfs_args args = {.sem = nfs_sem};
         if (nfs_close_file(found->handle, nfs_async_close_cb, &args) < 0) {
