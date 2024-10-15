@@ -237,7 +237,7 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, se
         return seL4_NotEnoughMemory;
     }
 
-    l4_pt[l4_index] = frame_ref | ((REGION_RD | REGION_WR) << 31);
+    l4_pt[l4_index] = frame_ref | ((REGION_RD | REGION_WR) << 61);
 
     return sos_map_frame_impl(cspace, vspace, vaddr, rights, attr, frame_ref, l1_pt, l4_pt);
 }

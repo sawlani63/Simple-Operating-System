@@ -37,6 +37,12 @@
         "fs.h": "c",
         "typeinfo": "c",
         "time.h": "c",
-        "syscall.h": "c"
+        "syscall.h": "c",
+        "system_error": "c",
+        "complex": "c",
+        "threads.h": "c",
+        "debug.h": "c",
+        "sel4runtime.h": "c",
+        "nfs.h": "c"
     }
 }

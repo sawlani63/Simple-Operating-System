@@ -2,16 +2,18 @@
 
 #include <stdlib.h>
 #include <stdint.h>
+#include <sync/bin_sem.h>
 
 typedef const char * string;
 typedef int (*execute_io)(void *handle, char *data, uint64_t len, void *cb, void *args);
 
 typedef struct file {
+    void *handle; // i dont like this
     string path;
     int mode;
     execute_io file_write;
     execute_io file_read;
-    void *handle; // i dont like this
+    sync_bin_sem_t *file_sem;
 } open_file;
 
 /**
@@ -29,5 +31,3 @@ open_file *file_create(string path, int mode, execute_io file_write, execute_io 
  * @param file A reference to an open file to be deallocated.
  */
 void file_destroy(open_file *file);
-
-void nfsfh_init(open_file *file, void *nfsfh);
