@@ -16,16 +16,16 @@
 #define SYSCALL_SOS_GETDIRENT SYS_getdents64
 #define SYSCALL_SOS_STAT SYS_statfs
 
-void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
-void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
-void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
-void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
-void syscall_sos_usleep(bool *have_reply, struct task *curr_task);
+void syscall_sos_open(seL4_MessageInfo_t *reply_msg);
+void syscall_sos_close(seL4_MessageInfo_t *reply_msg);
+void syscall_sos_read(seL4_MessageInfo_t *reply_msg);
+void syscall_sos_write(seL4_MessageInfo_t *reply_msg);
+void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg);
 void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg);
-void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
-void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
-void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
-void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, struct task *curr_task);
+void syscall_sys_brk(seL4_MessageInfo_t *reply_msg);
+void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg);
+void syscall_sos_stat(seL4_MessageInfo_t *reply_msg);
+void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg);
 void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
 
 void init_semaphores(void);

@@ -95,13 +95,13 @@ bool handle_vm_fault(seL4_Word fault_addr) {
      * unblock the caller with an empty message. */
     if (l4_pt != NULL && l4_frame(l4_pt, l4_index) != NULL_FRAME) {
         pt_entry entry = l4_pt[l4_index];
-        if (!debug_is_read_fault() && ((entry >> 31) & REGION_WR) == 0) {
+        if (!debug_is_read_fault() && ((entry >> 61) & REGION_WR) == 0) {
             ZF_LOGE("Trying to write to a read only page");
             return false;
         }
         /* Assign the appropriate rights for the frame we are about to map. */
-        seL4_CapRights_t rights = seL4_CapRights_new(0, 0, (entry >> 31) & REGION_RD, (entry >> 32) & 1);
-        if (!((entry >> 31) & REGION_EX)) {
+        seL4_CapRights_t rights = seL4_CapRights_new(0, 0, (entry >> 61) & REGION_RD, (entry >> 62) & 1);
+        if (!((entry >> 61) & REGION_EX)) {
             attr |= seL4_ARM_ExecuteNever;
         }
         if (map_frame_impl(&cspace, l4_frame(l4_pt, l4_index), user_process.vspace, fault_addr,
@@ -176,7 +176,7 @@ bool handle_vm_fault(seL4_Word fault_addr) {
         ZF_LOGE("Failed to allocate a frame");
         return false;
     }
-    l4_pt[l4_index] = frame_ref | (reg->perms << 31);
+    l4_pt[l4_index] = frame_ref | (reg->perms << 61);
 
     /* Map the frame into the relevant page tables. */
     if (sos_map_frame_impl(&cspace, user_process.vspace, fault_addr, rights, attr, frame_ref, l1_pt, l4_pt) != 0) {
@@ -191,58 +191,100 @@ bool handle_vm_fault(seL4_Word fault_addr) {
  * Deals with a syscall and sets the message registers before returning the
  * message info to be passed through to seL4_ReplyRecv()
  */
-void handle_syscall(void *arg)
+seL4_MessageInfo_t handle_syscall()
 {
-    struct task *curr_task = (struct task *) arg;
-    seL4_MessageInfo_t reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
+    seL4_MessageInfo_t reply_msg;
 
     /* get the first word of the message, which in the SOS protocol is the number
      * of the SOS "syscall". */
-    seL4_Word syscall_number = curr_task->msg[0];
-
-    /* Set the reply flag */
-    bool have_reply = true;
+    seL4_Word syscall_number = seL4_GetMR(0);
 
     /* Process system call */
     switch (syscall_number) {
-        case SYSCALL_SOS_OPEN:
-            syscall_sos_open(&reply_msg, curr_task);
-            break;
-        case SYSCALL_SOS_CLOSE:
-            syscall_sos_close(&reply_msg, curr_task);
-            break;
-        case SYSCALL_SOS_READ:
-            syscall_sos_read(&reply_msg, curr_task);
-            break;
-        case SYSCALL_SOS_WRITE:
-            syscall_sos_write(&reply_msg, curr_task);
-            break;
-        case SYSCALL_SOS_USLEEP:
-            syscall_sos_usleep(&have_reply, curr_task);
-            break;
-        case SYSCALL_SOS_TIME_STAMP:
-            syscall_sos_time_stamp(&reply_msg);
-            break;
-        case SYSCALL_SYS_BRK:
-            syscall_sys_brk(&reply_msg, curr_task);
-            break;
-        case SYSCALL_SOS_STAT:
-            syscall_sos_stat(&reply_msg, curr_task);
-            break;
-        case SYSCALL_SOS_GETDIRENT:
-            syscall_sos_getdirent(&reply_msg, curr_task);
-            break;
-        default:
-            syscall_unknown_syscall(&reply_msg, syscall_number);
+    case SYSCALL_SOS_OPEN:
+        syscall_sos_open(&reply_msg);
+        break;
+    case SYSCALL_SOS_CLOSE:
+        syscall_sos_close(&reply_msg);
+        break;
+    case SYSCALL_SOS_READ:
+        syscall_sos_read(&reply_msg);
+        break;
+    case SYSCALL_SOS_WRITE:
+        syscall_sos_write(&reply_msg);
+        break;
+    case SYSCALL_SOS_USLEEP:
+        syscall_sos_usleep(&reply_msg);
+        break;
+    case SYSCALL_SOS_TIME_STAMP:
+        syscall_sos_time_stamp(&reply_msg);
+        break;
+    case SYSCALL_SYS_BRK:
+        syscall_sys_brk(&reply_msg);
+        break;
+    case SYSCALL_SOS_STAT:
+        syscall_sos_stat(&reply_msg);
+        break;
+    case SYSCALL_SOS_GETDIRENT:
+        syscall_sos_getdirent(&reply_msg);
+        break;
+    default:
+        syscall_unknown_syscall(&reply_msg, syscall_number);
     }
 
-    if (have_reply) {
-        seL4_NBSend(curr_task->reply, reply_msg);
-        free_untype(&curr_task->reply, curr_task->reply_ut);
+    return reply_msg;
+}
+
+NORETURN void syscall_loop(void *arg)
+{
+    seL4_CPtr ep = (seL4_CPtr) arg;
+    seL4_CPtr reply;
+
+    /* Create reply object */
+    ut_t *reply_ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
+    if (reply_ut == NULL) {
+        ZF_LOGF("Failed to alloc reply object ut");
+    }
+
+    bool have_reply = false;
+    seL4_MessageInfo_t reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
+
+    while (1) {
+        seL4_MessageInfo_t message;
+
+        /* Reply (if there is a reply) and block on ep, waiting for an IPC sent over ep */
+        if (have_reply) {
+            message = seL4_ReplyRecv(ep, reply_msg, 0, reply);
+        } else {
+            message = seL4_Recv(ep, 0, reply);
+        }
+
+        /* Awake! We got a message - check the label and badge to
+         * see what the message is about */
+        seL4_Word label = seL4_MessageInfo_get_label(message);
+
+        if (label == seL4_Fault_NullFault) {
+            /* It's not a fault or an interrupt, it must be an IPC
+             * message from console_test! */
+            reply_msg = handle_syscall();
+            have_reply = true;
+        } else if (label == seL4_Fault_VMFault) {
+            reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
+            have_reply = handle_vm_fault(seL4_GetMR(seL4_VMFault_Addr));
+        } else {
+            /* some kind of fault */
+            debug_print_fault(message, APP_NAME);
+            /* dump registers too */
+            debug_dump_registers(user_process.tcb);
+            /* Don't reply and recv on nothing */
+            have_reply = false;
+
+            ZF_LOGF("The SOS skeleton does not know how to handle faults!");
+        }
     }
 }
 
-NORETURN void syscall_loop(seL4_CPtr ep)
+NORETURN void irq_loop(seL4_CPtr ep)
 {
     seL4_CPtr reply;
 
@@ -256,32 +298,9 @@ NORETURN void syscall_loop(seL4_CPtr ep)
         seL4_Word badge = 0;
         seL4_MessageInfo_t message = seL4_Recv(ep, &badge, reply);
 
-        /* Awake! We got a message - check the label and badge to
-         * see what the message is about */
-        seL4_Word label = seL4_MessageInfo_get_label(message);
-
         if (badge & IRQ_EP_BADGE) {
             /* It's a notification from our bound notification object! */
-            sos_handle_irq_notification(&badge, false);
-        } else if (label == seL4_Fault_NullFault) {         
-            /* Create a new task for one of our worker threads in the thread pool */   
-            struct task task = {.reply_ut = reply_ut, .reply = reply};
-            seL4_Word msg[NUM_MSG_REGISTERS]
-                = {seL4_GetMR(0), seL4_GetMR(1), seL4_GetMR(2), seL4_GetMR(3)};
-            memcpy(task.msg, msg, sizeof(seL4_Word) * NUM_MSG_REGISTERS);
-            submit_task(task);
-            
-            /* To stop the main thread from overwriting the worker thread's
-             * reply object, we give the main thread a new one */
-            reply_ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
-            if (reply_ut == NULL) {
-                ZF_LOGF("Failed to alloc reply object ut");
-            }
-        } else if (label == seL4_Fault_VMFault) {
-            if (handle_vm_fault(seL4_GetMR(seL4_VMFault_Addr))) {
-                /* Respond with an empty message just to unblock the caller. */
-                seL4_NBSend(reply, seL4_MessageInfo_new(0, 0, 0, 0));
-            }
+            sos_handle_irq_notification(&badge, 0);
         } else {
             /* some kind of fault */
             debug_print_fault(message, APP_NAME);
@@ -436,8 +455,15 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
  * TODO: avoid leaking memory once you implement real processes, otherwise a user
  *       can force your OS to run out of memory by creating lots of failed processes.
  */
-bool start_first_process(char *app_name, seL4_CPtr ep)
+bool start_first_process(char *app_name)
 {
+    seL4_CPtr ep;
+    ut_t *ut = alloc_retype(&ep, seL4_EndpointObject, seL4_EndpointBits);
+    if (!ut) {
+        ZF_LOGF_IF(!ut, "No memory for endpoint");
+        return false;
+    }
+
     /* Create a VSpace */
     user_process.vspace_ut = alloc_retype(&user_process.vspace, seL4_ARM_PageGlobalDirectoryObject,
                                               seL4_PGDBits);
@@ -571,6 +597,13 @@ bool start_first_process(char *app_name, seL4_CPtr ep)
                         user_process.ipc_buffer_frame, user_process.addrspace);
     if (err != 0) {
         ZF_LOGE("Unable to map IPC buffer for user app");
+        return false;
+    }
+
+    init_threads(ep, ep, sched_ctrl_start, sched_ctrl_end);
+    sos_thread_t *handler_thread = thread_create(syscall_loop, (void *)ep, 0, true, seL4_MaxPrio, seL4_CapNull, true);
+    if (handler_thread == NULL) {
+        ZF_LOGE("Could not create system call handler thread for %s\n", app_name);
         return false;
     }
 
@@ -730,7 +763,7 @@ NORETURN void *main_continued(UNUSED void *arg)
 
     /* Start the user application */
     printf("Start first process\n");
-    bool success = start_first_process(APP_NAME, ipc_ep);
+    bool success = start_first_process(APP_NAME);
     ZF_LOGF_IF(!success, "Failed to start first process");
 
     /* Initialise semaphores for synchronisation */
@@ -738,10 +771,10 @@ NORETURN void *main_continued(UNUSED void *arg)
     init_semaphores();
 
     /* Creating thread pool */
-    initialise_thread_pool(handle_syscall);
+    // initialise_thread_pool(handle_syscall);
 
     printf("\nSOS entering syscall loop\n");
-    syscall_loop(ipc_ep);
+    irq_loop(ipc_ep);
 }
 /*
  * Main entry point - called by crt.

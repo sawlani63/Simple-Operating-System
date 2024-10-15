@@ -67,9 +67,8 @@ static frame_ref_t get_frame(seL4_Word vaddr) {
 
 static void wakeup(UNUSED uint32_t id, void* data)
 {
-    struct task *args = (struct task *) data;
-    seL4_NBSend(args->reply, seL4_MessageInfo_new(0, 0, 0, 0));
-    free_untype(&args->reply, args->reply_ut);
+    sync_bin_sem_t *sleep_sem = (sync_bin_sem_t *) data;
+    sync_bin_sem_post(sleep_sem);
 }
 
 static int perform_io(size_t nbyte, uintptr_t vaddr, open_file *file,
@@ -96,8 +95,6 @@ static int perform_io(size_t nbyte, uintptr_t vaddr, open_file *file,
 
         if (args.err < 0) {
             return -1;
-        } else if (!args.err) {
-            break;
         } else if (args.err != len) {
             bytes_left -= args.err;
             break;
@@ -119,20 +116,19 @@ static int perform_io(size_t nbyte, uintptr_t vaddr, open_file *file,
     return nbyte - bytes_left;
 }
 
-void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_task) 
+void syscall_sos_open(seL4_MessageInfo_t *reply_msg) 
 {
-    /* Wait for the nfs to be mounted before continuing with open. */
+    seL4_Word vaddr = seL4_GetMR(1);
+    int path_len = seL4_GetMR(2);
+    int mode = seL4_GetMR(3);
+
     extern sync_bin_sem_t *nfs_open_sem;
     sync_bin_sem_wait(nfs_open_sem);
     sync_bin_sem_post(nfs_open_sem);
 
-    ZF_LOGE("syscall: thread example made syscall %d!\n", SYSCALL_SOS_OPEN);
+    ZF_LOGV("syscall: thread example made syscall %d!\n", SYSCALL_SOS_OPEN);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-
-    seL4_Word vaddr = curr_task->msg[1];
-    int path_len = curr_task->msg[2];
-    int mode = curr_task->msg[3];
     if ((mode != O_WRONLY) && (mode != O_RDONLY) && (mode != O_RDWR)) {
         seL4_SetMR(0, -1);
         return;
@@ -172,15 +168,13 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
     seL4_SetMR(0, err ? -1 : (int) fd);
 }
 
-void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
+void syscall_sos_close(seL4_MessageInfo_t *reply_msg)
 {
-    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_CLOSE);
+    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_CLOSE);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
-    sync_bin_sem_wait(file_sem);
-    open_file *found = fdt_get_file(user_process.fdt, curr_task->msg[1]);
-    sync_bin_sem_post(file_sem);
+    open_file *found = fdt_get_file(user_process.fdt, seL4_GetMR(1));
     if (found == NULL) {
         seL4_SetMR(0, -1);
         return;
@@ -202,23 +196,21 @@ void syscall_sos_close(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
             return;
         }
     }
-    fdt_remove(user_process.fdt, curr_task->msg[1]);
+    fdt_remove(user_process.fdt, seL4_GetMR(1));
     seL4_SetMR(0, 0);
 }
 
-void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_task) 
+void syscall_sos_read(seL4_MessageInfo_t *reply_msg) 
 {
-    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_READ);
+    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_READ);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */
-    int read_fd = curr_task->msg[1];
-    seL4_Word vaddr = curr_task->msg[2];
-    int nbyte = curr_task->msg[3];
+    int read_fd = seL4_GetMR(1);
+    seL4_Word vaddr = seL4_GetMR(2);
+    int nbyte = seL4_GetMR(3);
 
-    sync_bin_sem_wait(file_sem);
     open_file *found = fdt_get_file(user_process.fdt, read_fd);
-    sync_bin_sem_post(file_sem);
     if (found == NULL || found->mode == O_WRONLY) {
         /* Set the reply message to be an error value */
         seL4_SetMR(0, -1);
@@ -229,21 +221,19 @@ void syscall_sos_read(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
     seL4_SetMR(0, res);
 }
 
-void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
+void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
 {
-    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_WRITE);
+    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_WRITE);
     /* Construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
     /* Receive fd, virtual address, and number of bytes from sos.c */
-    int write_fd = curr_task->msg[1];
-    seL4_Word vaddr = curr_task->msg[2];
-    size_t nbyte = curr_task->msg[3];
+    int write_fd = seL4_GetMR(1);
+    seL4_Word vaddr = seL4_GetMR(2);
+    size_t nbyte = seL4_GetMR(3);
 
     /* Find the file associated with the file descriptor */
-    sync_bin_sem_wait(file_sem);
     open_file *found = fdt_get_file(user_process.fdt, write_fd);
-    sync_bin_sem_post(file_sem);
     if (found == NULL || found->mode == O_RDONLY) {
         /* Set the reply message to be an error value and return early */
         seL4_SetMR(0, -1);
@@ -253,28 +243,38 @@ void syscall_sos_write(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
     seL4_SetMR(0, res);
 }
 
-void syscall_sos_usleep(bool *have_reply, struct task *curr_task)
+void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg)
 {
-    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_USLEEP);
-    register_timer(curr_task->msg[1], wakeup, (void *) curr_task);
-    *have_reply = false;
+    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_USLEEP);
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
+
+    seL4_CPtr sleep_sem_cptr;
+    sync_bin_sem_t sleep_sem;
+    ut_t *sleep_ut = alloc_retype(&sleep_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!sleep_ut, "No memory for notification");
+    sync_bin_sem_init(&sleep_sem, sleep_sem_cptr, 0);
+
+    register_timer(seL4_GetMR(1), wakeup, (void *) &sleep_sem);
+
+    sync_bin_sem_wait(&sleep_sem);
+    free_untype(&sleep_sem_cptr, sleep_ut);
 }
 
 void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
 {
-    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_TIME_STAMP);
+    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_TIME_STAMP);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Set the reply message to be the timestamp since booting in microseconds */
     seL4_SetMR(0, timestamp_us(timestamp_get_freq()));
 }
 
-void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
+void syscall_sys_brk(seL4_MessageInfo_t *reply_msg)
 {
-    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SYS_BRK);
+    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SYS_BRK);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
-    uintptr_t newbrk = curr_task->msg[1];
+    uintptr_t newbrk = seL4_GetMR(1);
     if (newbrk <= 0) {
         seL4_SetMR(0, PROCESS_HEAP_START);        
     } else if (newbrk >= ALIGN_DOWN(user_process.stack_reg->base, PAGE_SIZE_4K)) {
@@ -285,13 +285,13 @@ void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
     }
 }
 
-void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
+void syscall_sos_stat(seL4_MessageInfo_t *reply_msg)
 {
-    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_STAT);
+    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_STAT);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    seL4_Word path_vaddr = curr_task->msg[1];
-    seL4_Word buf_vaddr = curr_task->msg[2];
-    size_t path_len = curr_task->msg[3];
+    seL4_Word path_vaddr = seL4_GetMR(1);
+    seL4_Word buf_vaddr = seL4_GetMR(2);
+    size_t path_len = seL4_GetMR(3);
 
     /* Perform stat operation. We don't assume it's only on 1 page */
     char *file_path = calloc(path_len, sizeof(char));
@@ -319,13 +319,13 @@ void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
     seL4_SetMR(0, res < 0 ? res : 0);
 }
 
-void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, struct task *curr_task)
+void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg)
 {
-    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_GETDIRENT);
+    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_GETDIRENT);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    int pos = curr_task->msg[1];
-    seL4_Word vaddr = curr_task->msg[2];
-    size_t nbyte = curr_task->msg[3];
+    int pos = seL4_GetMR(1);
+    seL4_Word vaddr = seL4_GetMR(2);
+    size_t nbyte = seL4_GetMR(3);
 
     nfs_args args = {.err = 0, .sem = nfs_sem};
     if (nfs_open_dir(nfs_async_opendir_cb, &args)) {
