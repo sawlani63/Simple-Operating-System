@@ -17,11 +17,16 @@ typedef struct _region {
     struct _region *next;
 } mem_region_t;
 
-/* Packs the entire entry into 64 bits.
- * The lowest 19 bits contain the frame reference,
- * the next 42 bits contain the frame cap to the hpt,
- * and the last 3 bits contain the permissions. */
-typedef uint64_t pt_entry;
+typedef struct page pt_entry;
+/* Needs to sum to 64 bits to be properly memory aligned. */
+PACKED struct page {
+    /* Reference into the frame table. */
+    frame_ref_t frame_ref: 19;
+    /* Capability to the frame in the Hardware Page Table. */
+    seL4_CPtr frame_cptr : 42;
+    /* Permissions of the page (REGION_RD, REGION_WR, REGION_EX). */
+    size_t perms : 3;
+};
 
 typedef struct pt_l3 {
     pt_entry *l4;

@@ -43,7 +43,7 @@ static bool vaddr_is_mapped(seL4_Word vaddr) {
         return false;
     }
 
-    return (frame_ref_t)(l4_pt[l4_index] & MASK(19)) != NULL_FRAME;
+    return l4_pt[l4_index].frame_ref != NULL_FRAME;
 }
 
 static bool vaddr_check(seL4_Word vaddr) {
@@ -52,17 +52,12 @@ static bool vaddr_check(seL4_Word vaddr) {
     return vaddr_is_mapped(vaddr) || handle_vm_fault(vaddr);
 }
 
-static frame_ref_t l4_frame(pt_entry *l4_pt, uint16_t l4_index) {
-    return (frame_ref_t)(l4_pt[l4_index] & MASK(19));
-}
-
 static frame_ref_t get_frame(seL4_Word vaddr) {
-    uint16_t l1_index = (vaddr >> 39) & MASK(9); /* Top 9 bits */
-    uint16_t l2_index = (vaddr >> 30) & MASK(9); /* Next 9 bits */
-    uint16_t l3_index = (vaddr >> 21) & MASK(9); /* Next 9 bits */
-    uint16_t l4_index = (vaddr >> 12) & MASK(9); /* Next 9 bits */
-    return l4_frame(user_process.addrspace->page_table[l1_index].l2[l2_index].l3[l3_index].l4,
-                    l4_index);
+    uint16_t l1_i = (vaddr >> 39) & MASK(9); /* Top 9 bits */
+    uint16_t l2_i = (vaddr >> 30) & MASK(9); /* Next 9 bits */
+    uint16_t l3_i = (vaddr >> 21) & MASK(9); /* Next 9 bits */
+    uint16_t l4_i = (vaddr >> 12) & MASK(9); /* Next 9 bits */
+    return user_process.addrspace->page_table[l1_i].l2[l2_i].l3[l3_i].l4[l4_i].frame_ref;
 }
 
 static void wakeup(UNUSED uint32_t id, void* data)
