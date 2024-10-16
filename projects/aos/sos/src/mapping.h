@@ -91,10 +91,6 @@ seL4_Error map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, se
  * @return 0 on success
  */
 
-seL4_Error sos_map_frame_impl(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, seL4_CapRights_t rights,
-                              seL4_ARM_VMAttributes attr, frame_ref_t frame_ref, page_upper_directory *page_table,
-                              pt_entry *l4_pt);
-
 seL4_Error sos_map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
                                 seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, seL4_CPtr *free_slots,
                                 seL4_Word *used, page_upper_directory *page_table);

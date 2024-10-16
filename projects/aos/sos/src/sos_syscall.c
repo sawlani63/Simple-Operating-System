@@ -43,7 +43,7 @@ static bool vaddr_is_mapped(seL4_Word vaddr) {
         return false;
     }
 
-    return l4_pt[l4_index].frame_ref != NULL_FRAME;
+    return l4_pt[l4_index].present && l4_pt[l4_index].page.frame_ref != NULL_FRAME;
 }
 
 static bool vaddr_check(seL4_Word vaddr) {
@@ -57,7 +57,7 @@ static frame_ref_t get_frame(seL4_Word vaddr) {
     uint16_t l2_i = (vaddr >> 30) & MASK(9); /* Next 9 bits */
     uint16_t l3_i = (vaddr >> 21) & MASK(9); /* Next 9 bits */
     uint16_t l4_i = (vaddr >> 12) & MASK(9); /* Next 9 bits */
-    return user_process.addrspace->page_table[l1_i].l2[l2_i].l3[l3_i].l4[l4_i].frame_ref;
+    return user_process.addrspace->page_table[l1_i].l2[l2_i].l3[l3_i].l4[l4_i].page.frame_ref;
 }
 
 static void wakeup(UNUSED uint32_t id, void* data)
