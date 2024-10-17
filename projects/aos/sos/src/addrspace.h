@@ -27,9 +27,7 @@ typedef struct {
             /* Reference into the frame table. */
             frame_ref_t frame_ref : 19;
             /* Capability to the frame in the Hardware Page Table. */
-            seL4_CPtr frame_cptr : 43;
-            /* A bit to indicate whether a page has been recently referenced or not. */
-            seL4_CPtr referenced : 1;
+            seL4_CPtr frame_cptr : 44;
         } page;
         
         struct {
