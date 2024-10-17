@@ -73,6 +73,7 @@ add_executable(
     src/nfs.c
     src/thread_pool.c
     src/console.c
+    src/clock_replacement.c
 )
 target_include_directories(sos PRIVATE "include")
 target_link_libraries(
