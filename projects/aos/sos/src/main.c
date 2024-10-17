@@ -60,52 +60,6 @@ bool handle_vm_fault(seL4_Word fault_addr) {
         return false;
     }
 
-    /* We use our shadow page table which follows the same structure as the hardware one.
-     * Check the seL4 Manual section 7.1.1 for hardware virtual memory objects. Importantly
-     * the top-most 16 bits of the virtual address are unused bits, so we ignore them. */
-    uint16_t l1_index = (fault_addr >> 39) & MASK(9); /* Top 9 bits */
-    uint16_t l2_index = (fault_addr >> 30) & MASK(9); /* Next 9 bits */
-    uint16_t l3_index = (fault_addr >> 21) & MASK(9); /* Next 9 bits */
-    uint16_t l4_index = (fault_addr >> 12) & MASK(9); /* Next 9 bits */
-
-    /* Cache the related page table entries so we don't have to perform lots of dereferencing. */
-    page_upper_directory *l1_pt = as->page_table;
-    page_directory *l2_pt = NULL;
-    page_table *l3_pt = NULL;
-    pt_entry *l4_pt = NULL;
-    if (l1_pt[l1_index].l2 != NULL) {
-        l2_pt = l1_pt[l1_index].l2;
-        if (l2_pt[l2_index].l3 != NULL) {
-            l3_pt = l2_pt[l2_index].l3;
-            if (l3_pt[l3_index].l4 != NULL) {
-                l4_pt = l3_pt[l3_index].l4;
-            }
-        }
-    }
-
-    seL4_ARM_VMAttributes attr = seL4_ARM_Default_VMAttributes;
-
-    /* If there already exists a valid entry in our page table, reload the Hardware Page Table and
-     * unblock the caller with an empty message. */
-    if (l4_pt != NULL && l4_pt[l4_index].frame_ref != NULL_FRAME) {
-        pt_entry entry = l4_pt[l4_index];
-        if (!debug_is_read_fault() && (entry.perms & REGION_WR) == 0) {
-            ZF_LOGE("Trying to write to a read only page");
-            return false;
-        }
-        /* Assign the appropriate rights for the frame we are about to map. */
-        seL4_CapRights_t rights = seL4_CapRights_new(0, 0, entry.perms & REGION_RD, entry.perms & REGION_WR);
-        if (!(entry.perms & REGION_EX)) {
-            attr |= seL4_ARM_ExecuteNever;
-        }
-        if (map_frame_impl(&cspace, entry.frame_ref, user_process.vspace, fault_addr,
-                           rights, attr, NULL, NULL, NULL) != 0) {
-            ZF_LOGE("Could not map the frame into the two page tables");
-            return false;
-        }
-        return true;
-    }
-
     /* Check if we're faulting in a valid region. */
     mem_region_t *reg;
     seL4_Word heap_top = user_process.heap_reg->base + user_process.heap_reg->size;
@@ -135,31 +89,10 @@ bool handle_vm_fault(seL4_Word fault_addr) {
         return false;
     }
 
-    /* Allocate any necessary levels within the shadow page table. */
-    if (l2_pt == NULL) {
-        l2_pt = l1_pt[l1_index].l2 = calloc(PAGE_TABLE_ENTRIES, sizeof(page_directory));
-        if (l2_pt == NULL) {
-            ZF_LOGE("Failed to allocate level 2 page table");
-            return false;
-        }
-    }
-    if (l3_pt == NULL) {
-        l3_pt = l2_pt[l2_index].l3 = calloc(PAGE_TABLE_ENTRIES, sizeof(page_table));
-        if (l3_pt == NULL) {
-            ZF_LOGE("Failed to allocate level 3 page table");
-            return false;
-        }
-    }
-    if (l4_pt == NULL) {
-        l4_pt = l3_pt[l3_index].l4 = calloc(PAGE_TABLE_ENTRIES, sizeof(pt_entry));
-        if (l4_pt == NULL) {
-            ZF_LOGE("Failed to allocate level 4 page table");
-            return false;
-        }
-    }
+    seL4_ARM_VMAttributes attr = seL4_ARM_Default_VMAttributes;
 
     /* Assign the appropriate rights for the frame we are about to map. */
-    seL4_CapRights_t rights = seL4_CapRights_new(0, 0, reg->perms & REGION_RD, (reg->perms >> 1) & 1);
+    seL4_CapRights_t rights = seL4_CapRights_new(0, 0, reg->perms & REGION_RD, (reg->perms & REGION_WR) >> 1);
     if (!(reg->perms & REGION_EX)) {
         attr |= seL4_ARM_ExecuteNever;
     }
@@ -171,11 +104,8 @@ bool handle_vm_fault(seL4_Word fault_addr) {
         return false;
     }
 
-    pt_entry entry = {.frame_ref = frame_ref, .perms = reg->perms};
-    l4_pt[l4_index] = entry;
-
     /* Map the frame into the relevant page tables. */
-    if (sos_map_frame_impl(&cspace, user_process.vspace, fault_addr, rights, attr, frame_ref, l1_pt, l4_pt) != 0) {
+    if (sos_map_frame(&cspace, user_process.vspace, fault_addr, rights, attr, frame_ref, as) != 0) {
         ZF_LOGE("Could not map the frame into the two page tables");
         return false;
     }

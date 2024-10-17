@@ -171,29 +171,6 @@ seL4_Error sos_map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr
     return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, page_table);
 }
 
-seL4_Error sos_map_frame_impl(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, seL4_CapRights_t rights,
-                              seL4_ARM_VMAttributes attr, frame_ref_t frame_ref, page_upper_directory *page_table,
-                              pt_entry *l4_pt)
-{
-    /* create slot for the frame to load the data into */
-    seL4_CPtr frame_cap = cspace_alloc_slot(cspace);
-    if (frame_cap == seL4_CapNull) {
-        ZF_LOGD("Failed to alloc slot");
-        return 1;
-    }
-
-    /* copy the frame cptr into the loadee's address space */
-    seL4_Error err = cspace_copy(cspace, frame_cap, cspace, frame_page(frame_ref), seL4_AllRights);
-    if (err != seL4_NoError) {
-        ZF_LOGD("Failed to untyped reypte");
-        return err;
-    }
-
-    l4_pt[(vaddr >> 12) & MASK(9)].frame_cptr = frame_cap;
-
-    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, page_table);
-}
-
 seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, seL4_CapRights_t rights,
                          seL4_ARM_VMAttributes attr, frame_ref_t frame_ref, addrspace_t *as)
 {
@@ -237,11 +214,24 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, se
         return seL4_NotEnoughMemory;
     }
 
-    /* TODO: FIX THIS FROM ALWAYS HAVING READ AND WRITE PERMISSIONS. */
-    pt_entry entry = {.frame_ref = frame_ref, .perms = (REGION_RD | REGION_WR)};
+    /* create slot for the frame to load the data into */
+    seL4_CPtr frame_cap = cspace_alloc_slot(cspace);
+    if (frame_cap == seL4_CapNull) {
+        ZF_LOGD("Failed to alloc slot");
+        return 1;
+    }
+
+    /* copy the frame cptr into the loadee's address space */
+    seL4_Error err = cspace_copy(cspace, frame_cap, cspace, frame_page(frame_ref), seL4_AllRights);
+    if (err != seL4_NoError) {
+        ZF_LOGD("Failed to untyped reypte");
+        return err;
+    }
+
+    pt_entry entry = {.present = 1, .page = {frame_ref, frame_cap}};
     l4_pt[l4_index] = entry;
 
-    return sos_map_frame_impl(cspace, vspace, vaddr, rights, attr, frame_ref, l1_pt, l4_pt);
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, l1_pt);
 }
 
 

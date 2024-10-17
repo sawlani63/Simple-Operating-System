@@ -17,16 +17,27 @@ typedef struct _region {
     struct _region *next;
 } mem_region_t;
 
-typedef struct page pt_entry;
-/* Needs to sum to 64 bits to be properly memory aligned. */
-PACKED struct page {
-    /* Reference into the frame table. */
-    frame_ref_t frame_ref: 19;
-    /* Capability to the frame in the Hardware Page Table. */
-    seL4_CPtr frame_cptr : 42;
-    /* Permissions of the page (REGION_RD, REGION_WR, REGION_EX). */
-    size_t perms : 3;
-};
+/* Needs to sum to 64 bits to be properly byte aligned. */
+typedef struct {
+    /* A single bit to let us know if this is entry is present in the page table. */
+    size_t present : 1;
+    /* These two structs share the same memory and the one we use depends on the present bit. */
+    union {
+        struct {
+            /* Reference into the frame table. */
+            frame_ref_t frame_ref : 19;
+            /* Capability to the frame in the Hardware Page Table. */
+            seL4_CPtr frame_cptr : 44;
+        } page;
+        
+        struct {
+            /* Position in the nfs paging file the page entry is stored in. */
+            size_t file_position : 52;
+            /* Unused bits which we can change later if we find a use for them. */
+            size_t unused : 11;
+        } swapped;
+    };
+} PACKED pt_entry;
 
 typedef struct pt_l3 {
     pt_entry *l4;
