@@ -100,8 +100,7 @@ bool handle_vm_fault(seL4_Word fault_addr) {
     /* Allocate a new frame to be mapped by the shadow page table. */
     frame_ref_t frame_ref = alloc_frame();
     if (frame_ref == NULL_FRAME) {
-        ZF_LOGE("Failed to allocate a frame");
-        return false;
+        /* We could not allocate a new frame, so we will page out an existing entry and try again. */
     }
 
     /* Map the frame into the relevant page tables. */
