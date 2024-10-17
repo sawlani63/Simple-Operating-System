@@ -44,6 +44,7 @@
         "debug.h": "c",
         "sel4runtime.h": "c",
         "nfs.h": "c",
-        "frame_table.h": "c"
+        "frame_table.h": "c",
+        "stdbool.h": "c"
     }
 }
