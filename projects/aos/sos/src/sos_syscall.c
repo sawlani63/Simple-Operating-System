@@ -168,8 +168,9 @@ void syscall_sos_close(seL4_MessageInfo_t *reply_msg)
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_CLOSE);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    int close_fd = seL4_GetMR(1);
 
-    open_file *found = fdt_get_file(user_process.fdt, seL4_GetMR(1));
+    open_file *found = fdt_get_file(user_process.fdt, close_fd);
     if (found == NULL) {
         seL4_SetMR(0, -1);
         return;
@@ -185,13 +186,13 @@ void syscall_sos_close(seL4_MessageInfo_t *reply_msg)
             seL4_SetMR(0, -1);
             return;
         }
-
         if (args.err) {
             seL4_SetMR(0, -1);
             return;
         }
     }
-    fdt_remove(user_process.fdt, seL4_GetMR(1));
+    
+    fdt_remove(user_process.fdt, close_fd);
     seL4_SetMR(0, 0);
 }
 
@@ -282,7 +283,7 @@ void syscall_sys_brk(seL4_MessageInfo_t *reply_msg)
 
 void syscall_sos_stat(seL4_MessageInfo_t *reply_msg)
 {
-    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_STAT);
+    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_STAT);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     seL4_Word path_vaddr = seL4_GetMR(1);
     seL4_Word buf_vaddr = seL4_GetMR(2);
