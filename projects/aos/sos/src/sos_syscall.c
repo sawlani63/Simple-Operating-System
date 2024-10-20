@@ -273,17 +273,17 @@ void syscall_sys_brk(seL4_MessageInfo_t *reply_msg)
     uintptr_t newbrk = seL4_GetMR(1);
     if (newbrk <= 0) {
         seL4_SetMR(0, PROCESS_HEAP_START);        
-    } else if (newbrk >= ALIGN_DOWN(user_process.stack_reg->base, PAGE_SIZE_4K)) {
+    } else if (newbrk >= ALIGN_DOWN(user_process.addrspace->above_heap->base, PAGE_SIZE_4K)) {
         seL4_SetMR(0, 0);
     } else {
-        user_process.heap_reg->size = newbrk - PROCESS_HEAP_START;
+        user_process.addrspace->heap_reg->size = newbrk - PROCESS_HEAP_START;
         seL4_SetMR(0, newbrk);
     }
 }
 
 void syscall_sos_stat(seL4_MessageInfo_t *reply_msg)
 {
-    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_STAT);
+    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_STAT);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     seL4_Word path_vaddr = seL4_GetMR(1);
     seL4_Word buf_vaddr = seL4_GetMR(2);

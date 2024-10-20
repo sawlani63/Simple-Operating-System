@@ -63,9 +63,6 @@ struct user_process {
 
     frame_ref_t stack_frame;
     seL4_CPtr stack;
-    mem_region_t *stack_reg;
-
-    mem_region_t *heap_reg;
 
     addrspace_t *addrspace;
 

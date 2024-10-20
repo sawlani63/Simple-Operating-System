@@ -833,6 +833,27 @@
   (res) = _s_;\
 }
 
+#define SGLIB___BIN_TREE_FIND_CLOSEST_SMALLER_MEMBER(type, tree, elem, left, right, comparator, res) {\
+    type *_s_ = (tree);\
+    type *_closest_ = NULL; \
+    int _c_;\
+    while (_s_ != NULL) {\
+        _c_ = comparator((elem), _s_);\
+        if (_c_ < 0) {\
+            _s_ = _s_->left;\
+        } else {\
+            if (_c_ > 0) {\
+                _closest_ = _s_; /* Update closest if current node is less than elem */\
+                _s_ = _s_->right;\
+            } else {\
+                break; /* Exact match found, can exit early */\
+            }\
+        }\
+    }\
+    (res) = _closest_;\
+}
+
+
 /* ---------------------------------------------------------------------------- */
 /* ---------------------------------------------------------------------------- */
 /* -                             LEVEL - 1  INTERFACE                         - */
@@ -1770,6 +1791,12 @@ type *sglib_##type##_find_member(type *t, type *elem) {\
   return(res);\
 }\
 \
+type *sglib_##type##_find_closest_member(type *t, type *elem) {\
+  type *res;\
+  SGLIB___BIN_TREE_FIND_CLOSEST_SMALLER_MEMBER(type, t, elem, left, right, comparator, res);\
+  return(res);\
+}\
+\
 int sglib_##type##_is_member(type *t, type *elem) {\
   int       cmp;\
   while (t!=NULL) {\
@@ -1950,6 +1977,7 @@ void sglib___##type##_consistency_check(type *t) {\
  extern int sglib_##type##_delete_if_member(type **tree, type *elem, type **memb);\
  extern int sglib_##type##_is_member(type *t, type *elem);\
  extern type *sglib_##type##_find_member(type *t, type *elem);\
+ extern type *sglib_##type##_find_closest_member(type *t, type *elem);\
  extern int sglib_##type##_len(type *t);\
  extern type *sglib_##type##_it_init(struct sglib_##type##_iterator *it, type *tree);\
  extern type *sglib_##type##_it_init_preorder(struct sglib_##type##_iterator *it, type *tree);\

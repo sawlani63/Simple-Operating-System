@@ -61,30 +61,20 @@ bool handle_vm_fault(seL4_Word fault_addr) {
     }
 
     /* Check if we're faulting in a valid region. */
-    mem_region_t *reg;
-    seL4_Word heap_top = user_process.heap_reg->base + user_process.heap_reg->size;
-    for (reg = as->regions; reg != NULL; reg = reg->next) {
-        seL4_Word top_of_region = reg->base + reg->size;
-        if (fault_addr >= reg->base && fault_addr < top_of_region) {
-            /* We need this permissions check for demand paging that will later occur on the Hardware
-            * Page Table. In the case a page in the HPT gets swapped to disk yet remains on the
-            * Shadow Page Table, we need some way to know if the user is allowed to write to it. */
-            if (!debug_is_read_fault() && (reg->perms & REGION_WR) == 0) {
-                ZF_LOGE("Trying to write to a read only page");
-                return false;
-            }
-            /* Fault occurred in a valid region and permissions line up so we can safely break out. */
-            break;
-        } else if (top_of_region == PROCESS_STACK_TOP
-                   && fault_addr < top_of_region && ALIGN_DOWN(fault_addr, PAGE_SIZE_4K) >= heap_top) {
-            /* Expand the stack. */
-            reg->base = fault_addr;
-            reg->size = PROCESS_STACK_TOP - fault_addr;
-            break;
+    mem_region_t tmp = { .base = fault_addr };
+    mem_region_t *reg = sglib_mem_region_t_find_closest_member(as->region_tree, &tmp);
+    if (reg != NULL) {
+        // Check permissions for write faults
+        if (!debug_is_read_fault() && (reg->perms & REGION_WR) == 0) {
+            ZF_LOGE("Trying to write to a read only page");
+            return false;
         }
-    }
-
-    if (reg == NULL) {
+    } else if (fault_addr < as->stack_reg->base
+               && ALIGN_DOWN(fault_addr, PAGE_SIZE_4K) >= as->below_stack->base + as->below_stack->size) {
+        /* Expand the stack. */
+        as->stack_reg->base = ALIGN_DOWN(fault_addr, PAGE_SIZE_4K);
+        as->stack_reg->size = PROCESS_STACK_TOP - ALIGN_DOWN(fault_addr, PAGE_SIZE_4K);
+    } else {
         ZF_LOGE("Could not find a valid region for this address");
         return false;
     }
@@ -248,8 +238,8 @@ static int stack_write(seL4_Word *mapped_stack, int index, uintptr_t val)
 static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, elf_t *elf_file)
 {
     /* Allocating a region for the stack */
-    user_process.stack_reg = as_define_stack(user_process.addrspace);
-    if (user_process.stack_reg == NULL) {
+    user_process.addrspace->stack_reg = as_define_stack(user_process.addrspace);
+    if (user_process.addrspace->stack_reg == NULL) {
         ZF_LOGD("Failed to alloc stack region");
         return -1;
     }
@@ -503,8 +493,8 @@ bool start_first_process(char *app_name)
     seL4_Word sp = init_process_stack(&cspace, seL4_CapInitThreadVSpace, &elf_file);
 
     /* Allocating a region for the heap */
-    user_process.heap_reg = as_define_heap(user_process.addrspace);
-    if (user_process.stack_reg == NULL) {
+    user_process.addrspace->heap_reg = as_define_heap(user_process.addrspace);
+    if (user_process.addrspace->heap_reg == NULL) {
         ZF_LOGD("Failed to alloc heap region");
         return false;
     }

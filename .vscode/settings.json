@@ -45,6 +45,13 @@
         "sel4runtime.h": "c",
         "nfs.h": "c",
         "frame_table.h": "c",
-        "stdbool.h": "c"
+        "stdbool.h": "c",
+        "chrono": "cpp",
+        "compare": "cpp",
+        "ratio": "cpp",
+        "tuple": "cpp",
+        "type_traits": "cpp",
+        "unordered_map": "c",
+        "unordered_set": "c"
     }
 }
