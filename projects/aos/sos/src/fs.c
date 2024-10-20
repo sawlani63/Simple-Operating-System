@@ -63,11 +63,11 @@ void fdt_destroy(fdt *fdt) {
     free(fdt);
 }
 
-bool fdt_validfd(fdt *fdt, uint32_t fd) {
+inline bool fdt_validfd(fdt *fdt, uint32_t fd) {
     return fd < fdt->size - 1;
 }
 
-open_file *fdt_get_file(fdt *fdt, uint32_t fd) {
+inline open_file *fdt_get_file(fdt *fdt, uint32_t fd) {
     return !fdt_validfd(fdt, fd) ? NULL : fdt->files[fd];
 }
 

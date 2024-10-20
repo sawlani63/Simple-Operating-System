@@ -46,13 +46,13 @@ static bool vaddr_is_mapped(seL4_Word vaddr) {
     return l4_pt[l4_index].present && l4_pt[l4_index].page.frame_ref != NULL_FRAME;
 }
 
-static bool vaddr_check(seL4_Word vaddr) {
+static inline bool vaddr_check(seL4_Word vaddr) {
     /* If the vaddr is not in a valid region we error out. Then if the address is not already
      * mapped and vm_fault returns an error when trying to map it, we also error out.*/
     return vaddr_is_mapped(vaddr) || handle_vm_fault(vaddr);
 }
 
-static frame_ref_t get_frame(seL4_Word vaddr) {
+static inline frame_ref_t get_frame(seL4_Word vaddr) {
     uint16_t l1_i = (vaddr >> 39) & MASK(9); /* Top 9 bits */
     uint16_t l2_i = (vaddr >> 30) & MASK(9); /* Next 9 bits */
     uint16_t l3_i = (vaddr >> 21) & MASK(9); /* Next 9 bits */
@@ -60,7 +60,7 @@ static frame_ref_t get_frame(seL4_Word vaddr) {
     return user_process.addrspace->page_table[l1_i].l2[l2_i].l3[l3_i].l4[l4_i].page.frame_ref;
 }
 
-static void wakeup(UNUSED uint32_t id, void* data)
+static inline void wakeup(UNUSED uint32_t id, void* data)
 {
     sync_bin_sem_t *sleep_sem = (sync_bin_sem_t *) data;
     sync_bin_sem_post(sleep_sem);
@@ -256,7 +256,7 @@ void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg)
     free_untype(&sleep_sem_cptr, sleep_ut);
 }
 
-void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
+inline void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
 {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_TIME_STAMP);
     /* construct a reply message of length 1 */
@@ -265,7 +265,7 @@ void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
     seL4_SetMR(0, timestamp_us(timestamp_get_freq()));
 }
 
-void syscall_sys_brk(seL4_MessageInfo_t *reply_msg)
+inline void syscall_sys_brk(seL4_MessageInfo_t *reply_msg)
 {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SYS_BRK);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
