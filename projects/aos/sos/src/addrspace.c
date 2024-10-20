@@ -96,6 +96,7 @@ void remove_region(addrspace_t *addrspace, size_t base) {
     }
 }
 
+/* Function to remove a memory region by its start address */
 void free_region_tree(addrspace_t *addrspace) {
     struct sglib_mem_region_t_iterator it;
     for (mem_region_t *reg = sglib_mem_region_t_it_init(&it, addrspace->region_tree); reg != NULL; ) {
