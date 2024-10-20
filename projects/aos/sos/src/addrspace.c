@@ -28,6 +28,10 @@ int check_overlap(addrspace_t *addrspace, size_t base, size_t size) {
 /* Function to insert a memory region */
 mem_region_t *insert_region(addrspace_t *addrspace, size_t base, size_t size, uint64_t perms) {
     mem_region_t *region = malloc(sizeof(mem_region_t));
+    if (region == NULL) {
+        printf("No memory for a new region!\n");
+        return NULL;
+    }
     region->base = base;
     region->size = size;
     region->right = region->left = NULL;
@@ -109,6 +113,7 @@ void free_region_tree(addrspace_t *addrspace) {
 addrspace_t *as_create() {
     addrspace_t *as = malloc(sizeof(addrspace_t));
     if (as == NULL) {
+        printf("No memory for a new address space!\n");
 		return NULL;
 	}
 
