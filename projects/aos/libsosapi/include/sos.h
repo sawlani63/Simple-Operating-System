@@ -25,7 +25,6 @@
 #define SYSCALL_SOS_WRITE SYS_writev
 #define SYSCALL_SOS_USLEEP SYS_nanosleep
 #define SYSCALL_SOS_TIME_STAMP SYS_clock_gettime
-#define SYSCALL_SYS_BRK SYS_brk
 #define SYSCALL_SOS_GETDIRENT SYS_getdents64
 #define SYSCALL_SOS_STAT SYS_statfs
 

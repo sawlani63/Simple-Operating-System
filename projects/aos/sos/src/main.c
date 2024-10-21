@@ -23,7 +23,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "sosh"
+#define APP_NAME             "console_test"
 #define APP_PRIORITY         (0)
 #define APP_EP_BADGE         (101)
 
@@ -146,6 +146,12 @@ seL4_MessageInfo_t handle_syscall()
         break;
     case SYSCALL_SOS_GETDIRENT:
         syscall_sos_getdirent(&reply_msg);
+        break;
+    case SYSCALL_SYS_MMAP:
+        syscall_sys_mmap(&reply_msg);
+        break;
+    case SYSCALL_SYS_MUNMAP:
+        syscall_sys_munmap(&reply_msg);
         break;
     default:
         syscall_unknown_syscall(&reply_msg, syscall_number);

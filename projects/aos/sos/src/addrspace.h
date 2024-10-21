@@ -91,11 +91,12 @@ SGLIB_DEFINE_RBTREE_PROTOTYPES(mem_region_t, left, right, colour, compare_region
  */
 
 addrspace_t *as_create();
-mem_region_t *insert_region(addrspace_t *addrspace, size_t base, size_t size, uint64_t perms);
 mem_region_t *as_define_ipc_buff(addrspace_t *as, seL4_Word *initipcbuff);
 mem_region_t *as_define_stack(addrspace_t *as);
 mem_region_t *as_define_heap(addrspace_t *as);
 
 mem_region_t *insert_region(addrspace_t *addrspace, size_t base, size_t size, uint64_t perms);
+mem_region_t *insert_region_at_free_slot(addrspace_t *addrspace, size_t region_size, uint64_t perms);
+void remove_region(addrspace_t *addrspace, size_t base);
 
 #endif
