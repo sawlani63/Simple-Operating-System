@@ -71,7 +71,7 @@ bool handle_vm_fault(seL4_Word fault_addr) {
     } else {
         mem_region_t tmp = { .base = fault_addr };
         reg = sglib_mem_region_t_find_closest_member(as->region_tree, &tmp);
-        if (reg != NULL) {
+        if (reg != NULL && fault_addr < reg->base + reg->size) {
             // Check permissions for write faults
             if (!debug_is_read_fault() && (reg->perms & REGION_WR) == 0) {
                 ZF_LOGE("Trying to write to a read only page");
@@ -146,6 +146,12 @@ seL4_MessageInfo_t handle_syscall()
         break;
     case SYSCALL_SOS_GETDIRENT:
         syscall_sos_getdirent(&reply_msg);
+        break;
+    case SYSCALL_SYS_MMAP:
+        syscall_sys_mmap(&reply_msg);
+        break;
+    case SYSCALL_SYS_MUNMAP:
+        syscall_sys_munmap(&reply_msg);
         break;
     default:
         syscall_unknown_syscall(&reply_msg, syscall_number);

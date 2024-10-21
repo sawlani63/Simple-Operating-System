@@ -56,14 +56,25 @@ long sys_mmap(va_list ap)
     off_t offset = va_arg(ap, off_t);
 
     if (flags & MAP_ANONYMOUS) {
-        /* Check that we don't try and allocate more than exists */
-        if (length > morecore_top - morecore_base) {
-            return -ENOMEM;
-        }
-        /* Steal from the top */
-        morecore_top -= length;
-        return morecore_top;
+        seL4_SetMR(0, SYS_mmap);
+        seL4_SetMR(1, (seL4_Word) addr);
+        seL4_SetMR(2, length);
+        seL4_SetMR(3, prot);
+        seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 4));
+        return seL4_GetMR(0);
     }
     ZF_LOGF("not implemented");
     return -ENOMEM;
+}
+
+long sys_munmap(va_list ap)
+{
+    void *start = va_arg(ap, void *);
+    size_t len = va_arg(ap, size_t);
+
+    seL4_SetMR(0, SYS_munmap);
+    seL4_SetMR(1, (seL4_Word) start);
+    seL4_SetMR(2, len);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 3));
+    return seL4_GetMR(0);
 }

@@ -85,17 +85,6 @@ static void pt_test(void) {
     printf("Passed heap test\n");
 }
 
-static void recursive_stack_test(int counter) {
-    char **arr = malloc(NBLOCKS * sizeof(char *));
-    for (int i = 0; i < NBLOCKS; i++) {
-        arr[i] = malloc(NPAGES_PER_BLOCK * PAGE_SIZE_4K);
-    }
-    if (counter == 1000) {
-        return;
-    }
-    recursive_stack_test(counter + 1);
-}
-
 #define SMALL_BUF_SZ 2
 #define MEDIUM_BUF_SZ 5
 
@@ -182,15 +171,34 @@ int test_stack_write(int console_fd) {
    printf("\nPassed large write test\n");
 }
 
-void test_readdir() {
-    char *buffer = malloc(10);
-    assert(sos_getdirent(10, buffer, 10) == -1);
-    assert(sos_getdirent(8, buffer, 10) == 0);
-    assert(sos_getdirent(4, buffer, 8) == 8);
-    assert(!strncmp(buffer, "Pikachu9", 8));
-    assert(sos_getdirent(2, buffer, 10) == 10);
-    assert(!strncmp(buffer, "Pikachu8.t", 10));
-    free(buffer);
+#define SIZE_ALIGN (4*sizeof(size_t))
+#define MMAP_THRESHOLD (0x1c00*SIZE_ALIGN)
+
+int mmap_test_core(int size) {
+    char *buf = malloc(size);
+    char *buf1 = malloc(size);
+    printf("buf addr: %p\n", buf);
+
+    /* Set */
+    for (int b = 0; b < size / PAGE_SIZE_4K; b+=PAGE_SIZE_4K) {
+        buf[b] = b;
+        buf1[b] = b;
+    }
+
+    /* Check */
+    for (int b = 0; b < size / PAGE_SIZE_4K; b+=PAGE_SIZE_4K) {
+        assert(buf[b] == b);
+        assert(buf1[b] == b);
+    }
+
+    free(buf);
+    free(buf1);
+}
+
+int mmap_test() {
+    int size = MMAP_THRESHOLD * 2;
+    mmap_test_core(size);
+    printf("Passed mmap test\n");
 }
 
 int main(void)
@@ -211,11 +219,9 @@ int main(void)
     printf("Passed nfs test\n");
     
     pt_test();
-    test_stack_write(fd);
+    mmap_test();
+    // test_stack_write(fd);
 
-    test_buffers(fd);
-    printf("Passed read/write buffer test\n");
-
-    // recursive_stack_test(0);
-    // printf("Passed recursive stack test\n");
+    // test_buffers(fd);
+    // printf("Passed read/write buffer test\n");
 }

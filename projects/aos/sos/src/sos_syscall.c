@@ -19,6 +19,26 @@ sync_bin_sem_t *nfs_sem = NULL;
 
 bool handle_vm_fault(seL4_Word fault_addr);
 
+void init_semaphores(void) {
+    data_sem = malloc(sizeof(sync_bin_sem_t));
+    ZF_LOGF_IF(!data_sem, "No memory for semaphore object");
+    ut_t *sem_ut = alloc_retype(&data_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!sem_ut, "No memory for notification");
+    sync_bin_sem_init(data_sem, data_sem_cptr, 1);
+
+    file_sem = malloc(sizeof(sync_bin_sem_t));
+    ZF_LOGF_IF(!file_sem, "No memory for semaphore object");
+    ut_t *data_ut = alloc_retype(&file_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!data_ut, "No memory for notification");
+    sync_bin_sem_init(file_sem, file_sem_cptr, 1);
+
+    nfs_sem = malloc(sizeof(sync_bin_sem_t));
+    ZF_LOGF_IF(!nfs_sem, "No memory for semaphore object");
+    ut_t *nfs_ut = alloc_retype(&nfs_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!nfs_ut, "No memory for notification");
+    sync_bin_sem_init(nfs_sem, nfs_sem_cptr, 0);
+}
+
 static bool vaddr_is_mapped(seL4_Word vaddr) {
     /* We assume the top level is mapped. */
     page_upper_directory *l1_pt = user_process.addrspace->page_table;
@@ -265,22 +285,6 @@ inline void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
     seL4_SetMR(0, timestamp_us(timestamp_get_freq()));
 }
 
-inline void syscall_sys_brk(seL4_MessageInfo_t *reply_msg)
-{
-    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SYS_BRK);
-    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-
-    uintptr_t newbrk = seL4_GetMR(1);
-    if (newbrk <= 0) {
-        seL4_SetMR(0, PROCESS_HEAP_START);        
-    } else if (newbrk >= ALIGN_DOWN(user_process.addrspace->above_heap->base, PAGE_SIZE_4K)) {
-        seL4_SetMR(0, 0);
-    } else {
-        user_process.addrspace->heap_reg->size = newbrk - PROCESS_HEAP_START;
-        seL4_SetMR(0, newbrk);
-    }
-}
-
 void syscall_sos_stat(seL4_MessageInfo_t *reply_msg)
 {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_STAT);
@@ -371,22 +375,70 @@ void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_nu
     seL4_SetMR(0, -1);
 }
 
-void init_semaphores(void) {
-    data_sem = malloc(sizeof(sync_bin_sem_t));
-    ZF_LOGF_IF(!data_sem, "No memory for semaphore object");
-    ut_t *sem_ut = alloc_retype(&data_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
-    ZF_LOGF_IF(!sem_ut, "No memory for notification");
-    sync_bin_sem_init(data_sem, data_sem_cptr, 1);
+inline void syscall_sys_brk(seL4_MessageInfo_t *reply_msg)
+{
+    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SYS_BRK);
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
-    file_sem = malloc(sizeof(sync_bin_sem_t));
-    ZF_LOGF_IF(!file_sem, "No memory for semaphore object");
-    ut_t *data_ut = alloc_retype(&file_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
-    ZF_LOGF_IF(!data_ut, "No memory for notification");
-    sync_bin_sem_init(file_sem, file_sem_cptr, 1);
+    uintptr_t newbrk = seL4_GetMR(1);
+    if (newbrk <= 0) {
+        seL4_SetMR(0, PROCESS_HEAP_START);        
+    } else if (newbrk >= ALIGN_DOWN(user_process.addrspace->above_heap->base, PAGE_SIZE_4K)) {
+        seL4_SetMR(0, 0);
+    } else {
+        user_process.addrspace->heap_reg->size = newbrk - PROCESS_HEAP_START;
+        seL4_SetMR(0, newbrk);
+    }
+}
 
-    nfs_sem = malloc(sizeof(sync_bin_sem_t));
-    ZF_LOGF_IF(!nfs_sem, "No memory for semaphore object");
-    ut_t *nfs_ut = alloc_retype(&nfs_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
-    ZF_LOGF_IF(!nfs_ut, "No memory for notification");
-    sync_bin_sem_init(nfs_sem, nfs_sem_cptr, 0);
+void syscall_sys_mmap(seL4_MessageInfo_t *reply_msg)
+{
+    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SYS_MMAP);
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+
+    /* For malloc, we only care about the first 3 arguments of mmap. Even the 3rd one
+     * we can technically hard-code, but we'll take it in case we want to extend later.*/
+    seL4_Word addr = PAGE_ALIGN(seL4_GetMR(1), PAGE_SIZE_4K);
+    size_t length = PAGE_ALIGN(seL4_GetMR(2), PAGE_SIZE_4K);
+    int prot = seL4_GetMR(3);
+
+    if (!addr) {
+        /* Find the first slot in the user address space where we can insert this region. */
+        mem_region_t *mmap_region = insert_region_at_free_slot(user_process.addrspace, length, prot);
+        if (mmap_region == NULL) {
+            seL4_SetMR(0, -1);
+        } else {
+            assert(mmap_region->base != 0);
+            seL4_SetMR(0, mmap_region->base);
+        }
+    } else {
+        ZF_LOGE("This part of mmap is not implemented!\n");
+        seL4_SetMR(0, -1);
+    }
+}
+
+void syscall_sys_munmap(seL4_MessageInfo_t *reply_msg) {
+    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SYS_MUNMAP);
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+
+    seL4_Word addr = PAGE_ALIGN(seL4_GetMR(1), PAGE_SIZE_4K);
+    size_t length = PAGE_ALIGN(seL4_GetMR(2), PAGE_SIZE_4K);
+
+    mem_region_t tmp = { .base = addr };
+    mem_region_t *reg = sglib_mem_region_t_find_member(user_process.addrspace->region_tree, &tmp);
+    if (reg != NULL) {
+        seL4_SetMR(0, -1);
+    }
+
+    /* Assume the given addr is the start of the address space which is enough for malloc + free:
+     * The free() function frees the memory space pointed to by ptr, which must have been returned
+     * by a previous call to malloc(), calloc() or realloc(). Otherwise, or if free(ptr) has already
+     * been called before, undefined behavior occurs. If ptr is NULL, no operation is performed. */
+    if (length >= reg->size) {
+        remove_region(user_process.addrspace, reg->base);
+    } else {
+        reg->base += length;
+    }
+
+    seL4_SetMR(0, 0);
 }

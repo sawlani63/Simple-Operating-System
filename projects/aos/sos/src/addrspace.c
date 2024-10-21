@@ -64,8 +64,8 @@ mem_region_t *insert_region(addrspace_t *addrspace, size_t base, size_t size, ui
 }
 
 /* Function to insert a memory region of given size into the first available free slot */
-int insert_region_at_free_slot(addrspace_t *addrspace, size_t region_size, uint64_t perms) {
-    size_t last_end = 0;
+mem_region_t *insert_region_at_free_slot(addrspace_t *addrspace, size_t region_size, uint64_t perms) {
+    size_t last_end = PAGE_SIZE_4K; // We want to keep vaddr 0 as NULL!
     size_t start, end;
 
     struct sglib_mem_region_t_iterator it;
@@ -79,15 +79,13 @@ int insert_region_at_free_slot(addrspace_t *addrspace, size_t region_size, uint6
         end = start + region_size - 1;
 
         if (end < reg->base) {
-            insert_region(addrspace, start, region_size, perms);
-            return 1;
+            return insert_region(addrspace, start, region_size, perms);
         }
 
-        last_end = reg->base + reg->size + 1;
+        last_end = reg->base + reg->size;
     }
 
-    insert_region(addrspace, last_end, region_size, perms);
-    return 1;
+    return insert_region(addrspace, last_end, region_size, perms);
 }
 
 /* Function to remove a memory region by its start address */
