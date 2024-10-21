@@ -61,22 +61,26 @@ bool handle_vm_fault(seL4_Word fault_addr) {
     }
 
     /* Check if we're faulting in a valid region. */
-    mem_region_t tmp = { .base = fault_addr };
-    mem_region_t *reg = sglib_mem_region_t_find_closest_member(as->region_tree, &tmp);
-    if (reg != NULL) {
-        // Check permissions for write faults
-        if (!debug_is_read_fault() && (reg->perms & REGION_WR) == 0) {
-            ZF_LOGE("Trying to write to a read only page");
-            return false;
-        }
-    } else if (fault_addr < as->stack_reg->base
-               && ALIGN_DOWN(fault_addr, PAGE_SIZE_4K) >= as->below_stack->base + as->below_stack->size) {
+    mem_region_t *reg;
+    if (fault_addr < as->stack_reg->base
+        && ALIGN_DOWN(fault_addr, PAGE_SIZE_4K) >= as->below_stack->base + as->below_stack->size) {
         /* Expand the stack. */
         as->stack_reg->base = ALIGN_DOWN(fault_addr, PAGE_SIZE_4K);
         as->stack_reg->size = PROCESS_STACK_TOP - ALIGN_DOWN(fault_addr, PAGE_SIZE_4K);
+        reg = as->stack_reg;
     } else {
-        ZF_LOGE("Could not find a valid region for this address");
-        return false;
+        mem_region_t tmp = { .base = fault_addr };
+        reg = sglib_mem_region_t_find_closest_member(as->region_tree, &tmp);
+        if (reg != NULL) {
+            // Check permissions for write faults
+            if (!debug_is_read_fault() && (reg->perms & REGION_WR) == 0) {
+                ZF_LOGE("Trying to write to a read only page");
+                return false;
+            }
+        } else {
+            ZF_LOGE("Could not find a valid region for this address");
+            return false;
+        }
     }
 
     seL4_ARM_VMAttributes attr = seL4_ARM_Default_VMAttributes;
