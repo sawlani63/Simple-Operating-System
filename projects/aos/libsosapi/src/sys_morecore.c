@@ -67,13 +67,11 @@ long sys_mmap(va_list ap)
     return -ENOMEM;
 }
 
-/* Large frees will result in muslc calling munmap, so we do a minimal implementation
-   here to support that. We make a bunch of assumptions in the process */
 long sys_munmap(va_list ap)
 {
     void *start = va_arg(ap, void *);
     size_t len = va_arg(ap, size_t);
-    
+
     seL4_SetMR(0, SYS_munmap);
     seL4_SetMR(1, (seL4_Word) start);
     seL4_SetMR(2, len);

@@ -23,7 +23,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "console_test"
+#define APP_NAME             "sosh"
 #define APP_PRIORITY         (0)
 #define APP_EP_BADGE         (101)
 
@@ -71,7 +71,7 @@ bool handle_vm_fault(seL4_Word fault_addr) {
     } else {
         mem_region_t tmp = { .base = fault_addr };
         reg = sglib_mem_region_t_find_closest_member(as->region_tree, &tmp);
-        if (reg != NULL) {
+        if (reg != NULL && fault_addr < reg->base + reg->size) {
             // Check permissions for write faults
             if (!debug_is_read_fault() && (reg->perms & REGION_WR) == 0) {
                 ZF_LOGE("Trying to write to a read only page");

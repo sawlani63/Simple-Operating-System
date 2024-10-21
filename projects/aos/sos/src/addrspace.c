@@ -82,7 +82,7 @@ mem_region_t *insert_region_at_free_slot(addrspace_t *addrspace, size_t region_s
             return insert_region(addrspace, start, region_size, perms);
         }
 
-        last_end = reg->base + reg->size + 1;
+        last_end = reg->base + reg->size;
     }
 
     return insert_region(addrspace, last_end, region_size, perms);

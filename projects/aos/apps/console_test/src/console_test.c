@@ -174,23 +174,30 @@ int test_stack_write(int console_fd) {
 #define SIZE_ALIGN (4*sizeof(size_t))
 #define MMAP_THRESHOLD (0x1c00*SIZE_ALIGN)
 
-int mmap_test() {
-    int size = MMAP_THRESHOLD * 2;
+int mmap_test_core(int size) {
     char *buf = malloc(size);
+    char *buf1 = malloc(size);
     printf("buf addr: %p\n", buf);
 
     /* Set */
     for (int b = 0; b < size / PAGE_SIZE_4K; b+=PAGE_SIZE_4K) {
         buf[b] = b;
+        buf1[b] = b;
     }
 
     /* Check */
     for (int b = 0; b < size / PAGE_SIZE_4K; b+=PAGE_SIZE_4K) {
         assert(buf[b] == b);
+        assert(buf1[b] == b);
     }
 
     free(buf);
+    free(buf1);
+}
 
+int mmap_test() {
+    int size = MMAP_THRESHOLD * 2;
+    mmap_test_core(size);
     printf("Passed mmap test\n");
 }
 
