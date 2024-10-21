@@ -14,7 +14,9 @@ typedef struct _region {
     seL4_Word base;
     size_t size;
     uint64_t perms;
-    struct _region *next;
+    struct _region *left;
+    struct _region *right;
+    char colour;
 } mem_region_t;
 
 /* Needs to sum to 64 bits to be properly byte aligned. */
@@ -59,8 +61,16 @@ typedef struct pt_l1 {
 
 typedef struct addrspace {
     page_upper_directory *page_table;
-    mem_region_t *regions;
+    mem_region_t *region_tree;
+
+    mem_region_t *stack_reg;
+    mem_region_t *below_stack;
+
+    mem_region_t *heap_reg;
+    mem_region_t *above_heap;
 } addrspace_t;
+
+SGLIB_DEFINE_RBTREE_PROTOTYPES(mem_region_t, left, right, colour, compare_regions)
 
 /*
  * Functions in addrspace.c:
@@ -81,9 +91,11 @@ typedef struct addrspace {
  */
 
 addrspace_t *as_create();
-mem_region_t *as_define_region(addrspace_t *as, seL4_Word vaddr, size_t memsize, unsigned char perms);
+mem_region_t *insert_region(addrspace_t *addrspace, size_t base, size_t size, uint64_t perms);
 mem_region_t *as_define_ipc_buff(addrspace_t *as, seL4_Word *initipcbuff);
 mem_region_t *as_define_stack(addrspace_t *as);
 mem_region_t *as_define_heap(addrspace_t *as);
+
+mem_region_t *insert_region(addrspace_t *addrspace, size_t base, size_t size, uint64_t perms);
 
 #endif
