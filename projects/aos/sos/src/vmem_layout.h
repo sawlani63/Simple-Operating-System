@@ -28,8 +28,7 @@
 #define SOS_FRAME_DATA       		(0x8200000000)
 
 /* Constants for how SOS will layout the address space of any processes it loads up */
-#define PROCESS_STACK_TOP   		(0x8500000000) // Stack has 2GB to grow down until reaching heap
-#define PROCESS_HEAP_START   		(0x8400000000) // Heap has 2GB to grow up until reaching stack
-#define PROCESS_IPC_BUFFER  		(0x83FFF00000) // IPC Buffer has 1MB to grow up until reaching heap
+#define PROCESS_STACK_TOP   		(0x200000000) // Stack has 2GB to grow down until reaching heap
+#define PROCESS_HEAP_START   		(0x100000000) // Heap has 2GB to grow up until reaching stack
+#define PROCESS_IPC_BUFFER  		(0xFFFFF000) // IPC Buffer has 4KB to grow up until reaching heap
 #define PROCESS_VMEM_START  		(0xC0000000)
-

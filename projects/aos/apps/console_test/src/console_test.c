@@ -33,7 +33,7 @@
 
 #define NBLOCKS 9
 #define NPAGES_PER_BLOCK 28
-#define TEST_ADDRESS 0x1000000000
+#define TEST_ADDRESS 0x100000000
 
 /* called from pt_test */
 static void do_pt_test(char **buf) {

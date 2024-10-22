@@ -424,16 +424,16 @@ void syscall_sys_munmap(seL4_MessageInfo_t *reply_msg) {
     seL4_Word addr = PAGE_ALIGN(seL4_GetMR(1), PAGE_SIZE_4K);
     size_t length = PAGE_ALIGN(seL4_GetMR(2), PAGE_SIZE_4K);
 
+    /* Assume the given addr is the start of the address space which is enough for malloc + free:
+     * The free() function frees the memory space pointed to by ptr, which must have been returned
+     * by a previous call to malloc(), calloc() or realloc(). Otherwise, or if free(ptr) has already
+     * been called before, undefined behavior occurs. If ptr is NULL, no operation is performed. */
     mem_region_t tmp = { .base = addr };
     mem_region_t *reg = sglib_mem_region_t_find_member(user_process.addrspace->region_tree, &tmp);
     if (reg != NULL) {
         seL4_SetMR(0, -1);
     }
 
-    /* Assume the given addr is the start of the address space which is enough for malloc + free:
-     * The free() function frees the memory space pointed to by ptr, which must have been returned
-     * by a previous call to malloc(), calloc() or realloc(). Otherwise, or if free(ptr) has already
-     * been called before, undefined behavior occurs. If ptr is NULL, no operation is performed. */
     if (length >= reg->size) {
         remove_region(user_process.addrspace, reg->base);
     } else {
