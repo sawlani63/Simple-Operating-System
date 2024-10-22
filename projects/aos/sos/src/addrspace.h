@@ -91,7 +91,7 @@ SGLIB_DEFINE_RBTREE_PROTOTYPES(mem_region_t, left, right, colour, compare_region
  */
 
 addrspace_t *as_create();
-mem_region_t *as_define_ipc_buff(addrspace_t *as, seL4_Word *initipcbuff);
+mem_region_t *as_define_ipc_buff(addrspace_t *as);
 mem_region_t *as_define_stack(addrspace_t *as);
 mem_region_t *as_define_heap(addrspace_t *as);
 

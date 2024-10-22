@@ -130,8 +130,7 @@ addrspace_t *as_create() {
 	return as;
 }
 
-mem_region_t *as_define_ipc_buff(addrspace_t *as, seL4_Word *initipcbuff) {
-    *initipcbuff = PROCESS_IPC_BUFFER;
+mem_region_t *as_define_ipc_buff(addrspace_t *as) {
     return insert_region(as, PROCESS_IPC_BUFFER, PAGE_SIZE_4K, REGION_RD | REGION_WR);
 }
 

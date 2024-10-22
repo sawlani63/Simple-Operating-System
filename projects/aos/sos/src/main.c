@@ -672,7 +672,6 @@ NORETURN void *main_continued(UNUSED void *arg)
     seL4_Error bind_err = seL4_TCB_UnbindNotification(seL4_CapInitThreadTCB);
     ZF_LOGF_IFERR(err, "Failed to unbind notification object");
     /* Initialize a temporary irq handling thread that binds the notification object to its TCB and handles irqs until the main thread is done with its tasks */
-    /* Current state = running */
     sos_thread_t *irq_temp_thread = thread_create(irq_loop, (void *)ipc_ep, 0, true, seL4_MaxPrio, ntfn, false);
     if (irq_temp_thread == NULL) {
         ZF_LOGE("Could not create irq handler thread\n");
