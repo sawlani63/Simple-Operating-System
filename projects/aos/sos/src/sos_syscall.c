@@ -137,10 +137,6 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg)
     int path_len = seL4_GetMR(2);
     int mode = seL4_GetMR(3);
 
-    extern sync_bin_sem_t *nfs_open_sem;
-    sync_bin_sem_wait(nfs_open_sem);
-    sync_bin_sem_post(nfs_open_sem);
-
     ZF_LOGV("syscall: thread example made syscall %d!\n", SYSCALL_SOS_OPEN);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);

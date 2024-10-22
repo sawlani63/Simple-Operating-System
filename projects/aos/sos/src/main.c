@@ -23,7 +23,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "sosh"
+#define APP_NAME             "console_test"
 #define APP_PRIORITY         (0)
 #define APP_EP_BADGE         (101)
 
@@ -49,8 +49,9 @@ struct user_process user_process;
 
 struct network_console *console;
 
-seL4_CPtr nfs_open_sem_cptr;
-sync_bin_sem_t *nfs_open_sem = NULL;
+extern sync_bin_sem_t *nfs_sem;
+
+open_file *nfs_pagefile;
 
 bool handle_vm_fault(seL4_Word fault_addr) {
     addrspace_t *as = user_process.addrspace;
@@ -209,8 +210,9 @@ NORETURN void syscall_loop(void *arg)
     }
 }
 
-NORETURN void irq_loop(seL4_CPtr ep)
+NORETURN void irq_loop(void *ipc_ep)
 {
+    seL4_CPtr ep = (seL4_CPtr) ipc_ep;
     seL4_CPtr reply;
 
     /* Create reply object */
@@ -648,17 +650,33 @@ NORETURN void *main_continued(UNUSED void *arg)
     user_process.fdt = fdt_create(&err);
     ZF_LOGF_IF(err, "Failed to initialise the per-process file descriptor table");
 
+    /* Initialise semaphores for synchronisation */
+    init_nfs_sem();
+    init_semaphores();
+
+    /*irq_sem = malloc(sizeof(sync_bin_sem_t));
+    ZF_LOGF_IF(!irq_sem, "No memory for semaphore object");
+    ut_t *irq_ut = alloc_retype(&irq_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!irq_ut, "No memory for notification");
+    sync_bin_sem_init(irq_sem, irq_sem_cptr, 0);*/
+
     /* Initialise the network hardware. */
     printf("Network init\n");
-    nfs_open_sem = malloc(sizeof(sync_bin_sem_t));
-    ut_t *nfs_sem_ut = alloc_retype(&nfs_open_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
-    ZF_LOGF_IF(!nfs_sem_ut, "No memory for notification");
-    sync_bin_sem_init(nfs_open_sem, nfs_open_sem_cptr, 0);
 
-    network_init(&cspace, timer_vaddr, ntfn, nfs_open_sem);
+    network_init(&cspace, timer_vaddr, ntfn);
     console = network_console_init();
     network_console_register_handler(console, enqueue);
     init_console_sem();
+
+    /* After the main thread is done handling irqs in network_init, unbind the notification object from the main thread's TCB */
+    seL4_Error bind_err = seL4_TCB_UnbindNotification(seL4_CapInitThreadTCB);
+    ZF_LOGF_IFERR(err, "Failed to unbind notification object");
+    /* Initialize a temporary irq handling thread that binds the notification object to its TCB and handles irqs until the main thread is done with its tasks */
+    /* Current state = running */
+    sos_thread_t *irq_temp_thread = thread_create(irq_loop, (void *)ipc_ep, 0, true, seL4_MaxPrio, ntfn, false);
+    if (irq_temp_thread == NULL) {
+        ZF_LOGE("Could not create irq handler thread\n");
+    }
     
     open_file *file = file_create("console", O_WRONLY, network_console_send, deque);
     uint32_t fd;
@@ -666,6 +684,15 @@ NORETURN void *main_continued(UNUSED void *arg)
     ZF_LOGF_IF(err, "No memory for new file object");
     err = fdt_put(user_process.fdt, file, &fd); // initialise stderr
     ZF_LOGF_IF(err, "No memory for new file object");
+
+    nfs_pagefile = file_create("pagefile", O_RDWR, nfs_write_file, nfs_read_file);
+    nfs_args args = {.sem = nfs_sem};
+    /* Wait for NFS to finish mounting */
+    sync_bin_sem_wait(nfs_sem);
+    /* Open the pagefile on NFS so we can read/write to/from it for demand paging */
+    int error = nfs_open_file("pagefile", O_RDWR, nfs_async_open_cb, &args);
+    ZF_LOGF_IF(error, "NFS: Error in opening pagefile");
+    nfs_pagefile->handle = args.buff;
 
 #ifdef CONFIG_SOS_GDB_ENABLED
     /* Initialize the debugger */
@@ -691,15 +718,19 @@ NORETURN void *main_continued(UNUSED void *arg)
     bool success = start_first_process(APP_NAME);
     ZF_LOGF_IF(!success, "Failed to start first process");
 
-    /* Initialise semaphores for synchronisation */
-    init_nfs_sem();
-    init_semaphores();
-
     /* Creating thread pool */
     // initialise_thread_pool(handle_syscall);
 
+    /* Since our main thread has no other tasks left, we swap the task of irq handling from the temp thread to our main thread, and destroy our temp thread */
+    seL4_TCB_UnbindNotification(irq_temp_thread->tcb);
+    //error = thread_destroy(irq_temp_thread); gets stuck somewhere (inconsistent)
+    ZF_LOGF_IFERR(error, "Failed to destroy the temp irq thread");
+    bind_err = seL4_TCB_BindNotification(seL4_CapInitThreadTCB, ntfn);
+    ZF_LOGF_IFERR(bind_err, "Failed to bind notification object to TCB");
     printf("\nSOS entering syscall loop\n");
-    irq_loop(ipc_ep);
+    /* Continue with the syscall */
+    //sync_bin_sem_post(irq_sem);
+    irq_loop((void *) ipc_ep);
 }
 /*
  * Main entry point - called by crt.
