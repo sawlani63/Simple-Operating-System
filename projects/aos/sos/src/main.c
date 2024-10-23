@@ -9,7 +9,7 @@
  *
  * @TAG(DATA61_GPL)
  */
-#include "sos_syscall.h"
+#include "clock_replacement.h"
 
 /*
  * To differentiate between signals from notification objects and and IPC messages,
@@ -61,6 +61,10 @@ bool handle_vm_fault(seL4_Word fault_addr) {
         return false;
     }
 
+    if (!clock_try_page_in(fault_addr)) {
+        return true;
+    }
+
     /* Check if we're faulting in a valid region. */
     mem_region_t *reg;
     if (fault_addr < as->stack_reg->base
@@ -93,9 +97,9 @@ bool handle_vm_fault(seL4_Word fault_addr) {
     }
 
     /* Allocate a new frame to be mapped by the shadow page table. */
-    frame_ref_t frame_ref = alloc_frame();
+    frame_ref_t frame_ref = clock_alloc_page(fault_addr);
     if (frame_ref == NULL_FRAME) {
-        /* We could not allocate a new frame, so we will page out an existing entry and try again. */
+        ZF_LOGE("Weird error occurred, could not allocate a frame in vm fault");
     }
 
     /* Map the frame into the relevant page tables. */
@@ -256,20 +260,20 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
         return -1;
     }
 
-    /* Create a stack frame */
-    user_process.stack_frame = alloc_frame();
-    if (user_process.stack_frame == NULL_FRAME) {
-        ZF_LOGD("Failed to alloc frame");
-        return -1;
-    }
-    user_process.stack = frame_page(user_process.stack_frame);
-
     /* virtual addresses in the target process' address space */
     uintptr_t stack_top = PROCESS_STACK_TOP;
     uintptr_t stack_bottom = PROCESS_STACK_TOP - PAGE_SIZE_4K;
     /* virtual addresses in the SOS's address space */
     void *local_stack_top  = (seL4_Word *) SOS_SCRATCH;
     uintptr_t local_stack_bottom = SOS_SCRATCH - PAGE_SIZE_4K;
+
+    /* Create a stack frame */
+    user_process.stack_frame = clock_alloc_page(stack_bottom);
+    if (user_process.stack_frame == NULL_FRAME) {
+        ZF_LOGD("Failed to alloc frame");
+        return -1;
+    }
+    user_process.stack = frame_page(user_process.stack_frame);
 
     /* find the vsyscall table */
     uintptr_t *sysinfo = (uintptr_t *) elf_getSectionNamed(elf_file, "__vsyscall", NULL);
@@ -362,9 +366,8 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
     /* Exend the stack with extra pages */
     for (int page = 0; page < INITIAL_PROCESS_EXTRA_STACK_PAGES; page++) {
         stack_bottom -= PAGE_SIZE_4K;
-        frame_ref_t frame = alloc_frame();
+        frame_ref_t frame = clock_alloc_page(stack_bottom);
         if (frame == NULL_FRAME) {
-            ZF_LOGE("Couldn't allocate additional stack frame");
             return 0;
         }
 
@@ -415,8 +418,10 @@ bool start_first_process(char *app_name)
     /* Initialise the process address space */
     user_process.addrspace = as_create();
 
+    as_define_ipc_buff(user_process.addrspace);
+
     /* Create an IPC buffer */
-    user_process.ipc_buffer_frame = alloc_frame();
+    user_process.ipc_buffer_frame = clock_alloc_page(PROCESS_IPC_BUFFER);
     if (user_process.ipc_buffer_frame == NULL_FRAME) {
         ZF_LOGE("Failed to alloc ipc buffer ut");
         return false;
@@ -511,19 +516,19 @@ bool start_first_process(char *app_name)
         return false;
     }
 
-    /* load the elf image from the cpio file */
-    err = elf_load(&cspace, user_process.vspace, &elf_file, user_process.addrspace);
-    if (err) {
-        ZF_LOGE("Failed to load elf image");
-        return false;
-    }
-
     /* Map in the IPC buffer for the thread */
     err = sos_map_frame(&cspace, user_process.vspace, PROCESS_IPC_BUFFER, seL4_AllRights,
                         seL4_ARM_Default_VMAttributes | seL4_ARM_ExecuteNever,
                         user_process.ipc_buffer_frame, user_process.addrspace);
     if (err != 0) {
         ZF_LOGE("Unable to map IPC buffer for user app");
+        return false;
+    }
+
+    /* load the elf image from the cpio file */
+    err = elf_load(&cspace, user_process.vspace, &elf_file, user_process.addrspace);
+    if (err) {
+        ZF_LOGE("Failed to load elf image");
         return false;
     }
 
@@ -693,6 +698,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     int error = nfs_open_file("pagefile", O_RDWR, nfs_async_open_cb, &args);
     ZF_LOGF_IF(error, "NFS: Error in opening pagefile");
     nfs_pagefile->handle = args.buff;
+    init_bitmap();
 
 #ifdef CONFIG_SOS_GDB_ENABLED
     /* Initialize the debugger */

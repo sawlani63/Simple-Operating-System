@@ -52,6 +52,7 @@
         "tuple": "cpp",
         "type_traits": "cpp",
         "unordered_map": "c",
-        "unordered_set": "c"
+        "unordered_set": "c",
+        "clock_replacement.h": "c"
     }
 }
