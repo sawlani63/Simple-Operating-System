@@ -79,8 +79,7 @@ int sos_write(int file, const char *buf, size_t nbyte)
     seL4_SetMR(1, file);
     seL4_SetMR(2, (seL4_Word) buf);
     seL4_SetMR(3, nbyte);
-    seL4_SetMR(4, 6969696969);
-    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 5));
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 4));
     return seL4_GetMR(0);
 }
 

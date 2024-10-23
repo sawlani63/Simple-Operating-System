@@ -68,13 +68,6 @@ static inline uint64_t get_page_file_offset() {
     return swap_map_index * PAGE_SIZE_4K;
 }
 
-static void unmap_page(seL4_CPtr frame_cptr, frame_ref_t frame_ref) {
-    seL4_Error err = seL4_ARM_Page_Unmap(frame_cptr);
-    ZF_LOGF_IFERR(err != seL4_NoError, "Failed to unmap page");
-    free_untype(&frame_cptr, NULL);
-    free_frame(frame_ref);
-}
-
 /**
  * Identifies a candidate to page out, and writes it into the paging file on the nfs.
  * The corresponding frame is then unmapped from the hardware page table.
@@ -92,7 +85,8 @@ static int clock_page_out() {
                 break;
             }
             GET_PAGE(as->page_table, vaddr).page.ref = 0;
-            // unmap_page(entry.page.frame_cptr, entry.page.frame_ref);
+            seL4_Error err = seL4_ARM_Page_Unmap(entry.page.frame_cptr);
+            ZF_LOGF_IFERR(err != seL4_NoError, "Failed to unmap page");
         }
         clock_hand = (clock_hand + 1) % BUFFER_SIZE;
     }
@@ -106,9 +100,13 @@ static int clock_page_out() {
     }
 
     seL4_CPtr frame_cptr = entry.page.frame_cptr;
-    unmap_page(frame_cptr, entry.page.frame_ref);
+    seL4_Error err = seL4_ARM_Page_Unmap(frame_cptr);
+    ZF_LOGF_IFERR(err != seL4_NoError, "Failed to unmap page");
+    free_untype(&frame_cptr, NULL);
+    free_frame(entry.page.frame_ref);
 
-    pt_entry new_entry = {.present = 0, .swapped = 1, .pinned = 0, .swap_map_index = file_offset / PAGE_SIZE_4K};
+    pt_entry new_entry = {.valid = 0, .swapped = 1, .pinned = 0 , .perms = GET_PAGE(as->page_table, vaddr).perms,
+                          .swap_map_index = file_offset / PAGE_SIZE_4K};
     GET_PAGE(as->page_table, vaddr) = new_entry;
     return 0;
 }
@@ -125,5 +123,60 @@ int clock_add_page(seL4_Word vaddr) {
     circular_buffer[clock_hand] = vaddr;
     clock_hand = (clock_hand + 1) % BUFFER_SIZE;
 
+    return 0;
+}
+
+int clock_try_page_in(seL4_Word vaddr, addrspace_t *as) {
+    uint16_t l1_index = (vaddr >> 39) & MASK(9); /* Top 9 bits */
+    uint16_t l2_index = (vaddr >> 30) & MASK(9); /* Next 9 bits */
+    uint16_t l3_index = (vaddr >> 21) & MASK(9); /* Next 9 bits */
+    uint16_t l4_index = (vaddr >> 12) & MASK(9); /* Next 9 bits */
+
+    page_upper_directory *l1_pt = as->page_table;
+    if (l1_pt[l1_index].l2 == NULL) {
+        return 1;
+    }
+
+    page_directory *l2_pt = l1_pt[l1_index].l2;
+    if (l2_pt[l2_index].l3 == NULL) {
+        return 1;
+    }
+
+    page_table *l3_pt = l2_pt[l2_index].l3;
+    if (l3_pt[l3_index].l4 == NULL) {
+        return 1;
+    }
+
+    pt_entry *l4_pt = l3_pt[l3_index].l4;
+    frame_ref_t frame_ref = NULL_FRAME;
+    if (l4_pt[l4_index].valid && !l4_pt[l4_index].page.ref) {
+        l4_pt[l4_index].page.ref = 1;
+        frame_ref = l4_pt[l4_index].page.frame_ref;
+    } else if (l4_pt[l4_index].swapped == 1) {
+        /* Allocate a new frame to be mapped by the shadow page table. */
+        frame_ref = clock_alloc_frame(vaddr);
+        if (frame_ref == NULL_FRAME) {
+            ZF_LOGD("Failed to alloc frame");
+            return -1;
+        }
+
+        uint64_t file_offset = l4_pt[l4_index].swap_map_index * PAGE_SIZE_4K;
+        char *data = (char *)frame_data(frame_ref);
+        nfs_args args = {PAGE_SIZE_4K, data, nfs_sem};
+        int res = nfs_pread_file(nfs_pagefile->handle, file_offset, PAGE_SIZE_4K, nfs_async_read_cb, &args);
+        if (res < (int)PAGE_SIZE_4K) {
+            return -1;
+        }
+        
+        mark_block_free(file_offset / PAGE_SIZE_4K);
+    } else {
+        return 1;
+    }
+
+    assert(frame_ref != NULL_FRAME);
+    if (sos_map_frame(&cspace, user_process.vspace, vaddr, l4_pt[l4_index].perms, frame_ref, as) != 0) {
+        ZF_LOGE("Could not map the frame into the two page tables");
+        return -1;
+    }
     return 0;
 }
