@@ -137,10 +137,6 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg)
     int path_len = seL4_GetMR(2);
     int mode = seL4_GetMR(3);
 
-    extern sync_bin_sem_t *nfs_open_sem;
-    sync_bin_sem_wait(nfs_open_sem);
-    sync_bin_sem_post(nfs_open_sem);
-
     ZF_LOGV("syscall: thread example made syscall %d!\n", SYSCALL_SOS_OPEN);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
@@ -247,6 +243,7 @@ void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
     int write_fd = seL4_GetMR(1);
     seL4_Word vaddr = seL4_GetMR(2);
     size_t nbyte = seL4_GetMR(3);
+    assert(6969696969 == seL4_GetMR(4));
 
     /* Find the file associated with the file descriptor */
     open_file *found = fdt_get_file(user_process.fdt, write_fd);
@@ -370,7 +367,7 @@ void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg)
 void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number)
 {
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    ZF_LOGE("System call %lu not implemented\n", syscall_number);
+    ZF_LOGV("System call %lu not implemented\n", syscall_number);
     /* Reply -1 to an unimplemented syscall */
     seL4_SetMR(0, -1);
 }

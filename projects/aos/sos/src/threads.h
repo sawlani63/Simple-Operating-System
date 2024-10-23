@@ -49,3 +49,5 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
                             seL4_CPtr bound_ntfn, bool debugger_add);
 int thread_suspend(sos_thread_t *thread);
 int thread_resume(sos_thread_t *thread);
+
+int thread_destroy(sos_thread_t *thread);

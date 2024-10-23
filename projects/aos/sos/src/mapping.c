@@ -171,8 +171,8 @@ seL4_Error sos_map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr
     return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, page_table);
 }
 
-seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, seL4_CapRights_t rights,
-                         seL4_ARM_VMAttributes attr, frame_ref_t frame_ref, addrspace_t *as)
+seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
+                         size_t perms, frame_ref_t frame_ref, addrspace_t *as)
 {
     /* We assume SOS provided us with a valid, unmapped vaddr and isn't confusing any permissions. */
 
@@ -228,8 +228,27 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, se
         return err;
     }
 
-    pt_entry entry = {.present = 1, .page = {frame_ref, frame_cap}};
+    pt_entry entry = {.present = 1, .swapped = 0, .perms = perms, .pinned = 0, .page = {1, frame_ref, frame_cap}};
+    if (vaddr == PROCESS_IPC_BUFFER) {
+        entry.pinned = 1;
+    }
     l4_pt[l4_index] = entry;
+
+    /* Assign the appropriate rights and attributes for the frame we are about to map. */
+    bool canRead = (perms & REGION_RD || (perms & REGION_EX) >> 2);
+    bool canWrite = (perms & REGION_WR) >> 1;
+
+    seL4_CapRights_t rights;
+    if (!canRead && !canWrite) {
+        rights = seL4_AllRights;
+    } else {
+        rights = seL4_CapRights_new(false, false, canRead, canWrite);
+    }
+
+    seL4_ARM_VMAttributes attr = seL4_ARM_Default_VMAttributes;
+    if (!(perms & REGION_EX)) {
+        attr |= seL4_ARM_ExecuteNever;
+    }
 
     return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, l1_pt);
 }

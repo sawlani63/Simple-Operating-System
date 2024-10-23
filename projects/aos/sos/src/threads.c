@@ -71,6 +71,21 @@ static bool alloc_stack(seL4_Word *sp)
     return true;
 }
 
+static bool dealloc_stack(ut_t *stack_ut, seL4_CPtr stack)
+{
+    for (int i = 0; i < SOS_STACK_PAGES; i++) {
+        seL4_Error err = seL4_ARM_Page_Unmap(stack);
+        if (err != seL4_NoError) {
+            ZF_LOGE("Failed to unmap stack");
+            return false;
+        }
+        stack -= PAGE_SIZE_4K;
+    }
+    free_untype(&stack, stack_ut); // probs doesnt work because stack CPtr isnt retyped
+    return true;
+    //need to improve this function
+}
+
 int thread_suspend(sos_thread_t *thread)
 {
     return seL4_TCB_Suspend(thread->tcb);
@@ -283,6 +298,35 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
 #endif
 
     return new_thread;
+}
+
+int thread_destroy(sos_thread_t *thread)
+{
+    if (thread == NULL) {
+        return 1;
+    }
+    seL4_Error err = seL4_ARM_Page_Unmap(thread->ipc_buffer);
+    if (err != seL4_NoError) {
+        ZF_LOGE("Unable to unmap ipc buffer");
+        return 1;
+    }
+    /*if (!dealloc_stack(thread->stack_ut, thread->stack)) {
+        ZF_LOGE("Unable to dealloc stack");
+        return 1;
+    }*/ // doesnt work rn
+    err = seL4_TCB_UnbindNotification(thread->tcb);
+    if (err != seL4_NoError) {
+        ZF_LOGE("Unable to unbind notification");
+        return 1;
+    }
+    free_untype(&thread->sched_context, thread->sched_context_ut);
+    free_untype(&thread->tcb, thread->tcb_ut);
+    cspace_delete(&cspace, thread->user_ep);
+    cspace_free_slot(&cspace, thread->user_ep);
+    free(thread->tls_base);
+    free_untype(&thread->ipc_buffer, thread->ipc_buffer_ut);
+    free(thread);
+    return 0;
 }
 
 /*

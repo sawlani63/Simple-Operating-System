@@ -9,7 +9,7 @@
  *
  * @TAG(DATA61_GPL)
  */
-#include "sos_syscall.h"
+#include "clock_replacement.h"
 
 /*
  * To differentiate between signals from notification objects and and IPC messages,
@@ -23,7 +23,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "sosh"
+#define APP_NAME             "console_test"
 #define APP_PRIORITY         (0)
 #define APP_EP_BADGE         (101)
 
@@ -49,8 +49,9 @@ struct user_process user_process;
 
 struct network_console *console;
 
-seL4_CPtr nfs_open_sem_cptr;
-sync_bin_sem_t *nfs_open_sem = NULL;
+extern sync_bin_sem_t *nfs_sem;
+
+open_file *nfs_pagefile;
 
 bool handle_vm_fault(seL4_Word fault_addr) {
     addrspace_t *as = user_process.addrspace;
@@ -78,27 +79,51 @@ bool handle_vm_fault(seL4_Word fault_addr) {
                 return false;
             }
         } else {
-            ZF_LOGE("Could not find a valid region for this address");
+            ZF_LOGE("Could not find a valid region for this address: %p", (void*) fault_addr);
             return false;
         }
     }
 
-    seL4_ARM_VMAttributes attr = seL4_ARM_Default_VMAttributes;
-
-    /* Assign the appropriate rights for the frame we are about to map. */
-    seL4_CapRights_t rights = seL4_CapRights_new(0, 0, reg->perms & REGION_RD, (reg->perms & REGION_WR) >> 1);
-    if (!(reg->perms & REGION_EX)) {
-        attr |= seL4_ARM_ExecuteNever;
+    /* Allocate a new frame to be mapped by the shadow page table. */
+    frame_ref_t frame_ref = clock_alloc_frame(fault_addr);
+    if (frame_ref == NULL_FRAME) {
+        ZF_LOGD("Failed to alloc frame");
+        return false;
     }
 
-    /* Allocate a new frame to be mapped by the shadow page table. */
-    frame_ref_t frame_ref = alloc_frame();
-    if (frame_ref == NULL_FRAME) {
-        /* We could not allocate a new frame, so we will page out an existing entry and try again. */
+    uint16_t l1_index = (fault_addr >> 39) & MASK(9); /* Top 9 bits */
+    uint16_t l2_index = (fault_addr >> 30) & MASK(9); /* Next 9 bits */
+    uint16_t l3_index = (fault_addr >> 21) & MASK(9); /* Next 9 bits */
+    uint16_t l4_index = (fault_addr >> 12) & MASK(9); /* Next 9 bits */
+
+    page_upper_directory *l1_pt = as->page_table;
+    page_directory *l2_pt = NULL;
+    page_table *l3_pt = NULL;
+    pt_entry *l4_pt = NULL;
+    if (l1_pt[l1_index].l2 != NULL) {
+        l2_pt = l1_pt[l1_index].l2;
+        if (l2_pt[l2_index].l3 != NULL) {
+            l3_pt = l2_pt[l2_index].l3;
+            if (l3_pt[l3_index].l4 != NULL) {
+                l4_pt = l3_pt[l3_index].l4;
+            }
+        }
+    }
+
+    if (l4_pt != NULL && l4_pt[l4_index].swapped == 1) {
+        uint64_t file_offset = l4_pt[l4_index].swap_map_index * PAGE_SIZE_4K;
+        char *data = (char *)frame_data(frame_ref);
+        nfs_args args = {PAGE_SIZE_4K, data, nfs_sem};
+        int res = nfs_pread_file(nfs_pagefile->handle, file_offset, PAGE_SIZE_4K, nfs_async_read_cb, &args);
+        if (res < (int)PAGE_SIZE_4K) {
+            return false;
+        }
+        
+        mark_block_free(file_offset / PAGE_SIZE_4K);
     }
 
     /* Map the frame into the relevant page tables. */
-    if (sos_map_frame(&cspace, user_process.vspace, fault_addr, rights, attr, frame_ref, as) != 0) {
+    if (sos_map_frame(&cspace, user_process.vspace, fault_addr, reg->perms, frame_ref, as) != 0) {
         ZF_LOGE("Could not map the frame into the two page tables");
         return false;
     }
@@ -209,8 +234,9 @@ NORETURN void syscall_loop(void *arg)
     }
 }
 
-NORETURN void irq_loop(seL4_CPtr ep)
+NORETURN void irq_loop(void *ipc_ep)
 {
+    seL4_CPtr ep = (seL4_CPtr) ipc_ep;
     seL4_CPtr reply;
 
     /* Create reply object */
@@ -254,20 +280,20 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
         return -1;
     }
 
-    /* Create a stack frame */
-    user_process.stack_frame = alloc_frame();
-    if (user_process.stack_frame == NULL_FRAME) {
-        ZF_LOGD("Failed to alloc frame");
-        return -1;
-    }
-    user_process.stack = frame_page(user_process.stack_frame);
-
     /* virtual addresses in the target process' address space */
     uintptr_t stack_top = PROCESS_STACK_TOP;
     uintptr_t stack_bottom = PROCESS_STACK_TOP - PAGE_SIZE_4K;
     /* virtual addresses in the SOS's address space */
     void *local_stack_top  = (seL4_Word *) SOS_SCRATCH;
     uintptr_t local_stack_bottom = SOS_SCRATCH - PAGE_SIZE_4K;
+
+    /* Create a stack frame */
+    user_process.stack_frame = clock_alloc_frame(stack_bottom);
+    if (user_process.stack_frame == NULL_FRAME) {
+        ZF_LOGD("Failed to alloc frame");
+        return -1;
+    }
+    user_process.stack = frame_page(user_process.stack_frame);
 
     /* find the vsyscall table */
     uintptr_t *sysinfo = (uintptr_t *) elf_getSectionNamed(elf_file, "__vsyscall", NULL);
@@ -277,8 +303,7 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
     }
 
     /* Map in the stack frame for the user app */
-    seL4_Error err = sos_map_frame(cspace, user_process.vspace, stack_bottom, seL4_AllRights,
-                                   seL4_ARM_Default_VMAttributes | seL4_ARM_ExecuteNever,
+    seL4_Error err = sos_map_frame(cspace, user_process.vspace, stack_bottom, REGION_RD | REGION_WR,
                                    user_process.stack_frame, user_process.addrspace);
     if (err != 0) {
         ZF_LOGE("Unable to map stack for user app");
@@ -360,15 +385,14 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
     /* Exend the stack with extra pages */
     for (int page = 0; page < INITIAL_PROCESS_EXTRA_STACK_PAGES; page++) {
         stack_bottom -= PAGE_SIZE_4K;
-        frame_ref_t frame = alloc_frame();
+        frame_ref_t frame = clock_alloc_frame(stack_bottom);
         if (frame == NULL_FRAME) {
             ZF_LOGE("Couldn't allocate additional stack frame");
             return 0;
         }
 
-        err = sos_map_frame(cspace, user_process.vspace, stack_bottom, seL4_AllRights,
-                            seL4_ARM_Default_VMAttributes | seL4_ARM_ExecuteNever, frame,
-                            user_process.addrspace);
+        err = sos_map_frame(cspace, user_process.vspace, stack_bottom,
+                            REGION_RD | REGION_WR, frame, user_process.addrspace);
     }
 
     return stack_top;
@@ -413,8 +437,10 @@ bool start_first_process(char *app_name)
     /* Initialise the process address space */
     user_process.addrspace = as_create();
 
+    as_define_ipc_buff(user_process.addrspace);
+
     /* Create an IPC buffer */
-    user_process.ipc_buffer_frame = alloc_frame();
+    user_process.ipc_buffer_frame = clock_alloc_frame(PROCESS_IPC_BUFFER);
     if (user_process.ipc_buffer_frame == NULL_FRAME) {
         ZF_LOGE("Failed to alloc ipc buffer ut");
         return false;
@@ -509,19 +535,18 @@ bool start_first_process(char *app_name)
         return false;
     }
 
+    /* Map in the IPC buffer for the thread */
+    err = sos_map_frame(&cspace, user_process.vspace, PROCESS_IPC_BUFFER, REGION_RD | REGION_WR,
+                        user_process.ipc_buffer_frame, user_process.addrspace);
+    if (err != 0) {
+        ZF_LOGE("Unable to map IPC buffer for user app");
+        return false;
+    }
+
     /* load the elf image from the cpio file */
     err = elf_load(&cspace, user_process.vspace, &elf_file, user_process.addrspace);
     if (err) {
         ZF_LOGE("Failed to load elf image");
-        return false;
-    }
-
-    /* Map in the IPC buffer for the thread */
-    err = sos_map_frame(&cspace, user_process.vspace, PROCESS_IPC_BUFFER, seL4_AllRights,
-                        seL4_ARM_Default_VMAttributes | seL4_ARM_ExecuteNever,
-                        user_process.ipc_buffer_frame, user_process.addrspace);
-    if (err != 0) {
-        ZF_LOGE("Unable to map IPC buffer for user app");
         return false;
     }
 
@@ -648,17 +673,32 @@ NORETURN void *main_continued(UNUSED void *arg)
     user_process.fdt = fdt_create(&err);
     ZF_LOGF_IF(err, "Failed to initialise the per-process file descriptor table");
 
+    /* Initialise semaphores for synchronisation */
+    init_nfs_sem();
+    init_semaphores();
+
+    /*irq_sem = malloc(sizeof(sync_bin_sem_t));
+    ZF_LOGF_IF(!irq_sem, "No memory for semaphore object");
+    ut_t *irq_ut = alloc_retype(&irq_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!irq_ut, "No memory for notification");
+    sync_bin_sem_init(irq_sem, irq_sem_cptr, 0);*/
+
     /* Initialise the network hardware. */
     printf("Network init\n");
-    nfs_open_sem = malloc(sizeof(sync_bin_sem_t));
-    ut_t *nfs_sem_ut = alloc_retype(&nfs_open_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
-    ZF_LOGF_IF(!nfs_sem_ut, "No memory for notification");
-    sync_bin_sem_init(nfs_open_sem, nfs_open_sem_cptr, 0);
 
-    network_init(&cspace, timer_vaddr, ntfn, nfs_open_sem);
+    network_init(&cspace, timer_vaddr, ntfn);
     console = network_console_init();
     network_console_register_handler(console, enqueue);
     init_console_sem();
+
+    /* After the main thread is done handling irqs in network_init, unbind the notification object from the main thread's TCB */
+    seL4_Error bind_err = seL4_TCB_UnbindNotification(seL4_CapInitThreadTCB);
+    ZF_LOGF_IFERR(err, "Failed to unbind notification object");
+    /* Initialize a temporary irq handling thread that binds the notification object to its TCB and handles irqs until the main thread is done with its tasks */
+    sos_thread_t *irq_temp_thread = thread_create(irq_loop, (void *)ipc_ep, 0, true, seL4_MaxPrio, ntfn, false);
+    if (irq_temp_thread == NULL) {
+        ZF_LOGE("Could not create irq handler thread\n");
+    }
     
     open_file *file = file_create("console", O_WRONLY, network_console_send, deque);
     uint32_t fd;
@@ -666,6 +706,17 @@ NORETURN void *main_continued(UNUSED void *arg)
     ZF_LOGF_IF(err, "No memory for new file object");
     err = fdt_put(user_process.fdt, file, &fd); // initialise stderr
     ZF_LOGF_IF(err, "No memory for new file object");
+
+    nfs_pagefile = file_create("pagefile", O_RDWR, nfs_write_file, nfs_read_file);
+    nfs_args args = {.sem = nfs_sem};
+    /* Wait for NFS to finish mounting */
+    sync_bin_sem_wait(nfs_sem);
+    /* Open the pagefile on NFS so we can read/write to/from it for demand paging */
+    int error = nfs_open_file("pagefile", O_RDWR, nfs_async_open_cb, &args);
+    ZF_LOGF_IF(error, "NFS: Error in opening pagefile");
+    nfs_pagefile->handle = args.buff;
+
+    init_bitmap();
 
 #ifdef CONFIG_SOS_GDB_ENABLED
     /* Initialize the debugger */
@@ -691,15 +742,19 @@ NORETURN void *main_continued(UNUSED void *arg)
     bool success = start_first_process(APP_NAME);
     ZF_LOGF_IF(!success, "Failed to start first process");
 
-    /* Initialise semaphores for synchronisation */
-    init_nfs_sem();
-    init_semaphores();
-
     /* Creating thread pool */
     // initialise_thread_pool(handle_syscall);
 
+    /* Since our main thread has no other tasks left, we swap the task of irq handling from the temp thread to our main thread, and destroy our temp thread */
+    seL4_TCB_UnbindNotification(irq_temp_thread->tcb);
+    //error = thread_destroy(irq_temp_thread); gets stuck somewhere (inconsistent)
+    ZF_LOGF_IFERR(error, "Failed to destroy the temp irq thread");
+    bind_err = seL4_TCB_BindNotification(seL4_CapInitThreadTCB, ntfn);
+    ZF_LOGF_IFERR(bind_err, "Failed to bind notification object to TCB");
     printf("\nSOS entering syscall loop\n");
-    irq_loop(ipc_ep);
+    /* Continue with the syscall */
+    //sync_bin_sem_post(irq_sem);
+    irq_loop((void *) ipc_ep);
 }
 /*
  * Main entry point - called by crt.

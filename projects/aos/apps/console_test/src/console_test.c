@@ -220,8 +220,8 @@ int main(void)
     
     pt_test();
     mmap_test();
-    // test_stack_write(fd);
+    //test_stack_write(fd);
 
-    // test_buffers(fd);
-    // printf("Passed read/write buffer test\n");
+    test_buffers(fd);
+    printf("Passed read/write buffer test\n");
 }

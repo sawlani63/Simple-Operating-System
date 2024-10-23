@@ -23,21 +23,24 @@ typedef struct _region {
 typedef struct {
     /* A single bit to let us know if this is entry is present in the page table. */
     size_t present : 1;
+    /* A single bit to let us know whether this entry is new or back from disk */
+    size_t swapped : 1;
+    /* Four bits to indicate the permissions associated with this page entry */
+    size_t perms : 4;
+    /* A single bit to indicate whether this entry is pinned in memory and cannot be paged out */
+    size_t pinned : 1;
     /* These two structs share the same memory and the one we use depends on the present bit. */
     union {
         struct {
+            /* Reference bit to indicate whether this page was recently referenced */
+            size_t ref : 1;
             /* Reference into the frame table. */
             frame_ref_t frame_ref : 19;
             /* Capability to the frame in the Hardware Page Table. */
-            seL4_CPtr frame_cptr : 44;
+            seL4_CPtr frame_cptr : 37;
         } page;
-        
-        struct {
-            /* Position in the nfs paging file the page entry is stored in. */
-            size_t file_position : 52;
-            /* Unused bits which we can change later if we find a use for them. */
-            size_t unused : 11;
-        } swapped;
+        /* Index into the swap map. Large enough to support the entire address space. */
+        size_t swap_map_index : 20;
     };
 } PACKED pt_entry;
 
@@ -91,12 +94,15 @@ SGLIB_DEFINE_RBTREE_PROTOTYPES(mem_region_t, left, right, colour, compare_region
  */
 
 addrspace_t *as_create();
-mem_region_t *as_define_ipc_buff(addrspace_t *as, seL4_Word *initipcbuff);
+mem_region_t *as_define_ipc_buff(addrspace_t *as);
 mem_region_t *as_define_stack(addrspace_t *as);
 mem_region_t *as_define_heap(addrspace_t *as);
 
 mem_region_t *insert_region(addrspace_t *addrspace, size_t base, size_t size, uint64_t perms);
 mem_region_t *insert_region_at_free_slot(addrspace_t *addrspace, size_t region_size, uint64_t perms);
 void remove_region(addrspace_t *addrspace, size_t base);
+
+/* USED ONLY FOR DEBUGGING */
+void print_regions(addrspace_t *addrspace);
 
 #endif

@@ -25,6 +25,35 @@ int check_overlap(addrspace_t *addrspace, size_t base, size_t size) {
     return 0;
 }
 
+/* USED ONLY FOR DEBUGGING */
+void print_regions(addrspace_t *addrspace) {
+    if (!addrspace || !addrspace->region_tree) {
+        printf("No regions to print!\n");
+        return;
+    }
+
+    printf("\n=== Memory Regions ===\n");
+    struct sglib_mem_region_t_iterator it;
+    for (mem_region_t *reg = sglib_mem_region_t_it_init(&it, addrspace->region_tree); 
+         reg != NULL; 
+         reg = sglib_mem_region_t_it_next(&it)) {
+        
+        printf("Region: base=%p, size=%p, end=%p, perms=", reg->base, reg->size, reg->base + reg->size);
+        
+        if (reg->perms & REGION_RD) printf("R");
+        if (reg->perms & REGION_WR) printf("W");
+        if (reg->perms & REGION_EX) printf("X");
+        
+        if (reg == addrspace->stack_reg) printf(" (Stack)");
+        if (reg == addrspace->heap_reg) printf(" (Heap)");
+        if (reg == addrspace->below_stack) printf(" (Below Stack)");
+        if (reg == addrspace->above_heap) printf(" (Above Heap)");
+        
+        printf("\n");
+    }
+    printf("==================\n\n");
+}
+
 /* Function to insert a memory region */
 mem_region_t *insert_region(addrspace_t *addrspace, size_t base, size_t size, uint64_t perms) {
     mem_region_t *region = malloc(sizeof(mem_region_t));
@@ -32,6 +61,11 @@ mem_region_t *insert_region(addrspace_t *addrspace, size_t base, size_t size, ui
         printf("No memory for a new region!\n");
         return NULL;
     }
+
+    size_t end = PAGE_ALIGN(base + size + PAGE_SIZE_4K - 1, PAGE_SIZE_4K);
+    base = PAGE_ALIGN(base, PAGE_SIZE_4K);
+    size = end - base;
+
     region->base = base;
     region->size = size;
     region->right = region->left = NULL;
@@ -130,8 +164,7 @@ addrspace_t *as_create() {
 	return as;
 }
 
-mem_region_t *as_define_ipc_buff(addrspace_t *as, seL4_Word *initipcbuff) {
-    *initipcbuff = PROCESS_IPC_BUFFER;
+mem_region_t *as_define_ipc_buff(addrspace_t *as) {
     return insert_region(as, PROCESS_IPC_BUFFER, PAGE_SIZE_4K, REGION_RD | REGION_WR);
 }
 

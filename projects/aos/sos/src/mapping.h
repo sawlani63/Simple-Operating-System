@@ -95,8 +95,8 @@ seL4_Error sos_map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr
                                 seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, seL4_CPtr *free_slots,
                                 seL4_Word *used, page_upper_directory *page_table);
 
-seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, seL4_CapRights_t rights,
-                         seL4_ARM_VMAttributes attr, frame_ref_t frame_ref, addrspace_t *as);
+seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
+                         size_t perms, frame_ref_t frame_ref, addrspace_t *as);
 
 /*
  * Map a device and return the virtual address it is mapped to.
