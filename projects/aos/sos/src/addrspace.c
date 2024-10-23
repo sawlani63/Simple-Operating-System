@@ -61,9 +61,10 @@ mem_region_t *insert_region(addrspace_t *addrspace, size_t base, size_t size, ui
         printf("No memory for a new region!\n");
         return NULL;
     }
-    
+
+    size_t end = PAGE_ALIGN(base + size + PAGE_SIZE_4K - 1, PAGE_SIZE_4K);
     base = PAGE_ALIGN(base, PAGE_SIZE_4K);
-    size = PAGE_ALIGN(size + PAGE_SIZE_4K - 1, PAGE_SIZE_4K);
+    size = end - base;
 
     region->base = base;
     region->size = size;
