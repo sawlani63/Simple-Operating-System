@@ -25,6 +25,8 @@ typedef struct {
     size_t present : 1;
     /* A single bit to let us know whether this entry has been swapped out or not */
     size_t swapped : 1;
+    /* Four bits to indicate the permissions associated with this page entry */
+    size_t perms : 4;
     /* These two structs share the same memory and the one we use depends on the present bit. */
     union {
         struct {
@@ -33,10 +35,10 @@ typedef struct {
             /* Reference into the frame table. */
             frame_ref_t frame_ref : 19;
             /* Capability to the frame in the Hardware Page Table. */
-            seL4_CPtr frame_cptr : 42;
+            seL4_CPtr frame_cptr : 38;
         } page;
         /* Index into the swap map. Large enough to support the entire address space. */
-        size_t swap_map_index : 62;
+        size_t swap_map_index : 20;
     };
 } PACKED pt_entry;
 
@@ -97,5 +99,8 @@ mem_region_t *as_define_heap(addrspace_t *as);
 mem_region_t *insert_region(addrspace_t *addrspace, size_t base, size_t size, uint64_t perms);
 mem_region_t *insert_region_at_free_slot(addrspace_t *addrspace, size_t region_size, uint64_t perms);
 void remove_region(addrspace_t *addrspace, size_t base);
+
+/* USED ONLY FOR DEBUGGING */
+void print_regions(addrspace_t *addrspace);
 
 #endif

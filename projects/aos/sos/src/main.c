@@ -23,7 +23,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "console_test"
+#define APP_NAME             "sosh"
 #define APP_PRIORITY         (0)
 #define APP_EP_BADGE         (101)
 
@@ -61,26 +61,6 @@ bool handle_vm_fault(seL4_Word fault_addr) {
         return false;
     }
 
-    uint16_t l1_index = (fault_addr >> 39) & MASK(9); /* Top 9 bits */
-    uint16_t l2_index = (fault_addr >> 30) & MASK(9); /* Next 9 bits */
-    uint16_t l3_index = (fault_addr >> 21) & MASK(9); /* Next 9 bits */
-    uint16_t l4_index = (fault_addr >> 12) & MASK(9); /* Next 9 bits */
-
-    /* Cache the related page table entries so we don't have to perform lots of dereferencing. */
-    page_upper_directory *l1_pt = as->page_table;
-    page_directory *l2_pt = NULL;
-    page_table *l3_pt = NULL;
-    pt_entry *l4_pt = NULL;
-    if (l1_pt[l1_index].l2 != NULL) {
-        l2_pt = l1_pt[l1_index].l2;
-        if (l2_pt[l2_index].l3 != NULL) {
-            l3_pt = l2_pt[l2_index].l3;
-            if (l3_pt[l3_index].l4 != NULL) {
-                l4_pt = l3_pt[l3_index].l4;
-            }
-        }
-    }
-
     /* Check if we're faulting in a valid region. */
     mem_region_t *reg;
     if (fault_addr < as->stack_reg->base
@@ -99,53 +79,54 @@ bool handle_vm_fault(seL4_Word fault_addr) {
                 return false;
             }
         } else {
-            ZF_LOGE("REG %p", reg);
-            ZF_LOGE("REG base %p", reg->base);
-            ZF_LOGE("REG size %p", reg->size);
-            ZF_LOGE("FAULT %p", fault_addr);
-            ZF_LOGE("Could not find a valid region for this address");
+            ZF_LOGE("Could not find a valid region for this address: %p", (void*) fault_addr);
             return false;
         }
-    }
-
-    seL4_ARM_VMAttributes attr = seL4_ARM_Default_VMAttributes;
-
-    /* Assign the appropriate rights for the frame we are about to map. */
-    seL4_CapRights_t rights = seL4_CapRights_new(0, 0, (reg->perms & REGION_RD || (reg->perms & REGION_EX) >> 2), (reg->perms & REGION_WR) >> 1);
-    if (!(reg->perms & REGION_EX)) {
-        attr |= seL4_ARM_ExecuteNever;
     }
 
     //make sync
     //and pin pages
 
-    if (clock_add_page(fault_addr)) {
-        ZF_LOGE("Could not page out an existing entry and add this address");
-        return false;
-    }
-
     /* Allocate a new frame to be mapped by the shadow page table. */
-    frame_ref_t frame_ref = alloc_frame();
+    frame_ref_t frame_ref = clock_alloc_frame(fault_addr);
     if (frame_ref == NULL_FRAME) {
-        /* We could not allocate a new frame, so we will page out an existing entry and try again. */
         ZF_LOGD("Failed to alloc frame");
         return false;
     }
 
-    if (l4_pt != NULL && l4_pt[l4_index].swapped) {
-        uint32_t file_offset = l4_pt[l4_index].swap_map_index * PAGE_SIZE_4K;
+    uint16_t l1_index = (fault_addr >> 39) & MASK(9); /* Top 9 bits */
+    uint16_t l2_index = (fault_addr >> 30) & MASK(9); /* Next 9 bits */
+    uint16_t l3_index = (fault_addr >> 21) & MASK(9); /* Next 9 bits */
+    uint16_t l4_index = (fault_addr >> 12) & MASK(9); /* Next 9 bits */
 
+    page_upper_directory *l1_pt = as->page_table;
+    page_directory *l2_pt = NULL;
+    page_table *l3_pt = NULL;
+    pt_entry *l4_pt = NULL;
+    if (l1_pt[l1_index].l2 != NULL) {
+        l2_pt = l1_pt[l1_index].l2;
+        if (l2_pt[l2_index].l3 != NULL) {
+            l3_pt = l2_pt[l2_index].l3;
+            if (l3_pt[l3_index].l4 != NULL) {
+                l4_pt = l3_pt[l3_index].l4;
+            }
+        }
+    }
+
+    if (l4_pt != NULL && l4_pt[l4_index].swapped == 1) {
+        uint64_t file_offset = l4_pt[l4_index].swap_map_index * PAGE_SIZE_4K;
         char *data = (char *)frame_data(frame_ref);
         nfs_args args = {PAGE_SIZE_4K, data, nfs_sem};
         int res = nfs_pread_file(nfs_pagefile->handle, file_offset, PAGE_SIZE_4K, nfs_async_read_cb, &args);
         if (res < (int)PAGE_SIZE_4K) {
-            return;
+            return false;
         }
+        
         mark_block_free(file_offset / PAGE_SIZE_4K);
     }
 
     /* Map the frame into the relevant page tables. */
-    if (sos_map_frame(&cspace, user_process.vspace, fault_addr, rights, attr, frame_ref, as) != 0) {
+    if (sos_map_frame(&cspace, user_process.vspace, fault_addr, reg->perms, frame_ref, as) != 0) {
         ZF_LOGE("Could not map the frame into the two page tables");
         return false;
     }
@@ -302,20 +283,20 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
         return -1;
     }
 
-    /* Create a stack frame */
-    user_process.stack_frame = alloc_frame();
-    if (user_process.stack_frame == NULL_FRAME) {
-        ZF_LOGD("Failed to alloc frame");
-        return -1;
-    }
-    user_process.stack = frame_page(user_process.stack_frame);
-
     /* virtual addresses in the target process' address space */
     uintptr_t stack_top = PROCESS_STACK_TOP;
     uintptr_t stack_bottom = PROCESS_STACK_TOP - PAGE_SIZE_4K;
     /* virtual addresses in the SOS's address space */
     void *local_stack_top  = (seL4_Word *) SOS_SCRATCH;
     uintptr_t local_stack_bottom = SOS_SCRATCH - PAGE_SIZE_4K;
+
+    /* Create a stack frame */
+    user_process.stack_frame = clock_alloc_frame(stack_bottom);
+    if (user_process.stack_frame == NULL_FRAME) {
+        ZF_LOGD("Failed to alloc frame");
+        return -1;
+    }
+    user_process.stack = frame_page(user_process.stack_frame);
 
     /* find the vsyscall table */
     uintptr_t *sysinfo = (uintptr_t *) elf_getSectionNamed(elf_file, "__vsyscall", NULL);
@@ -325,15 +306,12 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
     }
 
     /* Map in the stack frame for the user app */
-    seL4_Error err = sos_map_frame(cspace, user_process.vspace, stack_bottom, seL4_AllRights,
-                                   seL4_ARM_Default_VMAttributes | seL4_ARM_ExecuteNever,
+    seL4_Error err = sos_map_frame(cspace, user_process.vspace, stack_bottom, REGION_RD | REGION_WR,
                                    user_process.stack_frame, user_process.addrspace);
     if (err != 0) {
         ZF_LOGE("Unable to map stack for user app");
         return 0;
     }
-    /* Add the mapped frame vaddr to the clock buffer for demand paging */
-    clock_add_page(stack_bottom);
 
     /* allocate a slot to duplicate the stack frame cap so we can map it into our address space */
     seL4_CPtr local_stack_cptr = cspace_alloc_slot(cspace);
@@ -410,16 +388,14 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
     /* Exend the stack with extra pages */
     for (int page = 0; page < INITIAL_PROCESS_EXTRA_STACK_PAGES; page++) {
         stack_bottom -= PAGE_SIZE_4K;
-        frame_ref_t frame = alloc_frame();
+        frame_ref_t frame = clock_alloc_frame(stack_bottom);
         if (frame == NULL_FRAME) {
             ZF_LOGE("Couldn't allocate additional stack frame");
             return 0;
         }
 
-        err = sos_map_frame(cspace, user_process.vspace, stack_bottom, seL4_AllRights,
-                            seL4_ARM_Default_VMAttributes | seL4_ARM_ExecuteNever, frame,
-                            user_process.addrspace);
-        clock_add_page(stack_bottom);
+        err = sos_map_frame(cspace, user_process.vspace, stack_bottom,
+                            REGION_RD | REGION_WR, frame, user_process.addrspace);
     }
 
     return stack_top;
@@ -467,7 +443,7 @@ bool start_first_process(char *app_name)
     as_define_ipc_buff(user_process.addrspace);
 
     /* Create an IPC buffer */
-    user_process.ipc_buffer_frame = alloc_frame();
+    user_process.ipc_buffer_frame = clock_alloc_frame(PROCESS_IPC_BUFFER);
     if (user_process.ipc_buffer_frame == NULL_FRAME) {
         ZF_LOGE("Failed to alloc ipc buffer ut");
         return false;
@@ -563,15 +539,12 @@ bool start_first_process(char *app_name)
     }
 
     /* Map in the IPC buffer for the thread */
-    err = sos_map_frame(&cspace, user_process.vspace, PROCESS_IPC_BUFFER, seL4_AllRights,
-                        seL4_ARM_Default_VMAttributes | seL4_ARM_ExecuteNever,
+    err = sos_map_frame(&cspace, user_process.vspace, PROCESS_IPC_BUFFER, REGION_RD | REGION_WR,
                         user_process.ipc_buffer_frame, user_process.addrspace);
     if (err != 0) {
         ZF_LOGE("Unable to map IPC buffer for user app");
         return false;
     }
-    /* Add the ipc buffer vaddr to the clock buffer for demand paging */
-    clock_add_page(PROCESS_IPC_BUFFER);
 
     /* load the elf image from the cpio file */
     err = elf_load(&cspace, user_process.vspace, &elf_file, user_process.addrspace);

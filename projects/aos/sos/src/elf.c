@@ -74,7 +74,7 @@ static inline seL4_CapRights_t get_sel4_rights_from_elf(unsigned long permission
  *
  */
 static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const char *src, size_t segment_size,
-                                    size_t file_size, uintptr_t dst, seL4_CapRights_t permissions, addrspace_t *as)
+                                    size_t file_size, uintptr_t dst, seL4_Word flags, addrspace_t *as)
 {
     assert(file_size <= segment_size);
 
@@ -84,20 +84,15 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
     while (pos < segment_size) {
         uintptr_t loadee_vaddr = (ROUND_DOWN(dst, PAGE_SIZE_4K));
 
-        if (clock_add_page(loadee_vaddr)) {
-            ZF_LOGE("Could not page out an existing entry and add this address");
-            return -1;
-        }
-
         /* allocate the frame for the loadees address space */
-        frame_ref_t frame = alloc_frame();
+        frame_ref_t frame = clock_alloc_frame(loadee_vaddr);
         if (frame == NULL_FRAME) {
             ZF_LOGD("Failed to alloc frame");
             return -1;
         }
 
         /* map the frame into the loadee address space */
-        err = sos_map_frame(cspace, loadee, loadee_vaddr, permissions, seL4_ARM_Default_VMAttributes, frame, as);
+        err = sos_map_frame(cspace, loadee, loadee_vaddr, flags, frame, as);
 
         /* A frame has already been mapped at this address. This occurs when segments overlap in
          * the same frame, which is permitted by the standard. That's fine as we
@@ -169,7 +164,7 @@ int elf_load(cspace_t *cspace, seL4_CPtr loadee_vspace, elf_t *elf_file, addrspa
         /* Copy it across into the vspace. */
         ZF_LOGD(" * Loading segment %p-->%p\n", (void *) vaddr, (void *)(vaddr + segment_size));
         int err = load_segment_into_vspace(cspace, loadee_vspace, source_addr, segment_size, file_size, vaddr,
-                                           get_sel4_rights_from_elf(flags), as);
+                                           reg_flags, as);
         if (err) {
             ZF_LOGE("Elf loading failed!");
             return -1;
