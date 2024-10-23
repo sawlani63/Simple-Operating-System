@@ -129,24 +129,7 @@ bool handle_vm_fault(seL4_Word fault_addr) {
     }
 
     if (l4_pt != NULL && l4_pt[l4_index].swapped == 1) {
-        /* create slot for the frame to load the data into */
-        seL4_CPtr frame_cap = cspace_alloc_slot(&cspace);
-        if (frame_cap == seL4_CapNull) {
-            ZF_LOGD("Failed to alloc slot");
-            return false;
-        }
-
-        /* copy the frame cptr into the loadee's address space */
-        seL4_Error err = cspace_copy(&cspace, frame_cap, frame_table_cspace(), frame_page(frame_ref), seL4_AllRights);
-        if (err != seL4_NoError) {
-            ZF_LOGD("Failed to untyped reypte");
-            return false;
-        }
-
         uint64_t file_offset = l4_pt[l4_index].swap_map_index * PAGE_SIZE_4K;
-        pt_entry entry = {.present = 1, .swapped = 0, .page = {1, frame_ref = frame_ref, .frame_cptr = frame_cap}};
-        l4_pt[l4_index] = entry;
-
         char *data = (char *)frame_data(frame_ref);
         nfs_args args = {PAGE_SIZE_4K, data, nfs_sem};
         int res = nfs_pread_file(nfs_pagefile->handle, file_offset, PAGE_SIZE_4K, nfs_async_read_cb, &args);
@@ -155,14 +138,12 @@ bool handle_vm_fault(seL4_Word fault_addr) {
         }
         
         mark_block_free(file_offset / PAGE_SIZE_4K);
-        err = seL4_ARM_Page_Map(frame_cap, user_process.vspace, PAGE_ALIGN(fault_addr, PAGE_SIZE_4K), rights, attr);
-        ZF_LOGF_IF(err != seL4_NoError, "Failed to map into the HPT in clock_try_page_in!\n");
-    } else {
-        /* Map the frame into the relevant page tables. */
-        if (sos_map_frame(&cspace, user_process.vspace, fault_addr, rights, attr, frame_ref, as) != 0) {
-            ZF_LOGE("Could not map the frame into the two page tables");
-            return false;
-        }
+    }
+
+    /* Map the frame into the relevant page tables. */
+    if (sos_map_frame(&cspace, user_process.vspace, fault_addr, rights, attr, frame_ref, as) != 0) {
+        ZF_LOGE("Could not map the frame into the two page tables");
+        return false;
     }
 
     return true;
