@@ -7,9 +7,9 @@
 /* 2^19 is the entire frame table size, meaning we can
    cover every page with 2^19 * 8 bytes = 4MB of memory. */
 #ifdef CONFIG_SOS_FRAME_LIMIT
-    #define BUFFER_SIZE (CONFIG_SOS_FRAME_LIMIT != 0ul ? CONFIG_SOS_FRAME_LIMIT : BIT(19)) - 1
+    #define BUFFER_SIZE ((CONFIG_SOS_FRAME_LIMIT != 0ul ? CONFIG_SOS_FRAME_LIMIT : BIT(19)) - 1)
 #else
-    #define BUFFER_SIZE BIT(19)
+    #define BUFFER_SIZE (BIT(19) - 1)
 #endif
 
 seL4_Word circular_buffer[BUFFER_SIZE];
@@ -61,7 +61,7 @@ int find_first_free_block() {
     return -1;
 }
 
-static inline uint32_t get_page_file_offset() {
+static inline uint64_t get_page_file_offset() {
     int swap_map_index = find_first_free_block();
     ZF_LOGF_IF(swap_map_index < 0, "Could not find a free swap map index!\n");
     mark_block_used(swap_map_index);
@@ -77,19 +77,17 @@ static int clock_page_out() {
     addrspace_t *as = user_process.addrspace;
     seL4_Word vaddr;
     pt_entry entry;
-
     while (1) {
         vaddr = circular_buffer[clock_hand];
         entry = GET_PAGE(as->page_table, vaddr);
         if (entry.page.ref == 0) {
             break;
         }
-        entry.page.ref = 0;
-        GET_PAGE(as->page_table, vaddr) = entry;
+        GET_PAGE(as->page_table, vaddr).page.ref = 0;
         clock_hand = (clock_hand + 1) % BUFFER_SIZE;
     }
     
-    uint32_t file_offset = get_page_file_offset();
+    uint64_t file_offset = get_page_file_offset();
     char *data = (char *)frame_data(entry.page.frame_ref);
     nfs_args args = {PAGE_SIZE_4K, data, nfs_sem};
     int res = nfs_pwrite_file(nfs_pagefile->handle, file_offset, data, PAGE_SIZE_4K, nfs_async_write_cb, &args);
@@ -103,10 +101,8 @@ static int clock_page_out() {
     free_untype(&frame_cptr, NULL);
     free_frame(entry.page.frame_ref);
 
-    entry.present = 0;
-    entry.swapped = 1;
-    entry.swap_map_index = file_offset / PAGE_SIZE_4K;
-    GET_PAGE(as->page_table, vaddr) = entry;
+    pt_entry new_entry = {.present = 0, .swapped = 1, .swap_map_index = file_offset / PAGE_SIZE_4K};
+    GET_PAGE(as->page_table, vaddr) = new_entry;
     return 0;
 }
 

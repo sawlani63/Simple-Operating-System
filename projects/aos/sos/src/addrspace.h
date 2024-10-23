@@ -98,4 +98,7 @@ mem_region_t *insert_region(addrspace_t *addrspace, size_t base, size_t size, ui
 mem_region_t *insert_region_at_free_slot(addrspace_t *addrspace, size_t region_size, uint64_t perms);
 void remove_region(addrspace_t *addrspace, size_t base);
 
+/* USED ONLY FOR DEBUGGING */
+void print_regions(addrspace_t *addrspace);
+
 #endif

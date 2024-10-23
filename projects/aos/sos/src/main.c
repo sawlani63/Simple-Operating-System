@@ -61,26 +61,6 @@ bool handle_vm_fault(seL4_Word fault_addr) {
         return false;
     }
 
-    uint16_t l1_index = (fault_addr >> 39) & MASK(9); /* Top 9 bits */
-    uint16_t l2_index = (fault_addr >> 30) & MASK(9); /* Next 9 bits */
-    uint16_t l3_index = (fault_addr >> 21) & MASK(9); /* Next 9 bits */
-    uint16_t l4_index = (fault_addr >> 12) & MASK(9); /* Next 9 bits */
-
-    /* Cache the related page table entries so we don't have to perform lots of dereferencing. */
-    page_upper_directory *l1_pt = as->page_table;
-    page_directory *l2_pt = NULL;
-    page_table *l3_pt = NULL;
-    pt_entry *l4_pt = NULL;
-    if (l1_pt[l1_index].l2 != NULL) {
-        l2_pt = l1_pt[l1_index].l2;
-        if (l2_pt[l2_index].l3 != NULL) {
-            l3_pt = l2_pt[l2_index].l3;
-            if (l3_pt[l3_index].l4 != NULL) {
-                l4_pt = l3_pt[l3_index].l4;
-            }
-        }
-    }
-
     /* Check if we're faulting in a valid region. */
     mem_region_t *reg;
     if (fault_addr < as->stack_reg->base
@@ -99,12 +79,11 @@ bool handle_vm_fault(seL4_Word fault_addr) {
                 return false;
             }
         } else {
-            ZF_LOGE("Could not find a valid region for this address");
+            ZF_LOGE("Could not find a valid region for this address: %p", (void*) fault_addr);
+            print_regions(as);
             return false;
         }
     }
-
-    ZF_LOGE("FAULT ADDR %p", fault_addr);
 
     seL4_ARM_VMAttributes attr = seL4_ARM_Default_VMAttributes;
 
@@ -130,16 +109,26 @@ bool handle_vm_fault(seL4_Word fault_addr) {
         return false;
     }
 
-    pt_entry entry;
-    uint32_t file_offset;
-    if (l4_pt != NULL && entry.swapped == 1) {
-        entry = l4_pt[l4_index];
-        file_offset = entry.swap_map_index * PAGE_SIZE_4K;
-        entry.present = 1;
-        entry.swapped = 0;
-        entry.page.ref = 1;
-        entry.page.frame_ref = frame_ref;
+    uint16_t l1_index = (fault_addr >> 39) & MASK(9); /* Top 9 bits */
+    uint16_t l2_index = (fault_addr >> 30) & MASK(9); /* Next 9 bits */
+    uint16_t l3_index = (fault_addr >> 21) & MASK(9); /* Next 9 bits */
+    uint16_t l4_index = (fault_addr >> 12) & MASK(9); /* Next 9 bits */
 
+    page_upper_directory *l1_pt = as->page_table;
+    page_directory *l2_pt = NULL;
+    page_table *l3_pt = NULL;
+    pt_entry *l4_pt = NULL;
+    if (l1_pt[l1_index].l2 != NULL) {
+        l2_pt = l1_pt[l1_index].l2;
+        if (l2_pt[l2_index].l3 != NULL) {
+            l3_pt = l2_pt[l2_index].l3;
+            if (l3_pt[l3_index].l4 != NULL) {
+                l4_pt = l3_pt[l3_index].l4;
+            }
+        }
+    }
+
+    if (l4_pt != NULL && l4_pt[l4_index].swapped == 1) {
         /* create slot for the frame to load the data into */
         seL4_CPtr frame_cap = cspace_alloc_slot(&cspace);
         if (frame_cap == seL4_CapNull) {
@@ -148,37 +137,29 @@ bool handle_vm_fault(seL4_Word fault_addr) {
         }
 
         /* copy the frame cptr into the loadee's address space */
-        seL4_Error err = cspace_copy(&cspace, frame_cap, &cspace, frame_page(entry.page.frame_ref), seL4_AllRights);
+        seL4_Error err = cspace_copy(&cspace, frame_cap, frame_table_cspace(), frame_page(frame_ref), seL4_AllRights);
         if (err != seL4_NoError) {
             ZF_LOGD("Failed to untyped reypte");
             return false;
         }
 
-        /*if (entry.swapped) {
-            char *data = (char *)frame_data(entry.page.frame_ref);
-            nfs_args args = {PAGE_SIZE_4K, data, nfs_sem};
-            int res = nfs_pread_file(nfs_pagefile->handle, file_offset, PAGE_SIZE_4K, nfs_async_read_cb, &args);
-            if (res < (int)PAGE_SIZE_4K) {
-                return;
-            }
-            mark_block_free(file_offset / PAGE_SIZE_4K);
-        }*/
+        uint64_t file_offset = l4_pt[l4_index].swap_map_index * PAGE_SIZE_4K;
+        pt_entry entry = {.present = 1, .swapped = 0, .page = {1, frame_ref = frame_ref, .frame_cptr = frame_cap}};
+        l4_pt[l4_index] = entry;
+        printf("%d, %d, %d, %p, %p\n", l4_pt[l4_index].present, l4_pt[l4_index].swapped, l4_pt[l4_index].page.ref, l4_pt[l4_index].page.frame_ref, l4_pt[l4_index].page.frame_cptr);
 
-        char *data = (char *)frame_data(entry.page.frame_ref);
+        char *data = (char *)frame_data(frame_ref);
         nfs_args args = {PAGE_SIZE_4K, data, nfs_sem};
         int res = nfs_pread_file(nfs_pagefile->handle, file_offset, PAGE_SIZE_4K, nfs_async_read_cb, &args);
         if (res < (int)PAGE_SIZE_4K) {
-            return;
+            return false;
         }
+        
         mark_block_free(file_offset / PAGE_SIZE_4K);
-        ZF_LOGE("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-        err = seL4_ARM_Page_Map(frame_cap, user_process.vspace, fault_addr, rights, attr);
-        ZF_LOGF_IF(err == seL4_FailedLookup, "Failed to map into the HPT in clock_try_page_in!\n");
-        entry.page.frame_cptr = frame_cap;
-        l4_pt[l4_index] = entry;
+        err = seL4_ARM_Page_Map(frame_cap, user_process.vspace, PAGE_ALIGN(fault_addr, PAGE_SIZE_4K), rights, attr);
+        ZF_LOGF_IF(err != seL4_NoError, "Failed to map into the HPT in clock_try_page_in!\n");
     } else {
         /* Map the frame into the relevant page tables. */
-        ZF_LOGE("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         if (sos_map_frame(&cspace, user_process.vspace, fault_addr, rights, attr, frame_ref, as) != 0) {
             ZF_LOGE("Could not map the frame into the two page tables");
             return false;
@@ -498,6 +479,8 @@ bool start_first_process(char *app_name)
 
     /* Initialise the process address space */
     user_process.addrspace = as_create();
+
+    as_define_ipc_buff(user_process.addrspace);
 
     /* Create an IPC buffer */
     user_process.ipc_buffer_frame = alloc_frame();
