@@ -25,11 +25,11 @@ typedef struct {
     size_t valid : 1;
     /* A single bit to let us know whether this entry has been paged out onto disk or not. */
     size_t swapped : 1;
-    /* Three bits to indicate the permissions associated with this page entry. */
-    size_t pinned : 1;
-    /* These two structs share the same memory and the one we use depends on the present bit. */
-    size_t perms : 3;
     /* A single bit to indicate whether this entry is pinned in memory and cannot be paged out */
+    size_t pinned : 1;
+    /* Three bits to indicate the permissions associated with this page entry. */
+    size_t perms : 3;
+    /* These two structs share the same memory and the one we use depends on the present bit. */
     union {
         struct {
             /* Reference bit to indicate whether this page was recently referenced */
