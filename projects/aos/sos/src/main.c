@@ -146,7 +146,6 @@ bool handle_vm_fault(seL4_Word fault_addr) {
         uint64_t file_offset = l4_pt[l4_index].swap_map_index * PAGE_SIZE_4K;
         pt_entry entry = {.present = 1, .swapped = 0, .page = {1, frame_ref = frame_ref, .frame_cptr = frame_cap}};
         l4_pt[l4_index] = entry;
-        printf("%d, %d, %d, %p, %p\n", l4_pt[l4_index].present, l4_pt[l4_index].swapped, l4_pt[l4_index].page.ref, l4_pt[l4_index].page.frame_ref, l4_pt[l4_index].page.frame_cptr);
 
         char *data = (char *)frame_data(frame_ref);
         nfs_args args = {PAGE_SIZE_4K, data, nfs_sem};
