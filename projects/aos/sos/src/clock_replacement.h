@@ -21,6 +21,8 @@ void mark_block_free(uint32_t block_num);
  */
 int clock_add_page(seL4_Word vaddr);
 
+int clock_try_page_in(seL4_Word vaddr, addrspace_t *as);
+
 static inline frame_ref_t clock_alloc_frame(seL4_Word vaddr) {
     clock_add_page(vaddr);
     return alloc_frame();

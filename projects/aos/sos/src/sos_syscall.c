@@ -63,7 +63,7 @@ static bool vaddr_is_mapped(seL4_Word vaddr) {
         return false;
     }
 
-    return l4_pt[l4_index].present && l4_pt[l4_index].page.frame_ref != NULL_FRAME;
+    return l4_pt[l4_index].valid;
 }
 
 static inline bool vaddr_check(seL4_Word vaddr) {

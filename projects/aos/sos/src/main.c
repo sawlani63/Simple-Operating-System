@@ -61,6 +61,13 @@ bool handle_vm_fault(seL4_Word fault_addr) {
         return false;
     }
 
+    int try_page_in_res = clock_try_page_in(fault_addr, as);
+    if (try_page_in_res < 0) {
+        return false;
+    } else if (!try_page_in_res) {
+        return true;
+    }
+
     /* Check if we're faulting in a valid region. */
     mem_region_t *reg;
     if (fault_addr < as->stack_reg->base
@@ -92,37 +99,6 @@ bool handle_vm_fault(seL4_Word fault_addr) {
     if (frame_ref == NULL_FRAME) {
         ZF_LOGD("Failed to alloc frame");
         return false;
-    }
-
-    uint16_t l1_index = (fault_addr >> 39) & MASK(9); /* Top 9 bits */
-    uint16_t l2_index = (fault_addr >> 30) & MASK(9); /* Next 9 bits */
-    uint16_t l3_index = (fault_addr >> 21) & MASK(9); /* Next 9 bits */
-    uint16_t l4_index = (fault_addr >> 12) & MASK(9); /* Next 9 bits */
-
-    page_upper_directory *l1_pt = as->page_table;
-    page_directory *l2_pt = NULL;
-    page_table *l3_pt = NULL;
-    pt_entry *l4_pt = NULL;
-    if (l1_pt[l1_index].l2 != NULL) {
-        l2_pt = l1_pt[l1_index].l2;
-        if (l2_pt[l2_index].l3 != NULL) {
-            l3_pt = l2_pt[l2_index].l3;
-            if (l3_pt[l3_index].l4 != NULL) {
-                l4_pt = l3_pt[l3_index].l4;
-            }
-        }
-    }
-
-    if (l4_pt != NULL && l4_pt[l4_index].swapped == 1) {
-        uint64_t file_offset = l4_pt[l4_index].swap_map_index * PAGE_SIZE_4K;
-        char *data = (char *)frame_data(frame_ref);
-        nfs_args args = {PAGE_SIZE_4K, data, nfs_sem};
-        int res = nfs_pread_file(nfs_pagefile->handle, file_offset, PAGE_SIZE_4K, nfs_async_read_cb, &args);
-        if (res < (int)PAGE_SIZE_4K) {
-            return false;
-        }
-        
-        mark_block_free(file_offset / PAGE_SIZE_4K);
     }
 
     /* Map the frame into the relevant page tables. */
