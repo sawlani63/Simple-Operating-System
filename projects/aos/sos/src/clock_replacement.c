@@ -12,7 +12,7 @@
     #define BUFFER_SIZE BIT(19)
 #endif
 
-seL4_Word circular_buffer[BUFFER_SIZE - 1];
+seL4_Word circular_buffer[BUFFER_SIZE];
 /* The clock hand pointing to the current position in the circular buffer */
 size_t clock_hand = 0;
 size_t curr_size = 0;
@@ -110,13 +110,8 @@ static int clock_page_out() {
     return 0;
 }
 
-/**
- * Adds a page in the page table to the clock circular buffer.
- * @param vaddr The virtual address we are adding to our clock cicular buffer
- * @return 0 on success and 1 on failure
- */
-static int clock_add_page(seL4_Word vaddr) {
-    if (curr_size == BUFFER_SIZE - 1) {
+int clock_add_page(seL4_Word vaddr) {
+    if (curr_size == BUFFER_SIZE) {
         if (clock_page_out()) {
             return 1;
         }
@@ -125,73 +120,7 @@ static int clock_add_page(seL4_Word vaddr) {
     }
 
     circular_buffer[clock_hand] = vaddr;
-    clock_hand = (clock_hand + 1) % (BUFFER_SIZE - 1);
-    return 0;
-}
-
-frame_ref_t clock_alloc_page(seL4_Word vaddr) {
-    clock_add_page(vaddr);
-    frame_ref_t frame_ref = alloc_frame();
-    ZF_LOGF_IF(frame_ref == NULL_FRAME, "Couldn't allocate a frame in clock_alloc_page!\n");
-    return frame_ref;
-}
-
-int clock_try_page_in(seL4_Word vaddr) {
-    uint16_t l1_index = (vaddr >> 39) & MASK(9); /* Top 9 bits */
-    uint16_t l2_index = (vaddr >> 30) & MASK(9); /* Next 9 bits */
-    uint16_t l3_index = (vaddr >> 21) & MASK(9); /* Next 9 bits */
-    uint16_t l4_index = (vaddr >> 12) & MASK(9); /* Next 9 bits */
-
-    page_upper_directory *l1_pt = user_process.addrspace->page_table;
-
-    if (l1_pt[l1_index].l2 == NULL) {
-        return 1;
-    }
-    if (l1_pt[l1_index].l2[l2_index].l3 == NULL) {
-        return 1;
-    }
-    if (l1_pt[l1_index].l2[l2_index].l3[l3_index].l4 == NULL) {
-        return 1;
-    }
-
-    pt_entry entry = l1_pt[l1_index].l2[l2_index].l3[l3_index].l4[l4_index];
-    if (!entry.valid || entry.present) {
-        return 1;
-    }
-    uint32_t swapmap_pos = GET_PAGE(user_process.addrspace->page_table, vaddr).swap_map_index;
-
-    entry.present = 1;
-    entry.page.ref = 1;
-
-    printf("Paged in vaddr %p from swap map offset %d\n", vaddr, swapmap_pos);
-    entry.page.frame_ref = clock_alloc_page(vaddr);
-
-    char *data = (char *)frame_data(entry.page.frame_ref);
-    nfs_args args = {PAGE_SIZE_4K, data, nfs_sem};
-    int res = nfs_pread_file(nfs_pagefile->handle, swapmap_pos * PAGE_SIZE_4K, PAGE_SIZE_4K, nfs_async_read_cb, &args);
-    if (res < (int)PAGE_SIZE_4K) {
-        return 1;
-    }
-    mark_block_free(swapmap_pos);
-
-    /* create slot for the frame to load the data into */
-    seL4_CPtr frame_cap = cspace_alloc_slot(&cspace);
-    if (frame_cap == seL4_CapNull) {
-        ZF_LOGD("Failed to alloc slot");
-        return 1;
-    }
-    entry.page.frame_cptr = frame_cap;
-
-    /* copy the frame cptr into the loadee's address space */
-    seL4_Error err = cspace_copy(&cspace, frame_cap, &cspace, frame_page(entry.page.frame_ref), seL4_AllRights);
-    if (err != seL4_NoError) {
-        ZF_LOGD("Failed to untyped reypte");
-        return 1;
-    }
-
-    GET_PAGE(user_process.addrspace->page_table, vaddr) = entry;
-    err = seL4_ARM_Page_Map(frame_cap, user_process.vspace, vaddr, seL4_AllRights, seL4_ARM_Default_VMAttributes);
-    ZF_LOGF_IF(err == seL4_FailedLookup, "Failed to map into the HPT in clock_try_page_in!\n");
+    clock_hand = (clock_hand + 1) % BUFFER_SIZE;
 
     return 0;
 }

@@ -21,8 +21,6 @@ typedef struct _region {
 
 /* Needs to sum to 64 bits to be properly byte aligned. */
 typedef struct {
-    /* A single bit to let us know if this is entry is valid/mapped in the page table. */
-    size_t valid : 1;
     /* A single bit to let us know if this is entry is present in the page table. */
     size_t present : 1;
     /* A single bit to let us know whether this entry has been swapped out or not */

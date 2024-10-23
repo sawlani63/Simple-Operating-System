@@ -21,7 +21,6 @@
 #include "ut.h"
 #include "mapping.h"
 #include "elfload.h"
-#include "clock_replacement.h"
 
 #include "clock_replacement.h"
 
@@ -91,8 +90,9 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
         }
 
         /* allocate the frame for the loadees address space */
-        frame_ref_t frame = clock_alloc_page(loadee_vaddr);
+        frame_ref_t frame = alloc_frame();
         if (frame == NULL_FRAME) {
+            ZF_LOGD("Failed to alloc frame");
             return -1;
         }
 
@@ -163,7 +163,8 @@ int elf_load(cspace_t *cspace, seL4_CPtr loadee_vspace, elf_t *elf_file, addrspa
         seL4_Word flags = elf_getProgramHeaderFlags(elf_file, i);
 
         /* Load the segment into the address space */
-        insert_region(as, vaddr, segment_size, flags & 0x3);
+        seL4_Word reg_flags = ((flags & 1) << 2) | (flags & 2) | ((flags & 4) >> 2);
+        insert_region(as, vaddr, segment_size, reg_flags);
 
         /* Copy it across into the vspace. */
         ZF_LOGD(" * Loading segment %p-->%p\n", (void *) vaddr, (void *)(vaddr + segment_size));

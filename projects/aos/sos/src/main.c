@@ -109,7 +109,7 @@ bool handle_vm_fault(seL4_Word fault_addr) {
     seL4_ARM_VMAttributes attr = seL4_ARM_Default_VMAttributes;
 
     /* Assign the appropriate rights for the frame we are about to map. */
-    seL4_CapRights_t rights = seL4_CapRights_new(0, 0, reg->perms & REGION_RD, (reg->perms & REGION_WR) >> 1);
+    seL4_CapRights_t rights = seL4_CapRights_new(0, 0, (reg->perms & REGION_RD || (reg->perms & REGION_EX) >> 2), (reg->perms & REGION_WR) >> 1);
     if (!(reg->perms & REGION_EX)) {
         attr |= seL4_ARM_ExecuteNever;
     }
@@ -123,7 +123,7 @@ bool handle_vm_fault(seL4_Word fault_addr) {
     }
 
     /* Allocate a new frame to be mapped by the shadow page table. */
-    frame_ref_t frame_ref = clock_alloc_page(fault_addr);
+    frame_ref_t frame_ref = alloc_frame();
     if (frame_ref == NULL_FRAME) {
         /* We could not allocate a new frame, so we will page out an existing entry and try again. */
         ZF_LOGD("Failed to alloc frame");
@@ -132,10 +132,11 @@ bool handle_vm_fault(seL4_Word fault_addr) {
 
     pt_entry entry;
     uint32_t file_offset;
-    if (l4_pt != NULL) {
+    if (l4_pt != NULL && entry.swapped == 1) {
         entry = l4_pt[l4_index];
         file_offset = entry.swap_map_index * PAGE_SIZE_4K;
         entry.present = 1;
+        entry.swapped = 0;
         entry.page.ref = 1;
         entry.page.frame_ref = frame_ref;
 
@@ -336,20 +337,20 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
         return -1;
     }
 
+    /* Create a stack frame */
+    user_process.stack_frame = alloc_frame();
+    if (user_process.stack_frame == NULL_FRAME) {
+        ZF_LOGD("Failed to alloc frame");
+        return -1;
+    }
+    user_process.stack = frame_page(user_process.stack_frame);
+
     /* virtual addresses in the target process' address space */
     uintptr_t stack_top = PROCESS_STACK_TOP;
     uintptr_t stack_bottom = PROCESS_STACK_TOP - PAGE_SIZE_4K;
     /* virtual addresses in the SOS's address space */
     void *local_stack_top  = (seL4_Word *) SOS_SCRATCH;
     uintptr_t local_stack_bottom = SOS_SCRATCH - PAGE_SIZE_4K;
-
-    /* Create a stack frame */
-    user_process.stack_frame = clock_alloc_page(stack_bottom);
-    if (user_process.stack_frame == NULL_FRAME) {
-        ZF_LOGD("Failed to alloc frame");
-        return -1;
-    }
-    user_process.stack = frame_page(user_process.stack_frame);
 
     /* find the vsyscall table */
     uintptr_t *sysinfo = (uintptr_t *) elf_getSectionNamed(elf_file, "__vsyscall", NULL);
@@ -444,8 +445,9 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
     /* Exend the stack with extra pages */
     for (int page = 0; page < INITIAL_PROCESS_EXTRA_STACK_PAGES; page++) {
         stack_bottom -= PAGE_SIZE_4K;
-        frame_ref_t frame = clock_alloc_page(stack_bottom);
+        frame_ref_t frame = alloc_frame();
         if (frame == NULL_FRAME) {
+            ZF_LOGE("Couldn't allocate additional stack frame");
             return 0;
         }
 
@@ -497,10 +499,8 @@ bool start_first_process(char *app_name)
     /* Initialise the process address space */
     user_process.addrspace = as_create();
 
-    as_define_ipc_buff(user_process.addrspace);
-
     /* Create an IPC buffer */
-    user_process.ipc_buffer_frame = clock_alloc_page(PROCESS_IPC_BUFFER);
+    user_process.ipc_buffer_frame = alloc_frame();
     if (user_process.ipc_buffer_frame == NULL_FRAME) {
         ZF_LOGE("Failed to alloc ipc buffer ut");
         return false;
@@ -605,13 +605,6 @@ bool start_first_process(char *app_name)
     }
     /* Add the ipc buffer vaddr to the clock buffer for demand paging */
     clock_add_page(PROCESS_IPC_BUFFER);
-
-    /* load the elf image from the cpio file */
-    err = elf_load(&cspace, user_process.vspace, &elf_file, user_process.addrspace);
-    if (err) {
-        ZF_LOGE("Failed to load elf image");
-        return false;
-    }
 
     /* load the elf image from the cpio file */
     err = elf_load(&cspace, user_process.vspace, &elf_file, user_process.addrspace);
@@ -785,7 +778,6 @@ NORETURN void *main_continued(UNUSED void *arg)
     int error = nfs_open_file("pagefile", O_RDWR, nfs_async_open_cb, &args);
     ZF_LOGF_IF(error, "NFS: Error in opening pagefile");
     nfs_pagefile->handle = args.buff;
-    init_bitmap();
 
     init_bitmap();
 
