@@ -68,6 +68,13 @@ static inline uint64_t get_page_file_offset() {
     return swap_map_index * PAGE_SIZE_4K;
 }
 
+static void unmap_page(seL4_CPtr frame_cptr, frame_ref_t frame_ref) {
+    seL4_Error err = seL4_ARM_Page_Unmap(frame_cptr);
+    ZF_LOGF_IFERR(err != seL4_NoError, "Failed to unmap page");
+    free_untype(&frame_cptr, NULL);
+    free_frame(frame_ref);
+}
+
 /**
  * Identifies a candidate to page out, and writes it into the paging file on the nfs.
  * The corresponding frame is then unmapped from the hardware page table.
@@ -84,6 +91,7 @@ static int clock_page_out() {
             break;
         }
         GET_PAGE(as->page_table, vaddr).page.ref = 0;
+        // unmap_page(entry.page.frame_cptr, entry.page.frame_ref);
         clock_hand = (clock_hand + 1) % BUFFER_SIZE;
     }
     
@@ -96,10 +104,7 @@ static int clock_page_out() {
     }
 
     seL4_CPtr frame_cptr = entry.page.frame_cptr;
-    int err = seL4_ARM_Page_Unmap(frame_cptr);
-    ZF_LOGF_IFERR(err, "Failed to unmap page");
-    free_untype(&frame_cptr, NULL);
-    free_frame(entry.page.frame_ref);
+    unmap_page(frame_cptr, entry.page.frame_ref);
 
     pt_entry new_entry = {.present = 0, .swapped = 1, .swap_map_index = file_offset / PAGE_SIZE_4K};
     GET_PAGE(as->page_table, vaddr) = new_entry;
