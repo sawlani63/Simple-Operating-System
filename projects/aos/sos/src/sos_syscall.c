@@ -243,6 +243,7 @@ void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
     int write_fd = seL4_GetMR(1);
     seL4_Word vaddr = seL4_GetMR(2);
     size_t nbyte = seL4_GetMR(3);
+    assert(6969696969 == seL4_GetMR(4));
 
     /* Find the file associated with the file descriptor */
     open_file *found = fdt_get_file(user_process.fdt, write_fd);

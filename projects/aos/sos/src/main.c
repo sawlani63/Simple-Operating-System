@@ -23,7 +23,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "sosh"
+#define APP_NAME             "console_test"
 #define APP_PRIORITY         (0)
 #define APP_EP_BADGE         (101)
 
@@ -83,9 +83,6 @@ bool handle_vm_fault(seL4_Word fault_addr) {
             return false;
         }
     }
-
-    //make sync
-    //and pin pages
 
     /* Allocate a new frame to be mapped by the shadow page table. */
     frame_ref_t frame_ref = clock_alloc_frame(fault_addr);

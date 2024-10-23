@@ -50,14 +50,14 @@ ut_t *alloc_retype(seL4_CPtr *cptr, seL4_Word type, size_t size_bits)
 /* helper to delete a capability, free the cslot and mark the untyped memory as free */
 void free_untype(seL4_CPtr *cptr, ut_t *node)
 {
-    /* Delete the capability and return the memory used as untyped memory */
-    if (cptr != NULL && cspace_delete(&cspace, *cptr)) {
-        ZF_LOGE("Failed to delete the capability");
-        return;
-    }
-
-    /* Return the now empty cspace slot into the cspace's free slots list */
     if (cptr != NULL) {
+        /* Delete the capability and return the memory used as untyped memory */
+        if (cspace_delete(&cspace, *cptr)) {
+            ZF_LOGE("Failed to delete the capability");
+            return;
+        }
+
+        /* Return the now empty cspace slot into the cspace's free slots list */
         cspace_free_slot(&cspace, *cptr);
     }
 

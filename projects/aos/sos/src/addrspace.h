@@ -23,10 +23,12 @@ typedef struct _region {
 typedef struct {
     /* A single bit to let us know if this is entry is present in the page table. */
     size_t present : 1;
-    /* A single bit to let us know whether this entry has been swapped out or not */
+    /* A single bit to let us know whether this entry is new or back from disk */
     size_t swapped : 1;
     /* Four bits to indicate the permissions associated with this page entry */
     size_t perms : 4;
+    /* A single bit to indicate whether this entry is pinned in memory and cannot be paged out */
+    size_t pinned : 1;
     /* These two structs share the same memory and the one we use depends on the present bit. */
     union {
         struct {
@@ -35,7 +37,7 @@ typedef struct {
             /* Reference into the frame table. */
             frame_ref_t frame_ref : 19;
             /* Capability to the frame in the Hardware Page Table. */
-            seL4_CPtr frame_cptr : 38;
+            seL4_CPtr frame_cptr : 37;
         } page;
         /* Index into the swap map. Large enough to support the entire address space. */
         size_t swap_map_index : 20;

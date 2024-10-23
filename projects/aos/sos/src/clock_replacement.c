@@ -87,11 +87,13 @@ static int clock_page_out() {
     while (1) {
         vaddr = circular_buffer[clock_hand];
         entry = GET_PAGE(as->page_table, vaddr);
-        if (entry.page.ref == 0) {
-            break;
+        if (!entry.pinned) {
+            if (entry.page.ref == 0) {
+                break;
+            }
+            GET_PAGE(as->page_table, vaddr).page.ref = 0;
+            // unmap_page(entry.page.frame_cptr, entry.page.frame_ref);
         }
-        GET_PAGE(as->page_table, vaddr).page.ref = 0;
-        // unmap_page(entry.page.frame_cptr, entry.page.frame_ref);
         clock_hand = (clock_hand + 1) % BUFFER_SIZE;
     }
     
