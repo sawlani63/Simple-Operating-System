@@ -216,7 +216,7 @@ void dhcp_callback(void *cli, int code)
     dhcp_status = DHCP_STATUS_FINISHED;
 }
 
-void network_init(cspace_t *cspace, void *timer_vaddr, seL4_CPtr irq_ntfn)
+void network_init(cspace_t *cspace, void *timer_vaddr)
 {
     int error;
     ZF_LOGI("\nInitialising network...\n\n");
@@ -273,15 +273,9 @@ void network_init(cspace_t *cspace, void *timer_vaddr, seL4_CPtr irq_ntfn)
     error = pico_dhcp_initiate_negotiation(&pico_dev, dhcp_callback, &dhcp_xid);
     ZF_LOGF_IF(error != 0, "Failed to initialise DHCP negotiation");
 
-    /* handle all interrupts until dhcp negotiation finished
+    /* Interrupts handled by irq thread until dhcp negotiation finished
      * this is needed so we can receive and handle dhcp response */
     do {
-        seL4_Word badge;
-        seL4_Wait(irq_ntfn, &badge);
-        
-        UNUSED bool have_reply;
-        sos_handle_irq_notification(&badge, &have_reply);
-        
         if (dhcp_status == DHCP_STATUS_ERR) {
             ZF_LOGD("restarting dhcp negotiation");
             error = pico_dhcp_initiate_negotiation(&pico_dev, dhcp_callback, &dhcp_xid);
