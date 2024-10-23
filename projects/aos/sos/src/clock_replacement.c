@@ -7,7 +7,7 @@
 /* 2^19 is the entire frame table size, meaning we can
    cover every page with 2^19 * 8 bytes = 4MB of memory. */
 #ifdef CONFIG_SOS_FRAME_LIMIT
-    #define BUFFER_SIZE (CONFIG_SOS_FRAME_LIMIT != 0ul ? CONFIG_SOS_FRAME_LIMIT : BIT(19)) - 1
+    #define BUFFER_SIZE (CONFIG_SOS_FRAME_LIMIT != 0ul ? CONFIG_SOS_FRAME_LIMIT - 1 : BIT(19))
 #else
     #define BUFFER_SIZE BIT(19)
 #endif

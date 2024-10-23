@@ -27,6 +27,9 @@ int check_overlap(addrspace_t *addrspace, size_t base, size_t size) {
 
 /* Function to insert a memory region */
 mem_region_t *insert_region(addrspace_t *addrspace, size_t base, size_t size, uint64_t perms) {
+    size_t end = PAGE_ALIGN(base + size + PAGE_SIZE_4K - 1, PAGE_SIZE_4K);
+    base = PAGE_ALIGN(base, PAGE_SIZE_4K);
+    size = end - base;
     mem_region_t *region = malloc(sizeof(mem_region_t));
     if (region == NULL) {
         printf("No memory for a new region!\n");
