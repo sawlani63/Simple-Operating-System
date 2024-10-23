@@ -108,7 +108,7 @@ static int clock_page_out() {
     seL4_CPtr frame_cptr = entry.page.frame_cptr;
     unmap_page(frame_cptr, entry.page.frame_ref);
 
-    pt_entry new_entry = {.present = 0, .swapped = 1, .swap_map_index = file_offset / PAGE_SIZE_4K};
+    pt_entry new_entry = {.present = 0, .swapped = 1, .pinned = 0, .swap_map_index = file_offset / PAGE_SIZE_4K};
     GET_PAGE(as->page_table, vaddr) = new_entry;
     return 0;
 }
