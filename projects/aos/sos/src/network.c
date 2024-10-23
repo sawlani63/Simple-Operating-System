@@ -351,10 +351,34 @@ int nfs_close_file(void *nfsfh, nfs_cb cb, void *private_data)
     return 0;
 }
 
+int nfs_pread_file(void *nfsfh, uint64_t offset, uint64_t count, void *cb, void *private_data)
+{
+    sync_bin_sem_wait(net_sync_sem);
+    int res = nfs_pread_async(nfs, nfsfh, offset, count, cb, private_data);
+    sync_bin_sem_post(net_sync_sem);
+    if (res < 0) {
+        return -1;
+    }
+    sync_bin_sem_wait(nfs_sem);
+    return ((nfs_args *) private_data)->err;
+}
+
 int nfs_read_file(void *nfsfh, UNUSED char *data, uint64_t count, void *cb, void *private_data)
 {
     sync_bin_sem_wait(net_sync_sem);
     int res = nfs_read_async(nfs, nfsfh, count, cb, private_data);
+    sync_bin_sem_post(net_sync_sem);
+    if (res < 0) {
+        return -1;
+    }
+    sync_bin_sem_wait(nfs_sem);
+    return ((nfs_args *) private_data)->err;
+}
+
+int nfs_pwrite_file(void *nfsfh, uint64_t offset, char *buf, uint64_t count, void *cb, void *private_data)
+{
+    sync_bin_sem_wait(net_sync_sem);
+    int res = nfs_pwrite_async(nfs, nfsfh, offset, count, buf, cb, private_data);
     sync_bin_sem_post(net_sync_sem);
     if (res < 0) {
         return -1;

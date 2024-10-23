@@ -23,21 +23,20 @@ typedef struct _region {
 typedef struct {
     /* A single bit to let us know if this is entry is present in the page table. */
     size_t present : 1;
+    /* A single bit to let us know whether this entry has been swapped out or not */
+    size_t swapped : 1;
     /* These two structs share the same memory and the one we use depends on the present bit. */
     union {
         struct {
+            /* Reference bit to indicate whether this page was recently referenced */
+            size_t ref : 1;
             /* Reference into the frame table. */
             frame_ref_t frame_ref : 19;
             /* Capability to the frame in the Hardware Page Table. */
-            seL4_CPtr frame_cptr : 44;
+            seL4_CPtr frame_cptr : 42;
         } page;
-        
-        struct {
-            /* Position in the nfs paging file the page entry is stored in. */
-            size_t file_position : 52;
-            /* Unused bits which we can change later if we find a use for them. */
-            size_t unused : 11;
-        } swapped;
+        /* Index into the swap map. Large enough to support the entire address space. */
+        size_t swap_map_index : 62;
     };
 } PACKED pt_entry;
 
