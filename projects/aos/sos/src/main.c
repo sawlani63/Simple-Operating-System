@@ -91,9 +91,6 @@ bool handle_vm_fault(seL4_Word fault_addr) {
         }
     }
 
-    //make sync
-    //and pin pages
-
     /* Allocate a new frame to be mapped by the shadow page table. */
     frame_ref_t frame_ref = clock_alloc_frame(fault_addr);
     if (frame_ref == NULL_FRAME) {

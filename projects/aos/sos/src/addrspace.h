@@ -26,8 +26,10 @@ typedef struct {
     /* A single bit to let us know whether this entry has been paged out onto disk or not. */
     size_t swapped : 1;
     /* Three bits to indicate the permissions associated with this page entry. */
-    size_t perms : 3;
+    size_t pinned : 1;
     /* These two structs share the same memory and the one we use depends on the present bit. */
+    size_t perms : 3;
+    /* A single bit to indicate whether this entry is pinned in memory and cannot be paged out */
     union {
         struct {
             /* Reference bit to indicate whether this page was recently referenced */
@@ -35,7 +37,7 @@ typedef struct {
             /* Reference into the frame table. */
             frame_ref_t frame_ref : 19;
             /* Capability to the frame in the Hardware Page Table. */
-            seL4_CPtr frame_cptr : 39;
+            seL4_CPtr frame_cptr : 38;
         } page;
         /* Index into the swap map. Large enough to support the entire address space. */
         size_t swap_map_index : 20;

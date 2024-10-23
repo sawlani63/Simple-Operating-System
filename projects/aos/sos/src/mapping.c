@@ -228,7 +228,10 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
         return err;
     }
 
-    pt_entry entry = {.valid = 1, .swapped = 0, .perms = perms, .page = {1, frame_ref, frame_cap}};
+    pt_entry entry = {.valid = 1, .swapped = 0, .pinned = 0, .perms = perms, .page = {1, frame_ref, frame_cap}};
+    if (vaddr == PROCESS_IPC_BUFFER) {
+        entry.pinned = 1;
+    }
     l4_pt[l4_index] = entry;
 
     /* Assign the appropriate rights and attributes for the frame we are about to map. */

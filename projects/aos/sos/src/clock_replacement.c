@@ -80,12 +80,14 @@ static int clock_page_out() {
     while (1) {
         vaddr = circular_buffer[clock_hand];
         entry = GET_PAGE(as->page_table, vaddr);
-        if (entry.page.ref == 0) {
-            break;
+        if (!entry.pinned) {
+            if (entry.page.ref == 0) {
+                break;
+            }
+            GET_PAGE(as->page_table, vaddr).page.ref = 0;
+            seL4_Error err = seL4_ARM_Page_Unmap(entry.page.frame_cptr);
+            ZF_LOGF_IFERR(err != seL4_NoError, "Failed to unmap page");
         }
-        GET_PAGE(as->page_table, vaddr).page.ref = 0;
-        seL4_Error err = seL4_ARM_Page_Unmap(entry.page.frame_cptr);
-        ZF_LOGF_IFERR(err != seL4_NoError, "Failed to unmap page");
         clock_hand = (clock_hand + 1) % BUFFER_SIZE;
     }
     
@@ -103,7 +105,7 @@ static int clock_page_out() {
     free_untype(&frame_cptr, NULL);
     free_frame(entry.page.frame_ref);
 
-    pt_entry new_entry = {.valid = 0, .swapped = 1, .perms = GET_PAGE(as->page_table, vaddr).perms,
+    pt_entry new_entry = {.valid = 0, .swapped = 1, .pinned = 0 , .perms = GET_PAGE(as->page_table, vaddr).perms,
                           .swap_map_index = file_offset / PAGE_SIZE_4K};
     GET_PAGE(as->page_table, vaddr) = new_entry;
     return 0;
