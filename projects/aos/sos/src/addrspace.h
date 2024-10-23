@@ -25,6 +25,8 @@ typedef struct {
     size_t valid : 1;
     /* A single bit to let us know if this is entry is present in the page table. */
     size_t present : 1;
+    /* A single bit to let us know whether this entry has been swapped out or not */
+    size_t swapped : 1;
     /* These two structs share the same memory and the one we use depends on the present bit. */
     union {
         struct {

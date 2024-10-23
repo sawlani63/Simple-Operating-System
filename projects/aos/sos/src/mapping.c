@@ -228,7 +228,7 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, se
         return err;
     }
 
-    pt_entry entry = {.valid = 1, .present = 1, .page = {1, frame_ref, frame_cap}};
+    pt_entry entry = {.present = 1, .swapped = l4_pt[l4_index].swapped, .page = {1, frame_ref, frame_cap}};
     l4_pt[l4_index] = entry;
 
     return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, l1_pt);

@@ -137,7 +137,7 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg)
     int path_len = seL4_GetMR(2);
     int mode = seL4_GetMR(3);
 
-    ZF_LOGV("syscall: thread example made syscall %d!\n", SYSCALL_SOS_OPEN);
+    ZF_LOGE("syscall: thread example made syscall %d!\n", SYSCALL_SOS_OPEN);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     if ((mode != O_WRONLY) && (mode != O_RDONLY) && (mode != O_RDWR)) {
@@ -181,7 +181,7 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg)
 
 void syscall_sos_close(seL4_MessageInfo_t *reply_msg)
 {
-    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_CLOSE);
+    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_CLOSE);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     int close_fd = seL4_GetMR(1);
@@ -214,7 +214,7 @@ void syscall_sos_close(seL4_MessageInfo_t *reply_msg)
 
 void syscall_sos_read(seL4_MessageInfo_t *reply_msg) 
 {
-    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_READ);
+    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_READ);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Receive a fd from sos.c */
@@ -235,7 +235,7 @@ void syscall_sos_read(seL4_MessageInfo_t *reply_msg)
 
 void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
 {
-    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_WRITE);
+    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_WRITE);
     /* Construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
 
@@ -283,7 +283,7 @@ inline void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
 
 void syscall_sos_stat(seL4_MessageInfo_t *reply_msg)
 {
-    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_STAT);
+    ZF_LOGE("syscall: some thread made syscall %d!\n", SYSCALL_SOS_STAT);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     seL4_Word path_vaddr = seL4_GetMR(1);
     seL4_Word buf_vaddr = seL4_GetMR(2);

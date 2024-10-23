@@ -7,7 +7,7 @@
 /* 2^19 is the entire frame table size, meaning we can
    cover every page with 2^19 * 8 bytes = 4MB of memory. */
 #ifdef CONFIG_SOS_FRAME_LIMIT
-    #define BUFFER_SIZE (CONFIG_SOS_FRAME_LIMIT != 0ul ? CONFIG_SOS_FRAME_LIMIT : BIT(19))
+    #define BUFFER_SIZE (CONFIG_SOS_FRAME_LIMIT != 0ul ? CONFIG_SOS_FRAME_LIMIT : BIT(19)) - 1
 #else
     #define BUFFER_SIZE BIT(19)
 #endif
@@ -21,8 +21,8 @@ uint8_t *swap_map;
 
 extern struct user_process user_process;
 extern open_file *nfs_pagefile;
+
 extern sync_bin_sem_t *nfs_sem;
-extern cspace_t cspace;
 
 // Initialize bitmap (0 means free, 1 means used)
 void init_bitmap() {
@@ -61,7 +61,7 @@ int find_first_free_block() {
     return -1;
 }
 
-static inline uint64_t get_page_file_offset() {
+static inline uint32_t get_page_file_offset() {
     int swap_map_index = find_first_free_block();
     ZF_LOGF_IF(swap_map_index < 0, "Could not find a free swap map index!\n");
     mark_block_used(swap_map_index);
@@ -86,10 +86,10 @@ static int clock_page_out() {
         }
         entry.page.ref = 0;
         GET_PAGE(as->page_table, vaddr) = entry;
-        clock_hand = (clock_hand + 1) % (BUFFER_SIZE - 1);
+        clock_hand = (clock_hand + 1) % BUFFER_SIZE;
     }
     
-    uint64_t file_offset = get_page_file_offset();
+    uint32_t file_offset = get_page_file_offset();
     char *data = (char *)frame_data(entry.page.frame_ref);
     nfs_args args = {PAGE_SIZE_4K, data, nfs_sem};
     int res = nfs_pwrite_file(nfs_pagefile->handle, file_offset, data, PAGE_SIZE_4K, nfs_async_write_cb, &args);
@@ -98,18 +98,17 @@ static int clock_page_out() {
     }
 
     seL4_CPtr frame_cptr = entry.page.frame_cptr;
-    seL4_ARM_Page_Unmap(frame_cptr);
-    cspace_free_slot(&cspace, frame_cptr);
+    int err = seL4_ARM_Page_Unmap(frame_cptr);
+    ZF_LOGF_IFERR(err, "Failed to unmap page");
+    free_untype(&frame_cptr, NULL);
     free_frame(entry.page.frame_ref);
 
     entry.present = 0;
+    entry.swapped = 1;
     entry.swap_map_index = file_offset / PAGE_SIZE_4K;
     GET_PAGE(as->page_table, vaddr) = entry;
-
-    printf("Paged out vaddr %p into swap map offset %d\n", vaddr, entry.swap_map_index);
-
     return 0;
-}   
+}
 
 /**
  * Adds a page in the page table to the clock circular buffer.

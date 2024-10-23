@@ -127,6 +127,8 @@ frame_ref_t alloc_frame(void)
 
     if (frame != NULL) {
         push_back(&frame_table.allocated, frame);
+    } else {
+        return NULL_FRAME;
     }
 
     return ref_from_frame(frame);

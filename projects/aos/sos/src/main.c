@@ -61,8 +61,24 @@ bool handle_vm_fault(seL4_Word fault_addr) {
         return false;
     }
 
-    if (!clock_try_page_in(fault_addr)) {
-        return true;
+    uint16_t l1_index = (fault_addr >> 39) & MASK(9); /* Top 9 bits */
+    uint16_t l2_index = (fault_addr >> 30) & MASK(9); /* Next 9 bits */
+    uint16_t l3_index = (fault_addr >> 21) & MASK(9); /* Next 9 bits */
+    uint16_t l4_index = (fault_addr >> 12) & MASK(9); /* Next 9 bits */
+
+    /* Cache the related page table entries so we don't have to perform lots of dereferencing. */
+    page_upper_directory *l1_pt = as->page_table;
+    page_directory *l2_pt = NULL;
+    page_table *l3_pt = NULL;
+    pt_entry *l4_pt = NULL;
+    if (l1_pt[l1_index].l2 != NULL) {
+        l2_pt = l1_pt[l1_index].l2;
+        if (l2_pt[l2_index].l3 != NULL) {
+            l3_pt = l2_pt[l2_index].l3;
+            if (l3_pt[l3_index].l4 != NULL) {
+                l4_pt = l3_pt[l3_index].l4;
+            }
+        }
     }
 
     /* Check if we're faulting in a valid region. */
@@ -88,6 +104,8 @@ bool handle_vm_fault(seL4_Word fault_addr) {
         }
     }
 
+    ZF_LOGE("FAULT ADDR %p", fault_addr);
+
     seL4_ARM_VMAttributes attr = seL4_ARM_Default_VMAttributes;
 
     /* Assign the appropriate rights for the frame we are about to map. */
@@ -96,16 +114,74 @@ bool handle_vm_fault(seL4_Word fault_addr) {
         attr |= seL4_ARM_ExecuteNever;
     }
 
+    //make sync
+    //and pin pages
+
+    if (clock_add_page(fault_addr)) {
+        ZF_LOGE("Could not page out an existing entry and add this address");
+        return false;
+    }
+
     /* Allocate a new frame to be mapped by the shadow page table. */
     frame_ref_t frame_ref = clock_alloc_page(fault_addr);
     if (frame_ref == NULL_FRAME) {
-        ZF_LOGE("Weird error occurred, could not allocate a frame in vm fault");
+        /* We could not allocate a new frame, so we will page out an existing entry and try again. */
+        ZF_LOGD("Failed to alloc frame");
+        return false;
     }
 
-    /* Map the frame into the relevant page tables. */
-    if (sos_map_frame(&cspace, user_process.vspace, fault_addr, rights, attr, frame_ref, as) != 0) {
-        ZF_LOGE("Could not map the frame into the two page tables");
-        return false;
+    pt_entry entry;
+    uint32_t file_offset;
+    if (l4_pt != NULL) {
+        entry = l4_pt[l4_index];
+        file_offset = entry.swap_map_index * PAGE_SIZE_4K;
+        entry.present = 1;
+        entry.page.ref = 1;
+        entry.page.frame_ref = frame_ref;
+
+        /* create slot for the frame to load the data into */
+        seL4_CPtr frame_cap = cspace_alloc_slot(&cspace);
+        if (frame_cap == seL4_CapNull) {
+            ZF_LOGD("Failed to alloc slot");
+            return false;
+        }
+
+        /* copy the frame cptr into the loadee's address space */
+        seL4_Error err = cspace_copy(&cspace, frame_cap, &cspace, frame_page(entry.page.frame_ref), seL4_AllRights);
+        if (err != seL4_NoError) {
+            ZF_LOGD("Failed to untyped reypte");
+            return false;
+        }
+
+        /*if (entry.swapped) {
+            char *data = (char *)frame_data(entry.page.frame_ref);
+            nfs_args args = {PAGE_SIZE_4K, data, nfs_sem};
+            int res = nfs_pread_file(nfs_pagefile->handle, file_offset, PAGE_SIZE_4K, nfs_async_read_cb, &args);
+            if (res < (int)PAGE_SIZE_4K) {
+                return;
+            }
+            mark_block_free(file_offset / PAGE_SIZE_4K);
+        }*/
+
+        char *data = (char *)frame_data(entry.page.frame_ref);
+        nfs_args args = {PAGE_SIZE_4K, data, nfs_sem};
+        int res = nfs_pread_file(nfs_pagefile->handle, file_offset, PAGE_SIZE_4K, nfs_async_read_cb, &args);
+        if (res < (int)PAGE_SIZE_4K) {
+            return;
+        }
+        mark_block_free(file_offset / PAGE_SIZE_4K);
+        ZF_LOGE("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        err = seL4_ARM_Page_Map(frame_cap, user_process.vspace, fault_addr, rights, attr);
+        ZF_LOGF_IF(err == seL4_FailedLookup, "Failed to map into the HPT in clock_try_page_in!\n");
+        entry.page.frame_cptr = frame_cap;
+        l4_pt[l4_index] = entry;
+    } else {
+        /* Map the frame into the relevant page tables. */
+        ZF_LOGE("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        if (sos_map_frame(&cspace, user_process.vspace, fault_addr, rights, attr, frame_ref, as) != 0) {
+            ZF_LOGE("Could not map the frame into the two page tables");
+            return false;
+        }
     }
 
     return true;
@@ -290,6 +366,8 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
         ZF_LOGE("Unable to map stack for user app");
         return 0;
     }
+    /* Add the mapped frame vaddr to the clock buffer for demand paging */
+    clock_add_page(stack_bottom);
 
     /* allocate a slot to duplicate the stack frame cap so we can map it into our address space */
     seL4_CPtr local_stack_cptr = cspace_alloc_slot(cspace);
@@ -374,6 +452,7 @@ static uintptr_t init_process_stack(cspace_t *cspace, seL4_CPtr local_vspace, el
         err = sos_map_frame(cspace, user_process.vspace, stack_bottom, seL4_AllRights,
                             seL4_ARM_Default_VMAttributes | seL4_ARM_ExecuteNever, frame,
                             user_process.addrspace);
+        clock_add_page(stack_bottom);
     }
 
     return stack_top;
@@ -522,6 +601,15 @@ bool start_first_process(char *app_name)
                         user_process.ipc_buffer_frame, user_process.addrspace);
     if (err != 0) {
         ZF_LOGE("Unable to map IPC buffer for user app");
+        return false;
+    }
+    /* Add the ipc buffer vaddr to the clock buffer for demand paging */
+    clock_add_page(PROCESS_IPC_BUFFER);
+
+    /* load the elf image from the cpio file */
+    err = elf_load(&cspace, user_process.vspace, &elf_file, user_process.addrspace);
+    if (err) {
+        ZF_LOGE("Failed to load elf image");
         return false;
     }
 
@@ -677,7 +765,6 @@ NORETURN void *main_continued(UNUSED void *arg)
     seL4_Error bind_err = seL4_TCB_UnbindNotification(seL4_CapInitThreadTCB);
     ZF_LOGF_IFERR(err, "Failed to unbind notification object");
     /* Initialize a temporary irq handling thread that binds the notification object to its TCB and handles irqs until the main thread is done with its tasks */
-    /* Current state = running */
     sos_thread_t *irq_temp_thread = thread_create(irq_loop, (void *)ipc_ep, 0, true, seL4_MaxPrio, ntfn, false);
     if (irq_temp_thread == NULL) {
         ZF_LOGE("Could not create irq handler thread\n");
@@ -698,6 +785,8 @@ NORETURN void *main_continued(UNUSED void *arg)
     int error = nfs_open_file("pagefile", O_RDWR, nfs_async_open_cb, &args);
     ZF_LOGF_IF(error, "NFS: Error in opening pagefile");
     nfs_pagefile->handle = args.buff;
+    init_bitmap();
+
     init_bitmap();
 
 #ifdef CONFIG_SOS_GDB_ENABLED

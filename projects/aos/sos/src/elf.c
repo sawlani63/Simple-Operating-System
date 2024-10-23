@@ -23,6 +23,8 @@
 #include "elfload.h"
 #include "clock_replacement.h"
 
+#include "clock_replacement.h"
+
 /*
  * Convert ELF permissions into seL4 permissions.
  */
@@ -82,6 +84,11 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
     seL4_Error err = seL4_NoError;
     while (pos < segment_size) {
         uintptr_t loadee_vaddr = (ROUND_DOWN(dst, PAGE_SIZE_4K));
+
+        if (clock_add_page(loadee_vaddr)) {
+            ZF_LOGE("Could not page out an existing entry and add this address");
+            return -1;
+        }
 
         /* allocate the frame for the loadees address space */
         frame_ref_t frame = clock_alloc_page(loadee_vaddr);
