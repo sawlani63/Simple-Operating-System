@@ -343,6 +343,9 @@ void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg)
     char* name = nfsdirent->name;
     if (!strcmp(nfsdirent->name, "..")) {
         name = "console";
+    } else if (!strcmp(nfsdirent->name, "pagefile")) {
+        seL4_SetMR(0, -2);
+        return;
     } else if (i + 1 == pos && nfsdirent->next == NULL) {
         seL4_SetMR(0, 0);
         return;
