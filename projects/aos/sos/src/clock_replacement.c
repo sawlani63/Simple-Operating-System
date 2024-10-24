@@ -93,7 +93,7 @@ static int clock_page_out() {
     
     uint64_t file_offset = get_page_file_offset();
     char *data = (char *)frame_data(entry.page.frame_ref);
-    nfs_args args = {PAGE_SIZE_4K, data, nfs_sem};
+    nfs_args args = {PAGE_SIZE_4K, data, nfs_sem, 0, 0};
     int res = nfs_pwrite_file(nfs_pagefile->handle, file_offset, data, PAGE_SIZE_4K, nfs_async_write_cb, &args);
     if (res < (int)PAGE_SIZE_4K) {
         return 1;
@@ -162,7 +162,7 @@ int clock_try_page_in(seL4_Word vaddr, addrspace_t *as) {
 
         uint64_t file_offset = l4_pt[l4_index].swap_map_index * PAGE_SIZE_4K;
         char *data = (char *)frame_data(frame_ref);
-        nfs_args args = {PAGE_SIZE_4K, data, nfs_sem};
+        nfs_args args = {PAGE_SIZE_4K, data, nfs_sem, 0, 0};
         int res = nfs_pread_file(nfs_pagefile->handle, file_offset, PAGE_SIZE_4K, nfs_async_read_cb, &args);
         if (res < (int)PAGE_SIZE_4K) {
             return -1;

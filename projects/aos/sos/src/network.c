@@ -49,6 +49,7 @@
 #include "ut.h"
 #include "utils.h"
 #include "nfs.h"
+#include "open_file.h"
 
 #ifndef SOS_NFS_DIR
 #  ifdef CONFIG_SOS_NFS_DIR
@@ -350,16 +351,17 @@ int nfs_pread_file(void *nfsfh, uint64_t offset, uint64_t count, void *cb, void 
     return ((nfs_args *) private_data)->err;
 }
 
-int nfs_read_file(void *nfsfh, UNUSED char *data, uint64_t count, void *cb, void *private_data)
+int nfs_read_file(open_file *file, UNUSED char *data, uint64_t offset, uint64_t count, void *cb, void *private_data)
 {
-    sync_bin_sem_wait(net_sync_sem);
-    int res = nfs_read_async(nfs, nfsfh, count, cb, private_data);
-    sync_bin_sem_post(net_sync_sem);
-    if (res < 0) {
-        return -1;
+    if (offset > file->size) {
+        return 0;
+    } else if (offset + count > file->size) {
+        count = file->size - offset;
     }
-    sync_bin_sem_wait(nfs_sem);
-    return ((nfs_args *) private_data)->err;
+    sync_bin_sem_wait(net_sync_sem);
+    int res = nfs_read_async(nfs, file->handle, count, cb, private_data);
+    sync_bin_sem_post(net_sync_sem);
+    return res < 0 ? -1 : (int)count;
 }
 
 int nfs_pwrite_file(void *nfsfh, uint64_t offset, char *buf, uint64_t count, void *cb, void *private_data)
@@ -374,16 +376,12 @@ int nfs_pwrite_file(void *nfsfh, uint64_t offset, char *buf, uint64_t count, voi
     return ((nfs_args *) private_data)->err;
 }
 
-int nfs_write_file(void *nfsfh, char *buf, uint64_t count, void *cb, void *private_data)
+int nfs_write_file(open_file *file, char *buf, UNUSED uint64_t offset, uint64_t count, void *cb, void *private_data)
 {
     sync_bin_sem_wait(net_sync_sem);
-    int res = nfs_write_async(nfs, nfsfh, count, buf, cb, private_data);
+    int res = nfs_write_async(nfs, file->handle, count, buf, cb, private_data);
     sync_bin_sem_post(net_sync_sem);
-    if (res < 0) {
-        return -1;
-    }
-    sync_bin_sem_wait(nfs_sem);
-    return ((nfs_args *) private_data)->err;
+    return res < 0 ? -1 : (int)count;
 }
 
 int nfs_stat_file(const char *path, nfs_cb cb, void *private_data)

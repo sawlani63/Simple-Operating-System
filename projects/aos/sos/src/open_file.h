@@ -5,7 +5,10 @@
 #include <sync/bin_sem.h>
 
 typedef const char * string;
-typedef int (*execute_io)(void *handle, char *data, uint64_t len, void *cb, void *args);
+struct file;
+
+typedef const char * string;
+typedef int (*execute_io)(struct file *file, char *data, uint64_t offset, uint64_t len, void *cb, void *args);
 
 typedef struct file {
     void *handle; // i dont like this
@@ -14,6 +17,8 @@ typedef struct file {
     execute_io file_write;
     execute_io file_read;
     sync_bin_sem_t *file_sem;
+    size_t write_seek;
+    size_t size;
 } open_file;
 
 /**

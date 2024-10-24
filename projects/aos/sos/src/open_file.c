@@ -16,6 +16,8 @@ open_file *file_create(string path, int mode, execute_io file_write, execute_io 
     file->file_read = file_read;
     file->file_write = file_write;
     file->file_sem = malloc(sizeof(sync_bin_sem_t));
+    file->write_seek = 0;
+    file->size = 0;
 
     ZF_LOGF_IF(!file->file_sem, "No memory for semaphore object");
     seL4_CPtr cptr;

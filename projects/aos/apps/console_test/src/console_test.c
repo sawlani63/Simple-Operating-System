@@ -135,7 +135,7 @@ int test_nfs() {
     printf("From stat - type: %d, mode: %d, size: %u, atime: %ld, ctime: %ld\n",
            stat.st_type, stat.st_fmode, stat.st_size, stat.st_atime, stat.st_ctime);
 
-    char *buffer = malloc(MEDIUM_BUF_SZ);
+    char *buffer = calloc(81, sizeof(char));
 
     /* should be garbage / nothing */
     // int result = sos_read(fd, buffer, MEDIUM_BUF_SZ);
@@ -143,8 +143,8 @@ int test_nfs() {
     // printf("Garbage Buffer: %s\n", buffer);
 
     /* test a small string from the code segment */
-    int result = sos_write(fd, "HelpB", MEDIUM_BUF_SZ);
-    assert(result == MEDIUM_BUF_SZ);
+    int result = sos_write(fd, "WritingASomewhatLongerStringToTestI/OOverlappingActuallyWorksAsIntendedForOnce\n", 80);
+    assert(result == 80);
     
     /* Close and reopen the file so we reset the offset. */
     int res = sos_close(fd);
@@ -153,9 +153,10 @@ int test_nfs() {
     assert(fd > 2);
 
     /* test reading to a small buffer */
-    result = sos_read(fd, buffer, MEDIUM_BUF_SZ);
-    assert(result == MEDIUM_BUF_SZ);
-    assert(!strcmp(buffer, "HelpB"));
+    result = sos_read(fd, buffer, 80);
+    assert(result == 80);
+    printf("\nbuffer: %s\n", buffer);
+    assert(!strcmp(buffer, "WritingASomewhatLongerStringToTestI/OOverlappingActuallyWorksAsIntendedForOnce\n"));
 
     sos_stat(file, &stat);
     printf("From stat - type: %d, mode: %d, size: %u, atime: %ld, ctime: %ld\n",

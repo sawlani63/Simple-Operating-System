@@ -23,7 +23,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "console_test"
+#define APP_NAME             "sosh"
 #define APP_PRIORITY         (0)
 #define APP_EP_BADGE         (101)
 
@@ -673,7 +673,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     network_console_register_handler(console, enqueue);
     init_console_sem();
     
-    open_file *file = file_create("console", O_WRONLY, network_console_send, deque);
+    open_file *file = file_create("console", O_WRONLY, netcon_send, deque);
     uint32_t fd;
     err = fdt_put(user_process.fdt, file, &fd); // initialise stdout
     ZF_LOGF_IF(err, "No memory for new file object");

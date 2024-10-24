@@ -53,6 +53,7 @@
         "type_traits": "cpp",
         "unordered_map": "c",
         "unordered_set": "c",
-        "clock_replacement.h": "c"
+        "clock_replacement.h": "c",
+        "utils.h": "c"
     }
 }

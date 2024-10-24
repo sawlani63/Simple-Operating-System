@@ -36,3 +36,4 @@ void syscall_sys_munmap(seL4_MessageInfo_t *reply_msg);
 void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
 
 void init_semaphores(void);
+int netcon_send(open_file *file, char *data, UNUSED uint64_t offset, uint64_t len, void *callback, void *args);

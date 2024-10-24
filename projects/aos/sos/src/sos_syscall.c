@@ -17,6 +17,9 @@ sync_bin_sem_t *file_sem = NULL;
 seL4_CPtr nfs_sem_cptr;
 sync_bin_sem_t *nfs_sem = NULL;
 
+seL4_CPtr io_ep;
+seL4_CPtr reply;
+
 bool handle_vm_fault(seL4_Word fault_addr);
 
 void init_semaphores(void) {
@@ -37,6 +40,13 @@ void init_semaphores(void) {
     ut_t *nfs_ut = alloc_retype(&nfs_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!nfs_ut, "No memory for notification");
     sync_bin_sem_init(nfs_sem, nfs_sem_cptr, 0);
+
+    alloc_retype(&io_ep, seL4_EndpointObject, seL4_EndpointBits);
+    ut_t *reply_ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
+    if (reply_ut == NULL) {
+        ZF_LOGF("Failed to alloc reply object ut");
+    }
+    initialise_thread_pool(netcon_reply);
 }
 
 static bool vaddr_is_mapped(seL4_Word vaddr) {
@@ -86,8 +96,86 @@ static inline void wakeup(UNUSED uint32_t id, void* data)
     sync_bin_sem_post(sleep_sem);
 }
 
-static int perform_io(size_t nbyte, uintptr_t vaddr, open_file *file,
-                      void *callback, uint8_t op, void *buff) {
+static int perform_io_core(int data_offset, uint64_t file_offset, uintptr_t vaddr, open_file *file,
+                           void *callback, bool read, int len, seL4_CPtr io_ep) {
+    if (!vaddr_check(vaddr)) {
+        return -1;
+    }
+
+    sync_bin_sem_wait(data_sem);
+    char *data = (char *)frame_data(get_frame(vaddr));
+    nfs_args args = {len, data + data_offset, NULL, io_ep};
+    int res;
+    if (read) {
+        res = file->file_read(file, data + data_offset, file_offset, len, callback, &args);
+    } else {
+        res = file->file_write(file, data + data_offset, file_offset, len, callback, &args);
+    }
+    sync_bin_sem_post(data_sem);
+
+    return res < 0 ? -1 : res;
+}
+
+static int cleanup_pending_requests(int outstanding_requests) {
+    while (outstanding_requests > 0) {
+        seL4_Recv(io_ep, 0, reply);
+        outstanding_requests--;
+    }
+    return -1;
+}
+
+static int perform_io(size_t nbyte, uintptr_t vaddr, open_file *file, void *callback, bool read) {
+    #define MAX_BATCH_SIZE 2
+    size_t bytes_received = 0;
+    size_t bytes_left = nbyte;
+    int offset = vaddr & (PAGE_SIZE_4K - 1);
+    uint32_t outstanding_requests = 0;
+
+    do {
+        /* Start the new batch of I/O requests. */
+        while (outstanding_requests < MAX_BATCH_SIZE && bytes_left > 0) {
+            int len = MIN(bytes_left, PAGE_SIZE_4K - offset);
+            int res = perform_io_core(offset, nbyte - bytes_left, vaddr, file, callback, read, len, io_ep);
+            
+            if (res < 0) {
+                return cleanup_pending_requests(outstanding_requests);
+            }
+            
+            outstanding_requests++;
+            bytes_left -= res;
+            vaddr += res;
+            offset = 0;
+            
+            /* If we got partial or non-existent data then exit early (we probably hit the EOF). */
+            if (res != 0 && res != len) {
+                break;
+            }
+        }
+
+        /* Collect and process the outstanding results. */
+        while (outstanding_requests > 0) {
+            seL4_Recv(io_ep, 0, reply);
+            int target = seL4_GetMR(0);
+            int result = seL4_GetMR(1);
+            
+            if (result < 0) {
+                return cleanup_pending_requests(outstanding_requests);
+            }
+            
+            bytes_received += result;
+            outstanding_requests--;
+            
+            if (target != result) {
+                cleanup_pending_requests(outstanding_requests);
+                return bytes_received;
+            }
+        }
+    } while (bytes_left > 0);
+
+    return bytes_received;
+}
+
+static int perform_cpy(size_t nbyte, uintptr_t vaddr, bool data_to_buff, void *buff) {
     size_t bytes_left = nbyte;
     int offset = vaddr & (PAGE_SIZE_4K - 1);
 
@@ -100,25 +188,9 @@ static int perform_io(size_t nbyte, uintptr_t vaddr, open_file *file,
 
         sync_bin_sem_wait(data_sem);
         char *data = (char *)frame_data(get_frame(vaddr));
-        nfs_args args = {len, data + offset, nfs_sem};
-        if (op & READ_IO) {
-            args.err = file->file_read(file->handle, data + offset, len, callback, &args);
-        } else if (op & WRITE_IO) {
-            args.err = file->file_write(file->handle, data + offset, len, callback, &args);
-        }
-        sync_bin_sem_post(data_sem);
-
-        if (args.err < 0) {
-            return -1;
-        } else if (args.err != len) {
-            bytes_left -= args.err;
-            break;
-        }
-
-        sync_bin_sem_wait(data_sem);
-        if (op & DATA_TO_BUFF) {
+        if (data_to_buff) {
             memcpy(buff + (nbyte - len), data + offset, len);
-        } else if (op & BUFF_TO_DATA) {
+        } else {
             memcpy(data + offset, buff + (nbyte - len), len);
         }
         sync_bin_sem_post(data_sem);
@@ -129,6 +201,14 @@ static int perform_io(size_t nbyte, uintptr_t vaddr, open_file *file,
         offset = 0;
     }
     return nbyte - bytes_left;
+}
+
+int netcon_send(open_file *file, char *data, UNUSED uint64_t offset, uint64_t len, void *callback, void *args) {
+    int res = network_console_send(file->handle, data, len, callback, args);
+    nfs_args *arg = (nfs_args *) args;
+    struct task task = {len, res, arg->io_ep};
+    submit_task(task);
+    return res;
 }
 
 void syscall_sos_open(seL4_MessageInfo_t *reply_msg) 
@@ -146,7 +226,7 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg)
     }
 
     char *file_path = calloc(path_len, sizeof(char));
-    int res = perform_io(path_len, vaddr, NULL, NULL, DATA_TO_BUFF, file_path);
+    int res = perform_cpy(path_len, vaddr, true, file_path);
     if (res == -1) {
         seL4_SetMR(0, -1);
         return;
@@ -163,7 +243,7 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg)
             console_open_for_read = true;
         }
         sync_bin_sem_post(file_sem);
-        file = file_create(file_path, mode, network_console_send, deque);
+        file = file_create(file_path, mode, netcon_send, deque);
     } else {
         nfs_args args = {.sem = nfs_sem};
         if (nfs_open_file(file_path, mode, nfs_async_open_cb, &args) < 0) {
@@ -172,6 +252,19 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg)
         }
         file = file_create(file_path, mode, nfs_write_file, nfs_read_file);
         file->handle = args.buff;
+
+        sos_stat_t stat;
+        nfs_args new = {0, &stat, nfs_sem, 0};
+        if (nfs_stat_file(file_path, nfs_async_stat_cb, &new)) {
+            seL4_SetMR(0, -1);
+            return;
+        }
+        if (new.err < 0) {
+            seL4_SetMR(0, -1);
+            return;
+        }
+
+        file->size = stat.st_size;
     }
 
     uint32_t fd;
@@ -229,7 +322,7 @@ void syscall_sos_read(seL4_MessageInfo_t *reply_msg)
         return;
     }
 
-    int res = perform_io(nbyte, vaddr, found, nfs_async_read_cb, READ_IO, NULL);
+    int res = perform_io(nbyte, vaddr, found, nfs_async_read_cb, true);
     seL4_SetMR(0, res);
 }
 
@@ -251,7 +344,11 @@ void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
         seL4_SetMR(0, -1);
         return;
     }
-    int res = perform_io(nbyte, vaddr, found, nfs_async_write_cb, WRITE_IO, NULL);
+    int res = perform_io(nbyte, vaddr, found, nfs_async_write_cb, false);
+    found->write_seek += res;
+    if (found->write_seek > found->size) {
+        found->size = found->write_seek;
+    }
     seL4_SetMR(0, res);
 }
 
@@ -291,7 +388,7 @@ void syscall_sos_stat(seL4_MessageInfo_t *reply_msg)
 
     /* Perform stat operation. We don't assume it's only on 1 page */
     char *file_path = calloc(path_len, sizeof(char));
-    int res = perform_io(path_len, path_vaddr, NULL, NULL, DATA_TO_BUFF, file_path);
+    int res = perform_cpy(path_len, path_vaddr, true, file_path);
     if (res == -1) {
         seL4_SetMR(0, -1);
         return;
@@ -299,7 +396,7 @@ void syscall_sos_stat(seL4_MessageInfo_t *reply_msg)
 
     sos_stat_t stat = {ST_SPECIAL, 0, 0, 0, 0};
     if (strcmp(file_path, "console")) {
-        nfs_args args = {0, &stat, nfs_sem};
+        nfs_args args = {0, &stat, nfs_sem, 0};
         if (nfs_stat_file(file_path, nfs_async_stat_cb, &args)) {
             seL4_SetMR(0, -1);
             return;
@@ -311,7 +408,7 @@ void syscall_sos_stat(seL4_MessageInfo_t *reply_msg)
         stat.st_fmode >>= 6;
     }
     
-    res = perform_io(sizeof(sos_stat_t), buf_vaddr, NULL, NULL, BUFF_TO_DATA, &stat);
+    res = perform_cpy(sizeof(sos_stat_t), buf_vaddr, false, &stat);
     seL4_SetMR(0, res < 0 ? res : 0);
 }
 
@@ -356,7 +453,7 @@ void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg)
 
     size_t path_len = strlen(name);
     size_t size = nbyte < path_len ? nbyte : path_len;
-    int res = perform_io(size, vaddr, NULL, NULL, BUFF_TO_DATA, name);
+    int res = perform_cpy(size, vaddr, false, name);
 
     seL4_Word new_vaddr = vaddr + size;
     unsigned char *data = frame_data(get_frame(new_vaddr));
