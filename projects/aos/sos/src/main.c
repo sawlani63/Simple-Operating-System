@@ -696,7 +696,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     seL4_IRQHandler_Ack(irq_handler);
 
     /* Initialise the pagefile to write frame data into for demand paging */
-    nfs_pagefile = file_create("pagefile", O_RDWR, nfs_pwrite_file, nfs_pread_file);
+    nfs_pagefile = file_create("pagefile", O_RDWR, nfs_pwrite_pagefile, nfs_pread_pagefile);
     nfs_args args = {.sem = nfs_sem};
     /* Wait for NFS to finish mounting */
     sync_bin_sem_wait(nfs_sem);

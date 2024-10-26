@@ -37,8 +37,11 @@ int nfs_close_file(void *nfsfh, nfs_cb cb, void *private_data);
 int nfs_pread_file(open_file *file, UNUSED char *data, uint64_t offset, uint64_t count, void *cb, void *private_data);
 int nfs_read_file(open_file *file, UNUSED char *data, uint64_t offset, uint64_t count, void *cb, void *private_data);
 int nfs_pwrite_file(open_file *file, char *buf, uint64_t offset, uint64_t count, void *cb, void *private_data);
-int nfs_write_file(open_file *file, char *buf, uint64_t offset, uint64_t count, void *cb, void *private_data);
+int nfs_write_file(open_file *file, char *buf, UNUSED uint64_t offset, uint64_t count, void *cb, void *private_data);
 int nfs_stat_file(const char *path, nfs_cb cb, void *private_data);
 int nfs_open_dir(nfs_cb cb, void* private_data);
 void nfs_close_dir(struct nfsdir *nfsdir);
 struct nfsdirent *nfs_read_dir(struct nfsdir *nfsdir);
+
+int nfs_pwrite_pagefile(open_file *file, char *buf, uint64_t offset, uint64_t count, void *cb, void *private_data);
+int nfs_pread_pagefile(open_file *file, char *buf, uint64_t offset, uint64_t count, void *cb, void *private_data);
