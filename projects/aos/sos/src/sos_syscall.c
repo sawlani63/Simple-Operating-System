@@ -343,6 +343,9 @@ void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg)
     char* name = nfsdirent->name;
     if (!strcmp(nfsdirent->name, "..")) {
         name = "console";
+    } else if (!strcmp(nfsdirent->name, "pagefile")) {
+        seL4_SetMR(0, -2);
+        return;
     } else if (i + 1 == pos && nfsdirent->next == NULL) {
         seL4_SetMR(0, 0);
         return;
@@ -413,6 +416,22 @@ void syscall_sys_mmap(seL4_MessageInfo_t *reply_msg)
     }
 }
 
+static inline void free_page(seL4_Word vaddr) {
+    uint16_t l1_i = (vaddr >> 39) & MASK(9); /* Top 9 bits */
+    uint16_t l2_i = (vaddr >> 30) & MASK(9); /* Next 9 bits */
+    uint16_t l3_i = (vaddr >> 21) & MASK(9); /* Next 9 bits */
+    uint16_t l4_i = (vaddr >> 12) & MASK(9); /* Next 9 bits */
+    pt_entry *l4_table = user_process.addrspace->page_table[l1_i].l2[l2_i].l3[l3_i].l4;
+
+    sync_bin_sem_wait(data_sem);
+    free_frame(l4_table[l4_i].page.frame_ref);
+    sync_bin_sem_post(data_sem);
+    seL4_CPtr frame_cptr = l4_table[l4_i].page.frame_cptr;
+    seL4_ARM_PageTable_Unmap(frame_cptr);
+    free_untype(&frame_cptr, NULL);
+    l4_table[l4_i] = (pt_entry){0};
+}
+
 void syscall_sys_munmap(seL4_MessageInfo_t *reply_msg) {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SYS_MUNMAP);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
@@ -428,12 +447,26 @@ void syscall_sys_munmap(seL4_MessageInfo_t *reply_msg) {
     mem_region_t *reg = sglib_mem_region_t_find_member(user_process.addrspace->region_tree, &tmp);
     if (reg != NULL) {
         seL4_SetMR(0, -1);
+        return;
     }
 
+    /* Remove the mmapped memory region. */
     if (length >= reg->size) {
         remove_region(user_process.addrspace, reg->base);
     } else {
         reg->base += length;
+    }
+
+    /* Remove the page and its contents. */
+    size_t vaddr = addr;
+    for (size_t bytes_left = length; bytes_left > 0; bytes_left -= PAGE_SIZE_4K) {
+        if (!vaddr_check(vaddr)) {
+            seL4_SetMR(0, -1);
+            return;
+        }
+
+        free_page(vaddr);
+        vaddr += PAGE_SIZE_4K;
     }
 
     seL4_SetMR(0, 0);
