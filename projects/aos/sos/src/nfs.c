@@ -27,13 +27,37 @@ void nfs_async_read_cb(int err, UNUSED struct nfs_context *nfs, void *data, void
     if (err < 0) {
         ZF_LOGE("NFS: Error in reading file, %s\n", (char*) data);
     } else {
-        memcpy(args->buff, data, args->err);
+        memcpy(args->buff, data, err);
+    }
+    seL4_SetMR(0, args->err);
+    seL4_SetMR(1, err);
+    seL4_Send(args->io_ep, seL4_MessageInfo_new(0, 0, 0, 2));
+    free(args);
+}
+
+void nfs_async_write_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data) {
+    nfs_args *args = (nfs_args *) private_data;
+    if (err < 0) {
+        ZF_LOGE("NFS: Error in writing file, %s\n", (char*) data);
+    }
+    seL4_SetMR(0, args->err);
+    seL4_SetMR(1, err);
+    seL4_Send(args->io_ep, seL4_MessageInfo_new(0, 0, 0, 2));
+    free(args);
+}
+
+void nfs_pagefile_read_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data) {
+    nfs_args *args = (nfs_args *) private_data;
+    if (err < 0) {
+        ZF_LOGE("NFS: Error in reading file, %s\n", (char*) data);
+    } else {
+        memcpy(args->buff, data, err);
     }
     args->err = err;
     sync_bin_sem_post(args->sem);
 }
 
-void nfs_async_write_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data) {
+void nfs_pagefile_write_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data) {
     nfs_args *args = (nfs_args *) private_data;
     if (err < 0) {
         ZF_LOGE("NFS: Error in writing file, %s\n", (char*) data);

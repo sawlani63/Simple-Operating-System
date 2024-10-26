@@ -4,15 +4,7 @@
 #define SWAPMAP_SIZE (128 * 1024)         // 128KB in bytes
 #define NUM_BLOCKS (SWAPMAP_SIZE * 8)     // Total number of 4KB blocks in 4GB (can be stored in an int)
 
-/* 2^19 is the entire frame table size, meaning we can
-   cover every page with 2^19 * 8 bytes = 4MB of memory. */
-#ifdef CONFIG_SOS_FRAME_LIMIT
-    #define BUFFER_SIZE ((CONFIG_SOS_FRAME_LIMIT != 0ul ? CONFIG_SOS_FRAME_LIMIT : BIT(19)) - 1)
-#else
-    #define BUFFER_SIZE (BIT(19) - 1)
-#endif
-
-seL4_Word circular_buffer[BUFFER_SIZE];
+seL4_Word circular_buffer[NUM_FRAMES];
 /* The clock hand pointing to the current position in the circular buffer */
 size_t clock_hand = 0;
 size_t curr_size = 0;
@@ -21,7 +13,6 @@ uint8_t *swap_map;
 
 extern struct user_process user_process;
 extern open_file *nfs_pagefile;
-
 extern sync_bin_sem_t *nfs_sem;
 
 // Initialize bitmap (0 means free, 1 means used)
@@ -88,13 +79,13 @@ static int clock_page_out() {
             seL4_Error err = seL4_ARM_Page_Unmap(entry.page.frame_cptr);
             ZF_LOGF_IFERR(err != seL4_NoError, "Failed to unmap page");
         }
-        clock_hand = (clock_hand + 1) % BUFFER_SIZE;
+        clock_hand = (clock_hand + 1) % NUM_FRAMES;
     }
     
     uint64_t file_offset = get_page_file_offset();
     char *data = (char *)frame_data(entry.page.frame_ref);
-    nfs_args args = {PAGE_SIZE_4K, data, nfs_sem};
-    int res = nfs_pwrite_file(nfs_pagefile->handle, file_offset, data, PAGE_SIZE_4K, nfs_async_write_cb, &args);
+    nfs_args args = {PAGE_SIZE_4K, data, nfs_sem, seL4_CapNull};
+    int res = nfs_pwrite_pagefile(nfs_pagefile, data, file_offset, PAGE_SIZE_4K, nfs_pagefile_write_cb, &args);
     if (res < (int)PAGE_SIZE_4K) {
         return 1;
     }
@@ -112,7 +103,7 @@ static int clock_page_out() {
 }
 
 int clock_add_page(seL4_Word vaddr) {
-    if (curr_size == BUFFER_SIZE) {
+    if (curr_size == NUM_FRAMES) {
         if (clock_page_out()) {
             return 1;
         }
@@ -121,7 +112,7 @@ int clock_add_page(seL4_Word vaddr) {
     }
 
     circular_buffer[clock_hand] = vaddr;
-    clock_hand = (clock_hand + 1) % BUFFER_SIZE;
+    clock_hand = (clock_hand + 1) % NUM_FRAMES;
 
     return 0;
 }
@@ -162,12 +153,11 @@ int clock_try_page_in(seL4_Word vaddr, addrspace_t *as) {
 
         uint64_t file_offset = l4_pt[l4_index].swap_map_index * PAGE_SIZE_4K;
         char *data = (char *)frame_data(frame_ref);
-        nfs_args args = {PAGE_SIZE_4K, data, nfs_sem};
-        int res = nfs_pread_file(nfs_pagefile->handle, file_offset, PAGE_SIZE_4K, nfs_async_read_cb, &args);
+        nfs_args args = {PAGE_SIZE_4K, data, nfs_sem, seL4_CapNull};
+        int res = nfs_pread_pagefile(nfs_pagefile, NULL, file_offset, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
         if (res < (int)PAGE_SIZE_4K) {
             return -1;
         }
-        
         mark_block_free(file_offset / PAGE_SIZE_4K);
     } else {
         return 1;

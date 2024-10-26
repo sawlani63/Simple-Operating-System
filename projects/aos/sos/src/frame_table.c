@@ -150,7 +150,7 @@ seL4_ARM_Page frame_page(frame_ref_t frame_ref)
     return frame->sos_page;
 }
 
-inline unsigned char *frame_data(frame_ref_t frame_ref)
+unsigned char *frame_data(frame_ref_t frame_ref)
 {
     assert(frame_ref != NULL_FRAME);
     assert(frame_ref < frame_table.capacity);
