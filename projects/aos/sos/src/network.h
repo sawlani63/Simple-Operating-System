@@ -28,15 +28,15 @@
  *                       using the SoC's watchdog timer (which is not used by your timer driver
  *                       and has a completely different programming model!)
  */
-void network_init(cspace_t *cspace, void *timer_vaddr);
+void network_init(cspace_t *cspace, void *timer_vaddr, seL4_CPtr irq_ntfn);
 
 void init_nfs_sem(void);
 
 int nfs_open_file(const char* path, int mode, nfs_cb cb, void *private_data);
 int nfs_close_file(void *nfsfh, nfs_cb cb, void *private_data);
-int nfs_pread_file(void *nfsfh, uint64_t offset, uint64_t count, void *cb, void *private_data);
+int nfs_pread_file(open_file *file, UNUSED char *data, uint64_t offset, uint64_t count, void *cb, void *private_data);
 int nfs_read_file(open_file *file, UNUSED char *data, uint64_t offset, uint64_t count, void *cb, void *private_data);
-int nfs_pwrite_file(void *nfsfh, uint64_t offset, char *buf, uint64_t count, void *cb, void *private_data);
+int nfs_pwrite_file(open_file *file, char *buf, uint64_t offset, uint64_t count, void *cb, void *private_data);
 int nfs_write_file(open_file *file, char *buf, uint64_t offset, uint64_t count, void *cb, void *private_data);
 int nfs_stat_file(const char *path, nfs_cb cb, void *private_data);
 int nfs_open_dir(nfs_cb cb, void* private_data);

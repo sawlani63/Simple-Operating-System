@@ -17,8 +17,7 @@ typedef struct file {
     execute_io file_write;
     execute_io file_read;
     sync_bin_sem_t *file_sem;
-    size_t write_seek;
-    size_t size;
+    size_t offset;
 } open_file;
 
 /**

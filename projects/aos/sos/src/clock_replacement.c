@@ -21,7 +21,6 @@ uint8_t *swap_map;
 
 extern struct user_process user_process;
 extern open_file *nfs_pagefile;
-
 extern sync_bin_sem_t *nfs_sem;
 
 // Initialize bitmap (0 means free, 1 means used)
@@ -93,11 +92,12 @@ static int clock_page_out() {
     
     uint64_t file_offset = get_page_file_offset();
     char *data = (char *)frame_data(entry.page.frame_ref);
-    nfs_args args = {PAGE_SIZE_4K, data, nfs_sem, 0, 0};
-    int res = nfs_pwrite_file(nfs_pagefile->handle, file_offset, data, PAGE_SIZE_4K, nfs_async_write_cb, &args);
+    nfs_args args = {PAGE_SIZE_4K, data, nfs_sem, seL4_CapNull};
+    int res = nfs_pwrite_file(nfs_pagefile->handle, data, file_offset, PAGE_SIZE_4K, nfs_pagefile_write_cb, &args);
     if (res < (int)PAGE_SIZE_4K) {
         return 1;
     }
+    sync_bin_sem_wait(nfs_sem);
 
     seL4_CPtr frame_cptr = entry.page.frame_cptr;
     seL4_Error err = seL4_ARM_Page_Unmap(frame_cptr);
@@ -162,13 +162,13 @@ int clock_try_page_in(seL4_Word vaddr, addrspace_t *as) {
 
         uint64_t file_offset = l4_pt[l4_index].swap_map_index * PAGE_SIZE_4K;
         char *data = (char *)frame_data(frame_ref);
-        nfs_args args = {PAGE_SIZE_4K, data, nfs_sem, 0, 0};
-        int res = nfs_pread_file(nfs_pagefile->handle, file_offset, PAGE_SIZE_4K, nfs_async_read_cb, &args);
+        nfs_args args = {PAGE_SIZE_4K, data, nfs_sem, seL4_CapNull};
+        int res = nfs_pread_file(nfs_pagefile->handle, NULL, file_offset, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
         if (res < (int)PAGE_SIZE_4K) {
             return -1;
         }
-        
         mark_block_free(file_offset / PAGE_SIZE_4K);
+        sync_bin_sem_wait(nfs_sem);
     } else {
         return 1;
     }

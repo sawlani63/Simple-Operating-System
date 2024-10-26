@@ -555,8 +555,8 @@ static void sos_ipc_init(seL4_CPtr *ipc_ep, seL4_CPtr *ntfn)
     ZF_LOGF_IF(!ut, "No memory for notification object");
 
     /* Bind the notification object to our TCB */
-    //seL4_Error err = seL4_TCB_BindNotification(seL4_CapInitThreadTCB, *ntfn);
-    //ZF_LOGF_IFERR(err, "Failed to bind notification object to TCB");
+    // seL4_Error err = seL4_TCB_BindNotification(seL4_CapInitThreadTCB, *ntfn);
+    // ZF_LOGF_IFERR(err, "Failed to bind notification object to TCB");
 
     /* Create an endpoint for user application IPC */
     ut = alloc_retype(ipc_ep, seL4_EndpointObject, seL4_EndpointBits);
@@ -653,22 +653,9 @@ NORETURN void *main_continued(UNUSED void *arg)
     init_nfs_sem();
     init_semaphores();
 
-    /* Initialize a temporary irq handling thread that binds the notification object to its TCB and handles irqs until the main thread is done with its tasks */
-    sos_thread_t *irq_temp_thread = thread_create(irq_loop, (void *)ipc_ep, 0, true, seL4_MaxPrio, ntfn, false);
-    if (irq_temp_thread == NULL) {
-        ZF_LOGE("Could not create irq handler thread\n");
-    }
-
-    /*irq_sem = malloc(sizeof(sync_bin_sem_t));
-    ZF_LOGF_IF(!irq_sem, "No memory for semaphore object");
-    ut_t *irq_ut = alloc_retype(&irq_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
-    ZF_LOGF_IF(!irq_ut, "No memory for notification");
-    sync_bin_sem_init(irq_sem, irq_sem_cptr, 0);*/
-
     /* Initialise the network hardware. */
     printf("Network init\n");
-
-    network_init(&cspace, timer_vaddr);
+    network_init(&cspace, timer_vaddr, ntfn);
     console = network_console_init();
     network_console_register_handler(console, enqueue);
     init_console_sem();
@@ -688,6 +675,13 @@ NORETURN void *main_continued(UNUSED void *arg)
     ZF_LOGF_IF(err, "Failed to initialize debugger %d", err);
 #endif /* CONFIG_SOS_GDB_ENABLED */
 
+    // seL4_TCB_UnbindNotification(seL4_CapInitThreadTCB);
+    /* Initialize a temporary irq handling thread that binds the notification object to its TCB and handles irqs until the main thread is done with its tasks */
+    sos_thread_t *irq_temp_thread = thread_create(irq_loop, (void *)ipc_ep, 0, true, seL4_MaxPrio, ntfn, true);
+    if (irq_temp_thread == NULL) {
+        ZF_LOGE("Could not create irq handler thread\n");
+    }
+
     /* Initialises the timer */
     printf("Timer init\n");
     start_timer(timer_vaddr);
@@ -702,7 +696,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     seL4_IRQHandler_Ack(irq_handler);
 
     /* Initialise the pagefile to write frame data into for demand paging */
-    nfs_pagefile = file_create("pagefile", O_RDWR, nfs_write_file, nfs_read_file);
+    nfs_pagefile = file_create("pagefile", O_RDWR, nfs_pwrite_file, nfs_pread_file);
     nfs_args args = {.sem = nfs_sem};
     /* Wait for NFS to finish mounting */
     sync_bin_sem_wait(nfs_sem);
@@ -715,18 +709,14 @@ NORETURN void *main_continued(UNUSED void *arg)
     bool success = start_first_process(APP_NAME);
     ZF_LOGF_IF(!success, "Failed to start first process");
 
-    /* Creating thread pool */
-    // initialise_thread_pool(handle_syscall);
-
     /* Since our main thread has no other tasks left, we swap the task of irq handling from the temp thread to our main thread, and destroy our temp thread */
     seL4_TCB_UnbindNotification(irq_temp_thread->tcb);
     //error = thread_destroy(irq_temp_thread); gets stuck somewhere (inconsistent)
     //ZF_LOGF_IFERR(error, "Failed to destroy the temp irq thread");
     seL4_Error bind_err = seL4_TCB_BindNotification(seL4_CapInitThreadTCB, ntfn);
     ZF_LOGF_IFERR(bind_err, "Failed to bind notification object to TCB");
-    printf("\nSOS entering syscall loop\n");
-    /* Continue with the syscall */
-    //sync_bin_sem_post(irq_sem);
+
+    printf("\nSOS entering irq loop\n");
     irq_loop((void *) ipc_ep);
 }
 /*
