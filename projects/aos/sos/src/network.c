@@ -371,7 +371,6 @@ int nfs_pwrite_file(open_file *file, char *buf, uint64_t offset, uint64_t count,
 
 int nfs_pwrite_pagefile(open_file *file, char *buf, uint64_t offset, uint64_t count, void *cb, void *private_data)
 {
-    printf("Started page out\n");
     sync_bin_sem_wait(net_sync_sem);
     int res = nfs_pwrite_async(nfs, file->handle, offset, count, buf, cb, private_data);
     sync_bin_sem_post(net_sync_sem);
@@ -379,7 +378,6 @@ int nfs_pwrite_pagefile(open_file *file, char *buf, uint64_t offset, uint64_t co
         return -1;
     }
     sync_bin_sem_wait(nfs_sem);
-    printf("Finish page out\n");
     return ((nfs_args *) private_data)->err;
 }
 

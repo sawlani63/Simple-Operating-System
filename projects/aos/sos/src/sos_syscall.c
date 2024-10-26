@@ -121,7 +121,7 @@ static inline int cleanup_pending_requests(int outstanding_requests) {
 }
 
 static int perform_io(size_t nbyte, uintptr_t vaddr, open_file *file, void *callback, bool read) {
-    #define MAX_BATCH_SIZE 3
+    #define MAX_BATCH_SIZE (NUM_FRAMES < BIT(19) - 1 ? 1 : 3)
     size_t bytes_received = 0;
     size_t bytes_left = nbyte;
     uint16_t outstanding_requests = 0;
