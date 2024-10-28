@@ -23,7 +23,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "console_test"
+#define APP_NAME             "sosh"
 #define APP_PRIORITY         (0)
 #define APP_EP_BADGE         (101)
 
@@ -49,7 +49,7 @@ struct user_process user_process;
 
 struct network_console *console;
 
-extern sync_bin_sem_t *nfs_sem;
+extern seL4_CPtr nfs_signal;
 
 open_file *nfs_pagefile;
 
@@ -527,7 +527,7 @@ bool start_first_process(char *app_name)
     }
 
     init_threads(ep, ep, sched_ctrl_start, sched_ctrl_end);
-    sos_thread_t *handler_thread = thread_create(syscall_loop, (void *)ep, 0, true, seL4_MaxPrio, seL4_CapNull, true);
+    sos_thread_t *handler_thread = thread_create(syscall_loop, (void *)ep, 0, true, seL4_MaxPrio, seL4_CapNull, false);
     if (handler_thread == NULL) {
         ZF_LOGE("Could not create system call handler thread for %s\n", app_name);
         return false;
@@ -655,7 +655,7 @@ NORETURN void *main_continued(UNUSED void *arg)
 
     /* Initialise the network hardware. */
     printf("Network init\n");
-    network_init(&cspace, timer_vaddr, ntfn);
+    network_init(&cspace, timer_vaddr, ntfn, nfs_signal);
     console = network_console_init();
     network_console_register_handler(console, enqueue);
     init_console_sem();
@@ -677,7 +677,7 @@ NORETURN void *main_continued(UNUSED void *arg)
 
     // seL4_TCB_UnbindNotification(seL4_CapInitThreadTCB);
     /* Initialize a temporary irq handling thread that binds the notification object to its TCB and handles irqs until the main thread is done with its tasks */
-    sos_thread_t *irq_temp_thread = thread_create(irq_loop, (void *)ipc_ep, 0, true, seL4_MaxPrio, ntfn, true);
+    sos_thread_t *irq_temp_thread = thread_create(irq_loop, (void *)ipc_ep, 0, true, seL4_MaxPrio, ntfn, false);
     if (irq_temp_thread == NULL) {
         ZF_LOGE("Could not create irq handler thread\n");
     }
@@ -696,11 +696,11 @@ NORETURN void *main_continued(UNUSED void *arg)
     seL4_IRQHandler_Ack(irq_handler);
 
     /* Initialise the pagefile to write frame data into for demand paging */
-    nfs_pagefile = file_create("pagefile", O_RDWR, nfs_pwrite_pagefile, nfs_pread_pagefile);
-    nfs_args args = {.sem = nfs_sem};
+    nfs_pagefile = file_create("pagefile", O_RDWR, nfs_pwrite_file, nfs_pread_file);
+    io_args args = {.signal_cap = nfs_signal};
     /* Wait for NFS to finish mounting */
-    sync_bin_sem_wait(nfs_sem);
-    int error = nfs_open_file("pagefile", O_RDWR, nfs_async_open_cb, &args);
+    seL4_Wait(nfs_signal, 0);
+    int error = nfs_open_file(nfs_pagefile, nfs_async_open_cb, &args);
     ZF_LOGF_IF(error, "NFS: Error in opening pagefile");
     nfs_pagefile->handle = args.buff;
 

@@ -25,7 +25,7 @@ void netcon_reply(void *args) {
     struct task *task = (struct task *) args;
     seL4_SetMR(0, task->target);
     seL4_SetMR(1, task->result);
-    seL4_Send(task->io_ep, seL4_MessageInfo_new(0, 0, 0, 2));
+    seL4_Send(task->signal_cap, seL4_MessageInfo_new(0, 0, 0, 2));
 }
 
 void enqueue(UNUSED struct network_console *network_console, char c) {
@@ -41,7 +41,7 @@ void enqueue(UNUSED struct network_console *network_console, char c) {
 }
 
 int deque(UNUSED open_file *file, UNUSED char *data, UNUSED uint64_t offset, uint64_t count, UNUSED void *cb, void *args) {
-    nfs_args *arg = (nfs_args *) args;
+    io_args *arg = (io_args *) args;
     char *buff = (char *) arg->buff;
     sync_bin_sem_wait(queue_sem);
     for (uint64_t i = 0; i < count; i++) {
@@ -53,13 +53,13 @@ int deque(UNUSED open_file *file, UNUSED char *data, UNUSED uint64_t offset, uin
         read_queue.size--;
         buff[i] = c;
         if (buff[i] == '\n') {
-            struct task task = {count, i + 1, arg->io_ep};
+            struct task task = {count, i + 1, arg->signal_cap};
             submit_task(task);
             sync_bin_sem_post(queue_sem);
             return i + 1;
         }
     }
-    struct task task = {count, count, arg->io_ep};
+    struct task task = {count, count, arg->signal_cap};
     submit_task(task);
     sync_bin_sem_post(queue_sem);
     return count;

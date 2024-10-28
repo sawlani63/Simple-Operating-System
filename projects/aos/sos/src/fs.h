@@ -16,6 +16,13 @@ typedef struct {
     uint32_t free_count;    // Number of free slots available
 } fdt;
 
+typedef struct io_args {
+    int err;
+    void *buff;
+    seL4_CPtr signal_cap;
+    uintptr_t vaddr;
+} io_args;
+
 /**
  * Allocate memory for a per-process file descriptor table.
  * @param err Set to 0 if no error and set to 1 if calloc failed.

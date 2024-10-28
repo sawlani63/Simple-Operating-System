@@ -54,6 +54,8 @@
         "unordered_map": "c",
         "unordered_set": "c",
         "clock_replacement.h": "c",
-        "utils.h": "c"
+        "utils.h": "c",
+        "elfload.h": "c",
+        "mapping.h": "c"
     }
 }
