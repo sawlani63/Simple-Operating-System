@@ -1,5 +1,4 @@
-#ifndef ADDRSPACE
-#define ADDRSPACE
+#pragma once
 
 #include <cspace/cspace.h>
 #include "frame_table.h"
@@ -104,5 +103,3 @@ void remove_region(addrspace_t *addrspace, size_t base);
 
 /* USED ONLY FOR DEBUGGING */
 void print_regions(addrspace_t *addrspace);
-
-#endif

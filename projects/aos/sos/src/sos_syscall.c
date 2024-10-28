@@ -68,8 +68,6 @@ static bool vaddr_is_mapped(seL4_Word vaddr) {
 }
 
 static inline bool vaddr_check(seL4_Word vaddr) {
-    /* If the vaddr is not in a valid region we error out. Then if the address is not already
-     * mapped and vm_fault returns an error when trying to map it, we also error out.*/
     return vaddr_is_mapped(vaddr) || handle_vm_fault(vaddr);
 }
 
