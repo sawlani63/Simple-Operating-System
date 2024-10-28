@@ -10,7 +10,7 @@
 struct task {
     int target;
     int result;
-    seL4_CPtr io_ep;
+    seL4_CPtr signal_cap;
 };
 
 void submit_task(struct task task);

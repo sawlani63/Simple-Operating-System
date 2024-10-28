@@ -1,6 +1,7 @@
 #pragma once
 
 #include "network.h"
+#include "fs.h"
 
 #define ST_FILE    1    /* plain file */
 #define ST_SPECIAL 2    /* special (console) file */
@@ -12,13 +13,6 @@ typedef struct {
     long      st_ctime;   /* Unix file creation time (ms) */
     long      st_atime;   /* Unix file last access (open) time (ms) */
 } sos_stat_t;
-
-typedef struct nfs_args {
-    int err;
-    void *buff;
-    sync_bin_sem_t *sem;
-    seL4_CPtr io_ep;
-} nfs_args;
 
 void nfs_async_open_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data);
 

@@ -10,15 +10,16 @@ size_t clock_hand = 0;
 size_t curr_size = 0;
 
 uint8_t *swap_map;
+seL4_CPtr page_notif;
 
 extern struct user_process user_process;
 extern open_file *nfs_pagefile;
-extern sync_bin_sem_t *nfs_sem;
 
 // Initialize bitmap (0 means free, 1 means used)
 void init_bitmap() {
     swap_map = calloc(SWAPMAP_SIZE, sizeof(uint8_t));
     ZF_LOGF_IF(!swap_map, "Could not initialise swap map!\n");
+    alloc_retype(&page_notif, seL4_NotificationObject, seL4_NotificationBits);
 }
 
 // Mark a block as used (set bit to 1)
@@ -83,12 +84,18 @@ static int clock_page_out() {
     }
     
     uint64_t file_offset = get_page_file_offset();
+    GET_PAGE(as->page_table, vaddr).pinned = 1;
     char *data = (char *)frame_data(entry.page.frame_ref);
-    nfs_args args = {PAGE_SIZE_4K, data, nfs_sem, seL4_CapNull};
-    int res = nfs_pwrite_pagefile(nfs_pagefile, data, file_offset, PAGE_SIZE_4K, nfs_pagefile_write_cb, &args);
-    if (res < (int)PAGE_SIZE_4K) {
+    io_args args = {PAGE_SIZE_4K, data, page_notif, vaddr};
+    int res = nfs_pwrite_file(nfs_pagefile, data, file_offset, PAGE_SIZE_4K, nfs_pagefile_write_cb, &args);
+    if (res < 0) {
         return 1;
     }
+    seL4_Wait(page_notif, 0);
+    if (args.err < 0) {
+        return 1;
+    }
+    GET_PAGE(as->page_table, vaddr).pinned = 0;
 
     seL4_CPtr frame_cptr = entry.page.frame_cptr;
     seL4_Error err = seL4_ARM_Page_Unmap(frame_cptr);
@@ -152,12 +159,18 @@ int clock_try_page_in(seL4_Word vaddr, addrspace_t *as) {
         }
 
         uint64_t file_offset = l4_pt[l4_index].swap_map_index * PAGE_SIZE_4K;
+        l4_pt[l4_index].pinned = 1;
         char *data = (char *)frame_data(frame_ref);
-        nfs_args args = {PAGE_SIZE_4K, data, nfs_sem, seL4_CapNull};
-        int res = nfs_pread_pagefile(nfs_pagefile, NULL, file_offset, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
+        io_args args = {PAGE_SIZE_4K, data, page_notif, vaddr};
+        int res = nfs_pread_file(nfs_pagefile, NULL, file_offset, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
         if (res < (int)PAGE_SIZE_4K) {
             return -1;
         }
+        seL4_Wait(page_notif, 0);
+        if (args.err < 0) {
+            return 1;
+        }
+        GET_PAGE(as->page_table, vaddr).pinned = 0;
         mark_block_free(file_offset / PAGE_SIZE_4K);
     } else {
         return 1;
