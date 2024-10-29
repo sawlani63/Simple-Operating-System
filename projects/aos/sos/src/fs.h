@@ -5,6 +5,7 @@
 #include <stdbool.h>
 
 #include "open_file.h"
+#include "addrspace.h"
 
 #define FDT_SIZE 16         // Starting size of the fd table
 
@@ -20,7 +21,7 @@ typedef struct io_args {
     int err;
     void *buff;
     seL4_CPtr signal_cap;
-    uintptr_t vaddr;
+    pt_entry *entry;
 } io_args;
 
 /**

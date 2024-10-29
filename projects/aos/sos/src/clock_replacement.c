@@ -90,34 +90,6 @@ static inline uint64_t get_page_file_offset() {
     return swap_map_index * PAGE_SIZE_4K;
 }
 
-/* Copy-pasted from sos_syscall.c. Think of a way to not duplicate code later. */
-static bool vaddr_is_mapped(seL4_Word vaddr) {
-    /* We assume the top level is mapped. */
-    page_upper_directory *l1_pt = user_process.addrspace->page_table;
-
-    uint16_t l1_index = (vaddr >> 39) & MASK(9); /* Top 9 bits */
-    uint16_t l2_index = (vaddr >> 30) & MASK(9); /* Next 9 bits */
-    uint16_t l3_index = (vaddr >> 21) & MASK(9); /* Next 9 bits */
-    uint16_t l4_index = (vaddr >> 12) & MASK(9); /* Next 9 bits */
-
-    page_directory *l2_pt = l1_pt[l1_index].l2;
-    if (l2_pt == NULL) {
-        return false;
-    }
-
-    page_table *l3_pt = l2_pt[l2_index].l3;
-    if (l3_pt == NULL) {
-        return false;
-    }
-
-    pt_entry *l4_pt = l3_pt[l3_index].l4;
-    if (l4_pt == NULL) {
-        return false;
-    }
-
-    return l4_pt[l4_index].valid;
-}
-
 /**
  * Identifies a candidate to page out, and writes it into the paging file on the nfs.
  * The corresponding frame is then unmapped from the hardware page table.
@@ -130,7 +102,7 @@ static int clock_page_out() {
     while (1) {
         vaddr = swap_manager.circular_buffer[swap_manager.clock_hand];
         entry = GET_PAGE(as->page_table, vaddr);
-        if (!vaddr_is_mapped(vaddr)) {
+        if (!vaddr_is_mapped(as, vaddr)) {
             return 0;
         } else if (!entry.pinned) {
             if (entry.page.ref == 0) {
@@ -146,7 +118,7 @@ static int clock_page_out() {
     uint64_t file_offset = get_page_file_offset();
     GET_PAGE(as->page_table, vaddr).pinned = 1;
     char *data = (char *)frame_data(entry.page.frame_ref);
-    io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, vaddr};
+    io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, &GET_PAGE(as->page_table, vaddr)};
     int res = nfs_pwrite_file(nfs_pagefile, data, file_offset, PAGE_SIZE_4K, nfs_pagefile_write_cb, &args);
     if (res < 0) {
         return 1;
@@ -220,7 +192,7 @@ int clock_try_page_in(seL4_Word vaddr, addrspace_t *as) {
         uint64_t file_offset = l4_pt[l4_index].swap_map_index * PAGE_SIZE_4K;
         l4_pt[l4_index].pinned = 1;
         char *data = (char *)frame_data(frame_ref);
-        io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, vaddr};
+        io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, &GET_PAGE(as->page_table, vaddr)};
         int res = nfs_pread_file(nfs_pagefile, NULL, file_offset, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
         if (res < (int)PAGE_SIZE_4K) {
             return -1;
