@@ -1,8 +1,9 @@
 #include "clock_replacement.h"
 
 #define GET_PAGE(pt, vaddr) pt[(vaddr >> 39) & MASK(9)].l2[(vaddr >> 30) & MASK(9)].l3[(vaddr >> 21) & MASK(9)].l4[(vaddr >> 12) & MASK(9)]
-#define SWAPMAP_SIZE (128 * 1024)         // 128KB in bytes
-#define NUM_BLOCKS (SWAPMAP_SIZE * 8)     // Total number of 4KB blocks in 4GB (can be stored in an int)
+#define SWAPMAP_SIZE (128 * 1024)                           // 128KB in bytes
+#define NUM_BLOCKS (SWAPMAP_SIZE * 8)                       // Total number of 4KB blocks in 4GB (can be stored in an int)
+#define QUEUE_SIZE (PAGE_SIZE_4K / sizeof(uint32_t) )       // 4KB queue size (1024 entries cached)
 
 struct {
     seL4_Word circular_buffer[NUM_FRAMES];  // Data structure holding the circular buffer
@@ -10,8 +11,15 @@ struct {
     size_t curr_size;                       // Current size of the clock circular buffer
 
     uint8_t *swap_map;                      // Bitmap of used/free blocks
+    uint32_t curr_offset;                   // Current offset into the swap map
+
+    uint32_t *swap_queue;                   // Queue for managing swap map offsets
+    size_t queue_head;
+    size_t queue_tail;
+    size_t queue_size;
+
     seL4_CPtr page_notif;                   // Notification object to wait on pagefile
-} swap_manager = {.clock_hand = 0, .curr_size = 0};
+} swap_manager = {.clock_hand = 0, .curr_size = 0, .curr_offset = 0, .queue_head = 0, .queue_tail = 0, .queue_size = 0};
 
 extern struct user_process user_process;
 extern open_file *nfs_pagefile;
@@ -20,6 +28,10 @@ extern open_file *nfs_pagefile;
 void init_bitmap() {
     swap_manager.swap_map = calloc(SWAPMAP_SIZE, sizeof(uint8_t));
     ZF_LOGF_IF(!swap_manager.swap_map, "Could not initialise swap map!\n");
+
+    swap_manager.swap_queue = malloc(sizeof(uint32_t) * QUEUE_SIZE);
+    ZF_LOGF_IF(!swap_manager.swap_queue, "Could not initialise swap queue!\n");
+
     alloc_retype(&swap_manager.page_notif, seL4_NotificationObject, seL4_NotificationBits);
 }
 
@@ -40,12 +52,13 @@ void mark_block_free(uint32_t block_num) {
 }
 
 /* Find first free block (returns block number, or -1 if none found) */
-int find_first_free_block() {
-    for (uint32_t index = 0; index < SWAPMAP_SIZE; index++) {
+static int find_free_block_from_index(uint32_t start_index) {
+    for (uint32_t index = start_index; index < SWAPMAP_SIZE; index++) {
         // If not all blocks in this byte are used
         if (swap_manager.swap_map[index] != 0xFF) {
             for (uint8_t bit_index = 0; bit_index < 8; bit_index++) {
                 if (!(swap_manager.swap_map[index] & (1 << bit_index))) {
+                    swap_manager.curr_offset = index + 1;
                     return (index * 8) + bit_index;
                 }
             }
@@ -54,7 +67,23 @@ int find_first_free_block() {
     return -1;
 }
 
+static inline int find_first_free_block() {
+    int free_block = find_free_block_from_index(swap_manager.curr_offset);
+    if (free_block != -1) {
+        return free_block;
+    }
+
+    return find_free_block_from_index(0);
+}
+
 static inline uint64_t get_page_file_offset() {
+    if (swap_manager.queue_size > 0) {
+        uint32_t swap_map_index = swap_manager.swap_queue[swap_manager.queue_head];
+        swap_manager.queue_head = (swap_manager.queue_head + 1) % QUEUE_SIZE;
+        swap_manager.queue_size--;
+        return swap_map_index * PAGE_SIZE_4K;
+    }
+
     int swap_map_index = find_first_free_block();
     ZF_LOGF_IF(swap_map_index < 0, "Could not find a free swap map index!\n");
     mark_block_used(swap_map_index);
@@ -151,7 +180,6 @@ int clock_add_page(seL4_Word vaddr) {
 
     swap_manager.circular_buffer[swap_manager.clock_hand] = vaddr;
     swap_manager.clock_hand = (swap_manager.clock_hand + 1) % NUM_FRAMES;
-
     return 0;
 }
 
@@ -202,7 +230,12 @@ int clock_try_page_in(seL4_Word vaddr, addrspace_t *as) {
             return 1;
         }
         GET_PAGE(as->page_table, vaddr).pinned = 0;
-        mark_block_free(file_offset / PAGE_SIZE_4K);
+
+        swap_manager.swap_queue[swap_manager.queue_tail] = l4_pt[l4_index].swap_map_index;
+        swap_manager.queue_tail = (swap_manager.queue_tail + 1) % QUEUE_SIZE;
+        if (swap_manager.queue_size < QUEUE_SIZE) {
+            swap_manager.queue_size++;
+        }
     } else {
         return 1;
     }
