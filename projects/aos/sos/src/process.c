@@ -12,21 +12,45 @@
 extern char _cpio_archive[];
 extern char _cpio_archive_end[];
 
+
 extern struct user_process user_process;
 extern seL4_CPtr sched_ctrl_start;
 extern seL4_CPtr sched_ctrl_end;
-extern sync_bin_sem_t *nfs_sem;
+extern seL4_CPtr nfs_signal;
 
-char *get_elf_data(char *app_name)
+void *get_elf_data(char *app_name, unsigned long *elf_size)
 {
-    // open/close on process fdt?
-    nfs_args args = {.sem = nfs_sem};
-    int error = nfs_open_file("console_test", O_RDWR, nfs_async_open_cb, &args);
-    ZF_LOGF_IF(error, "NFS: Error in opening app");
-    void *nfsfh = args.buff;
-    error = nfs_pread_file(nfsfh, 0, PAGE_SIZE_4K, nfs_async_read_cb, &args);
-    ZF_LOGF_IF(error < 0, "NFS: Error in reading app");
-    return args.buff;
+    ZF_LOGE("app %s", app_name);
+    open_file *file = file_create(app_name, O_RDWR, nfs_pwrite_file, nfs_pread_file);
+    io_args args = {.signal_cap = nfs_signal};
+    int error = nfs_open_file(file, nfs_async_open_cb, &args);
+    if (error) {
+        ZF_LOGE("NFS: Error in opening app");
+        return NULL;
+    }
+    file->handle = args.buff;
+    void *data = malloc(sizeof(void) * PAGE_SIZE_4K);
+    args.buff = data;
+    error = nfs_pread_file(file, NULL, 0, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
+    if (error < (int) PAGE_SIZE_4K) {
+        ZF_LOGE("NFS: Error in reading app");
+        return NULL;
+    }
+    seL4_Wait(nfs_signal, 0);
+    if (args.err < 0) {
+        return NULL;
+    }
+    // close file in fdt and nfs
+    sos_stat_t stat = {ST_SPECIAL, 0, 0, 0, 0};
+    args.buff = &stat;
+    error = nfs_stat_file(app_name, nfs_async_stat_cb, &args);
+    if (error) {
+        return NULL;
+    }
+    sos_stat_t *sos_stat = (sos_stat_t *) args.buff;
+    *elf_size = sos_stat->st_size;
+    ZF_LOGE("help me %s %d %s %d %d", app_name, *elf_size, data, sizeof(data), strlen(app_name));
+    return data;
 }
 
 /* helper to conduct freeing operations in the event of an error in a function to prevent memory leaks */
@@ -336,17 +360,19 @@ bool start_process(char *app_name, thread_main_f *func)
     /* Provide a name for the thread -- Helpful for debugging */
     NAME_THREAD(user_process.tcb, app_name);
 
-    /* parse the cpio image */
+    /* Read the ELF header from NFS */
     ZF_LOGI("\nStarting \"%s\"...\n", app_name);
     elf_t elf_file = {};
-    unsigned long elf_size;
+    elf_t elf_file2 = {};
+    unsigned long elf_size, elf_size2;
+    void *elf_base = get_elf_data(app_name, &elf_size);
     size_t cpio_len = _cpio_archive_end - _cpio_archive;
-    const char *elf_base = cpio_get_file(_cpio_archive, cpio_len, app_name, &elf_size);
-    //char *data = get_elf_data(app_name);
-    //assert(strcmp(elf_base, data) == 0);
+    const char *elf_base2 = cpio_get_file(_cpio_archive, cpio_len, app_name, &elf_size2);
+    ZF_LOGE("FAIL THE FUCKING ASSERT %d", strcoll(elf_base, elf_base2));
+
 
     if (elf_base == NULL) {
-        ZF_LOGE("Unable to locate cpio header for %s", app_name);
+        ZF_LOGE("Unable to open or read %s from NFS", app_name);
         free_mem(user_ep, region, ep, ut);
         return false;
     }
@@ -355,6 +381,23 @@ bool start_process(char *app_name, thread_main_f *func)
         ZF_LOGE("Invalid elf file");
         free_mem(user_ep, region, ep, ut);
         return false;
+    }
+    if (elf_newFile(elf_base2, elf_size2, &elf_file2)) {
+        ZF_LOGE("Invalid elf file");
+        free_mem(user_ep, region, ep, ut);
+        return false;
+    }
+
+    size_t numSections = elf_getNumSections(&elf_file);
+    ZF_LOGE("NUMSECTION OF ELF 1 %d", numSections);
+    for (size_t i = 0; i < numSections; i++) {
+        ZF_LOGE("SECTION OF ELF 1 %s", elf_getSectionName(&elf_file, i));
+    }
+
+    size_t numSections2 = elf_getNumSections(&elf_file2);
+    ZF_LOGE("NUMSECTION OF ELF 2 %d", numSections2);
+    for (size_t i = 0; i < numSections2; i++) {
+        ZF_LOGE("SECTION OF ELF 2 %s", elf_getSectionName(&elf_file2, i));
     }
 
     /* set up the stack */

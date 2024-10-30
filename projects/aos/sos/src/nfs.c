@@ -77,7 +77,7 @@ void nfs_pagefile_write_cb(int err, UNUSED struct nfs_context *nfs, void *data, 
 void nfs_async_stat_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data) {
     io_args *args = (io_args *) private_data;
     if (err < 0) {
-        ZF_LOGE("NFS: Error in writing file, %s\n", (char*) data);
+        ZF_LOGE("NFS: Error in getting stats of file, %s\n", (char*) data);
     } else {
         struct nfs_stat_64 *stat = (struct nfs_stat_64 *) data;
         sos_stat_t *sos_stat = (sos_stat_t *) args->buff;

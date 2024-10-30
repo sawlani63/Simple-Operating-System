@@ -23,6 +23,12 @@ int elf_newFile_maybe_unsafe(const void *file, size_t size, bool check_pht, bool
         .elfSize = size
     };
 
+    size_t numSections = elf_getNumSections(&new_file);
+    printf("NUMSECTION OF ELF 1 %d\n", numSections);
+    for (size_t i = 0; i < numSections; i++) {
+        printf("SECTION OF ELF 1 %s\n", elf_getSectionName(&new_file, i));
+    }
+
     int status = elf_checkFile(&new_file);
     if (status < 0) {
         return status;
