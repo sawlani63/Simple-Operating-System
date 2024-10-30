@@ -203,9 +203,9 @@ int clock_try_page_in(seL4_Word vaddr, addrspace_t *as) {
         }
         GET_PAGE(as->page_table, vaddr).pinned = 0;
 
-        swap_manager.swap_queue[swap_manager.queue_tail] = l4_pt[l4_index].swap_map_index;
-        swap_manager.queue_tail = (swap_manager.queue_tail + 1) % QUEUE_SIZE;
         if (swap_manager.queue_size < QUEUE_SIZE) {
+            swap_manager.swap_queue[swap_manager.queue_tail] = l4_pt[l4_index].swap_map_index;
+            swap_manager.queue_tail = (swap_manager.queue_tail + 1) % QUEUE_SIZE;
             swap_manager.queue_size++;
         }
     } else {
