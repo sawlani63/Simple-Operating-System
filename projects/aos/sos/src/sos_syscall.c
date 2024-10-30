@@ -179,7 +179,7 @@ static int perform_cpy(size_t nbyte, uintptr_t vaddr, bool data_to_buff, void *b
 void syscall_sos_open(seL4_MessageInfo_t *reply_msg) 
 {
     seL4_Word vaddr = seL4_GetMR(1);
-    int path_len = seL4_GetMR(2);
+    int path_len = seL4_GetMR(2) + 1;
     int mode = seL4_GetMR(3);
 
     ZF_LOGV("syscall: thread example made syscall %d!\n", SYSCALL_SOS_OPEN);
@@ -190,12 +190,13 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg)
         return;
     }
 
-    char *file_path = calloc(path_len, sizeof(char));
+    char *file_path = malloc(path_len);
     int res = perform_cpy(path_len, vaddr, true, file_path);
     if (res == -1) {
         seL4_SetMR(0, -1);
         return;
     }
+    file_path[path_len - 1] = '\0';
 
     open_file *file;
     if (strcmp(file_path, "console")) {
