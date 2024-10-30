@@ -23,7 +23,12 @@ int clock_add_page(seL4_Word vaddr);
 
 int clock_try_page_in(seL4_Word vaddr, addrspace_t *as);
 
+extern sync_bin_sem_t *data_sem;
+
 static inline frame_ref_t clock_alloc_frame(seL4_Word vaddr) {
     clock_add_page(vaddr);
-    return alloc_frame();
+    sync_bin_sem_wait(data_sem);
+    frame_ref_t ref = alloc_frame();
+    sync_bin_sem_post(data_sem);
+    return ref;
 }

@@ -1,58 +1,64 @@
 #include "clock_replacement.h"
 
 #define GET_PAGE(pt, vaddr) pt[(vaddr >> 39) & MASK(9)].l2[(vaddr >> 30) & MASK(9)].l3[(vaddr >> 21) & MASK(9)].l4[(vaddr >> 12) & MASK(9)]
-#define SWAPMAP_SIZE 128 * 1024    // 128KB in bytes
-#define NUM_BLOCKS 1048576        // Total number of 4KB blocks in 4GB (can be stored in an int)
+#define SWAPMAP_SIZE (128 * 1024)                           // 128KB in bytes
+#define NUM_BLOCKS (SWAPMAP_SIZE * 8)                       // Total number of 4KB blocks in 4GB (can be stored in an int)
+#define QUEUE_SIZE (PAGE_SIZE_4K / sizeof(uint32_t) )       // 4KB queue size (1024 entries cached)
 
-/* 2^19 is the entire frame table size, meaning we can
-   cover every page with 2^19 * 8 bytes = 4MB of memory. */
-#ifdef CONFIG_SOS_FRAME_LIMIT
-    #define BUFFER_SIZE ((CONFIG_SOS_FRAME_LIMIT != 0ul ? CONFIG_SOS_FRAME_LIMIT : BIT(19)) - 1)
-#else
-    #define BUFFER_SIZE (BIT(19) - 1)
-#endif
+struct {
+    seL4_Word circular_buffer[NUM_FRAMES];  // Data structure holding the circular buffer
+    size_t clock_hand;                      // Current position of the clock hand
+    size_t curr_size;                       // Current size of the clock circular buffer
 
-seL4_Word circular_buffer[BUFFER_SIZE];
-/* The clock hand pointing to the current position in the circular buffer */
-size_t clock_hand = 0;
-size_t curr_size = 0;
+    uint8_t *swap_map;                      // Bitmap of used/free blocks
+    uint32_t curr_offset;                   // Current offset into the swap map
 
-uint8_t *swap_map;
+    uint32_t *swap_queue;                   // Queue for managing swap map offsets
+    size_t queue_head;
+    size_t queue_tail;
+    size_t queue_size;
+
+    seL4_CPtr page_notif;                   // Notification object to wait on pagefile
+} swap_manager = {.clock_hand = 0, .curr_size = 0, .curr_offset = 0, .queue_head = 0, .queue_tail = 0, .queue_size = 0};
 
 extern struct user_process user_process;
 extern open_file *nfs_pagefile;
 
-extern sync_bin_sem_t *nfs_sem;
-
 // Initialize bitmap (0 means free, 1 means used)
 void init_bitmap() {
-    swap_map = calloc(SWAPMAP_SIZE, sizeof(uint8_t));
-    ZF_LOGF_IF(!swap_map, "Could not initialise swap map!\n");
+    swap_manager.swap_map = calloc(SWAPMAP_SIZE, sizeof(uint8_t));
+    ZF_LOGF_IF(!swap_manager.swap_map, "Could not initialise swap map!\n");
+
+    swap_manager.swap_queue = malloc(sizeof(uint32_t) * QUEUE_SIZE);
+    ZF_LOGF_IF(!swap_manager.swap_queue, "Could not initialise swap queue!\n");
+
+    alloc_retype(&swap_manager.page_notif, seL4_NotificationObject, seL4_NotificationBits);
 }
 
 // Mark a block as used (set bit to 1)
-void mark_block_used(uint32_t block_num) {
-    ZF_LOGF_IF(block_num >= NUM_BLOCKS, "Trying to pass to large of a block number!\n");
+static inline void mark_block_used(uint32_t block_num) {
+    ZF_LOGF_IF(block_num >= NUM_BLOCKS, "Trying to pass too large of a block number!\n");
     uint32_t index = block_num / 8;
     uint8_t bit_index = block_num % 8;
-    swap_map[index] |= (1 << bit_index);
+    swap_manager.swap_map[index] |= (1 << bit_index);
 }
 
 // Mark a block as free (set bit to 0)
 void mark_block_free(uint32_t block_num) {
-    ZF_LOGF_IF(block_num >= NUM_BLOCKS, "Trying to pass to large of a block number!\n");
+    ZF_LOGF_IF(block_num >= NUM_BLOCKS, "Trying to pass too large of a block number!\n");
     uint32_t index = block_num / 8;
     uint8_t bit_index = block_num % 8;
-    swap_map[index] &= ~(1 << bit_index);
+    swap_manager.swap_map[index] &= ~(1 << bit_index);
 }
 
 /* Find first free block (returns block number, or -1 if none found) */
-int find_first_free_block() {
-    for (uint32_t index = 0; index < SWAPMAP_SIZE; index++) {
+static int find_free_block_from_index(uint32_t start_index) {
+    for (uint32_t index = start_index; index < SWAPMAP_SIZE; index++) {
         // If not all blocks in this byte are used
-        if (swap_map[index] != 0xFF) {
+        if (swap_manager.swap_map[index] != 0xFF) {
             for (uint8_t bit_index = 0; bit_index < 8; bit_index++) {
-                if (!(swap_map[index] & (1 << bit_index))) {
+                if (!(swap_manager.swap_map[index] & (1 << bit_index))) {
+                    swap_manager.curr_offset = index + 1;
                     return (index * 8) + bit_index;
                 }
             }
@@ -61,7 +67,23 @@ int find_first_free_block() {
     return -1;
 }
 
+static inline int find_first_free_block() {
+    int free_block = find_free_block_from_index(swap_manager.curr_offset);
+    if (free_block != -1) {
+        return free_block;
+    }
+
+    return find_free_block_from_index(0);
+}
+
 static inline uint64_t get_page_file_offset() {
+    if (swap_manager.queue_size > 0) {
+        uint32_t swap_map_index = swap_manager.swap_queue[swap_manager.queue_head];
+        swap_manager.queue_head = (swap_manager.queue_head + 1) % QUEUE_SIZE;
+        swap_manager.queue_size--;
+        return swap_map_index * PAGE_SIZE_4K;
+    }
+
     int swap_map_index = find_first_free_block();
     ZF_LOGF_IF(swap_map_index < 0, "Could not find a free swap map index!\n");
     mark_block_used(swap_map_index);
@@ -78,9 +100,11 @@ static int clock_page_out() {
     seL4_Word vaddr;
     pt_entry entry;
     while (1) {
-        vaddr = circular_buffer[clock_hand];
+        vaddr = swap_manager.circular_buffer[swap_manager.clock_hand];
         entry = GET_PAGE(as->page_table, vaddr);
-        if (!entry.pinned) {
+        if (!vaddr_is_mapped(as, vaddr)) {
+            return 0;
+        } else if (!entry.pinned) {
             if (entry.page.ref == 0) {
                 break;
             }
@@ -88,22 +112,32 @@ static int clock_page_out() {
             seL4_Error err = seL4_ARM_Page_Unmap(entry.page.frame_cptr);
             ZF_LOGF_IFERR(err != seL4_NoError, "Failed to unmap page");
         }
-        clock_hand = (clock_hand + 1) % BUFFER_SIZE;
+        swap_manager.clock_hand = (swap_manager.clock_hand + 1) % NUM_FRAMES;
     }
     
     uint64_t file_offset = get_page_file_offset();
+    GET_PAGE(as->page_table, vaddr).pinned = 1;
+    sync_bin_sem_wait(data_sem);
     char *data = (char *)frame_data(entry.page.frame_ref);
-    nfs_args args = {PAGE_SIZE_4K, data, nfs_sem};
-    int res = nfs_pwrite_file(nfs_pagefile->handle, file_offset, data, PAGE_SIZE_4K, nfs_async_write_cb, &args);
-    if (res < (int)PAGE_SIZE_4K) {
+    sync_bin_sem_post(data_sem);
+    io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, &GET_PAGE(as->page_table, vaddr)};
+    int res = nfs_pwrite_file(nfs_pagefile, data, file_offset, PAGE_SIZE_4K, nfs_pagefile_write_cb, &args);
+    if (res < 0) {
         return 1;
     }
+    seL4_Wait(swap_manager.page_notif, 0);
+    if (args.err < 0) {
+        return 1;
+    }
+    GET_PAGE(as->page_table, vaddr).pinned = 0;
 
     seL4_CPtr frame_cptr = entry.page.frame_cptr;
     seL4_Error err = seL4_ARM_Page_Unmap(frame_cptr);
     ZF_LOGF_IFERR(err != seL4_NoError, "Failed to unmap page");
     free_untype(&frame_cptr, NULL);
+    sync_bin_sem_wait(data_sem);
     free_frame(entry.page.frame_ref);
+    sync_bin_sem_post(data_sem);
 
     pt_entry new_entry = {.valid = 0, .swapped = 1, .pinned = 0 , .perms = GET_PAGE(as->page_table, vaddr).perms,
                           .swap_map_index = file_offset / PAGE_SIZE_4K};
@@ -112,17 +146,16 @@ static int clock_page_out() {
 }
 
 int clock_add_page(seL4_Word vaddr) {
-    if (curr_size == BUFFER_SIZE) {
+    if (swap_manager.curr_size == NUM_FRAMES) {
         if (clock_page_out()) {
             return 1;
         }
     } else {
-        curr_size++;
+        swap_manager.curr_size++;
     }
 
-    circular_buffer[clock_hand] = vaddr;
-    clock_hand = (clock_hand + 1) % BUFFER_SIZE;
-
+    swap_manager.circular_buffer[swap_manager.clock_hand] = vaddr;
+    swap_manager.clock_hand = (swap_manager.clock_hand + 1) % NUM_FRAMES;
     return 0;
 }
 
@@ -161,14 +194,26 @@ int clock_try_page_in(seL4_Word vaddr, addrspace_t *as) {
         }
 
         uint64_t file_offset = l4_pt[l4_index].swap_map_index * PAGE_SIZE_4K;
+        l4_pt[l4_index].pinned = 1;
+        sync_bin_sem_wait(data_sem);
         char *data = (char *)frame_data(frame_ref);
-        nfs_args args = {PAGE_SIZE_4K, data, nfs_sem};
-        int res = nfs_pread_file(nfs_pagefile->handle, file_offset, PAGE_SIZE_4K, nfs_async_read_cb, &args);
+        sync_bin_sem_post(data_sem);
+        io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, &l4_pt[l4_index]};
+        int res = nfs_pread_file(nfs_pagefile, NULL, file_offset, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
         if (res < (int)PAGE_SIZE_4K) {
             return -1;
         }
-        
-        mark_block_free(file_offset / PAGE_SIZE_4K);
+        seL4_Wait(swap_manager.page_notif, 0);
+        if (args.err < 0) {
+            return 1;
+        }
+        l4_pt[l4_index].pinned = 0;
+
+        if (swap_manager.queue_size < QUEUE_SIZE) {
+            swap_manager.swap_queue[swap_manager.queue_tail] = l4_pt[l4_index].swap_map_index;
+            swap_manager.queue_tail = (swap_manager.queue_tail + 1) % QUEUE_SIZE;
+            swap_manager.queue_size++;
+        }
     } else {
         return 1;
     }

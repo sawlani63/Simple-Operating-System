@@ -49,6 +49,7 @@
 #include "ut.h"
 #include "utils.h"
 #include "nfs.h"
+#include "open_file.h"
 
 #ifndef SOS_NFS_DIR
 #  ifdef CONFIG_SOS_NFS_DIR
@@ -216,7 +217,7 @@ void dhcp_callback(void *cli, int code)
     dhcp_status = DHCP_STATUS_FINISHED;
 }
 
-void network_init(cspace_t *cspace, void *timer_vaddr)
+void network_init(cspace_t *cspace, void *timer_vaddr, seL4_CPtr irq_ntfn, seL4_CPtr mount_signal)
 {
     int error;
     ZF_LOGI("\nInitialising network...\n\n");
@@ -273,9 +274,15 @@ void network_init(cspace_t *cspace, void *timer_vaddr)
     error = pico_dhcp_initiate_negotiation(&pico_dev, dhcp_callback, &dhcp_xid);
     ZF_LOGF_IF(error != 0, "Failed to initialise DHCP negotiation");
 
-    /* Interrupts handled by irq thread until dhcp negotiation finished
+    /* handle all interrupts until dhcp negotiation finished
      * this is needed so we can receive and handle dhcp response */
     do {
+        seL4_Word badge;
+        seL4_Wait(irq_ntfn, &badge);
+        
+        UNUSED bool have_reply;
+        sos_handle_irq_notification(&badge, &have_reply);
+        
         if (dhcp_status == DHCP_STATUS_ERR) {
             ZF_LOGD("restarting dhcp negotiation");
             error = pico_dhcp_initiate_negotiation(&pico_dev, dhcp_callback, &dhcp_xid);
@@ -288,19 +295,18 @@ void network_init(cspace_t *cspace, void *timer_vaddr)
 
     nfs_set_debug(nfs, 10);
     sprintf(nfs_dir_buf, "%s-%d-root", SOS_NFS_DIR, ip_octet);
-    int ret = nfs_mount_async(nfs, CONFIG_SOS_GATEWAY, nfs_dir_buf, nfs_mount_cb, NULL);
+    int ret = nfs_mount_async(nfs, CONFIG_SOS_GATEWAY, nfs_dir_buf, nfs_mount_cb, (void *)mount_signal);
     ZF_LOGF_IF(ret != 0, "NFS Mount failed: %s", nfs_get_error(nfs));
 }
 
-void nfs_mount_cb(int status, UNUSED struct nfs_context *nfs, void *data,
-                  UNUSED void *private_data)
+void nfs_mount_cb(int status, UNUSED struct nfs_context *nfs, void *data, void *private_data)
 {
     if (status < 0) {
         ZF_LOGF("mount/mnt call failed with \"%s\"\n", (char *)data);
     }
 
     printf("Mounted nfs dir %s\n", nfs_dir_buf);
-    sync_bin_sem_post(nfs_sem);
+    seL4_Signal((seL4_CPtr) private_data);
 }
 
 sync_bin_sem_t *net_sync_sem = NULL;
@@ -314,76 +320,46 @@ void init_nfs_sem(void) {
     sync_bin_sem_init(net_sync_sem, net_sync_sem_cptr, 1);
 }
 
-int nfs_open_file(const char *path, int mode, nfs_cb cb, void *private_data)
+int nfs_open_file(open_file *file, nfs_cb cb, void *private_data)
 {
     sync_bin_sem_wait(net_sync_sem);
-    int res = nfs_open_async(nfs, path, O_CREAT | mode, cb, private_data);
+    int res = nfs_open_async(nfs, file->path, O_CREAT | file->mode, cb, private_data);
     sync_bin_sem_post(net_sync_sem);
     if (res < 0) {
         return -1;
     }
-    sync_bin_sem_wait(nfs_sem);
-    return ((nfs_args *) private_data)->err;
+    io_args *args = (io_args *) private_data;
+    seL4_Wait(args->signal_cap, 0);
+    return ((io_args *) private_data)->err;
 }
 
-int nfs_close_file(void *nfsfh, nfs_cb cb, void *private_data)
+int nfs_close_file(open_file *file, nfs_cb cb, void *private_data)
 {
     sync_bin_sem_wait(net_sync_sem);
-    int res = nfs_close_async(nfs, nfsfh, cb, private_data);
+    int res = nfs_close_async(nfs, file->handle, cb, private_data);
     sync_bin_sem_post(net_sync_sem);
     if (res < 0) {
         return -1;
     }
-    sync_bin_sem_wait(nfs_sem);
+    io_args *args = (io_args *) private_data;
+    seL4_Wait(args->signal_cap, 0);
     return 0;
 }
 
-int nfs_pread_file(void *nfsfh, uint64_t offset, uint64_t count, void *cb, void *private_data)
+int nfs_pread_file(open_file *file, UNUSED char *data, uint64_t offset, uint64_t count, void *cb, void *private_data)
 {
     sync_bin_sem_wait(net_sync_sem);
-    int res = nfs_pread_async(nfs, nfsfh, offset, count, cb, private_data);
+    int res = nfs_pread_async(nfs, file->handle, offset, count, cb, private_data);
     sync_bin_sem_post(net_sync_sem);
-    if (res < 0) {
-        return -1;
-    }
-    sync_bin_sem_wait(nfs_sem);
-    return ((nfs_args *) private_data)->err;
+    return res < 0 ? -1 : (int)count;
 }
 
-int nfs_read_file(void *nfsfh, UNUSED char *data, uint64_t count, void *cb, void *private_data)
+int nfs_pwrite_file(open_file *file, char *buf, uint64_t offset, uint64_t count, void *cb, void *private_data)
 {
     sync_bin_sem_wait(net_sync_sem);
-    int res = nfs_read_async(nfs, nfsfh, count, cb, private_data);
+    int res = nfs_pwrite_async(nfs, file->handle, offset, count, buf, cb, private_data);
     sync_bin_sem_post(net_sync_sem);
-    if (res < 0) {
-        return -1;
-    }
-    sync_bin_sem_wait(nfs_sem);
-    return ((nfs_args *) private_data)->err;
-}
-
-int nfs_pwrite_file(void *nfsfh, uint64_t offset, char *buf, uint64_t count, void *cb, void *private_data)
-{
-    sync_bin_sem_wait(net_sync_sem);
-    int res = nfs_pwrite_async(nfs, nfsfh, offset, count, buf, cb, private_data);
-    sync_bin_sem_post(net_sync_sem);
-    if (res < 0) {
-        return -1;
-    }
-    sync_bin_sem_wait(nfs_sem);
-    return ((nfs_args *) private_data)->err;
-}
-
-int nfs_write_file(void *nfsfh, char *buf, uint64_t count, void *cb, void *private_data)
-{
-    sync_bin_sem_wait(net_sync_sem);
-    int res = nfs_write_async(nfs, nfsfh, count, buf, cb, private_data);
-    sync_bin_sem_post(net_sync_sem);
-    if (res < 0) {
-        return -1;
-    }
-    sync_bin_sem_wait(nfs_sem);
-    return ((nfs_args *) private_data)->err;
+    return res < 0 ? -1 : (int)count;
 }
 
 int nfs_stat_file(const char *path, nfs_cb cb, void *private_data)
@@ -394,7 +370,8 @@ int nfs_stat_file(const char *path, nfs_cb cb, void *private_data)
     if (res < 0) {
         return -1;
     }
-    sync_bin_sem_wait(nfs_sem);
+    io_args *args = (io_args *) private_data;
+    seL4_Wait(args->signal_cap, 0);
     return 0;
 }
 
@@ -406,7 +383,8 @@ int nfs_open_dir(nfs_cb cb, void* private_data)
     if (res) {
         return -1;
     }
-    sync_bin_sem_wait(nfs_sem);
+    io_args *args = (io_args *) private_data;
+    seL4_Wait(args->signal_cap, 0);
     return 0;
 }
 

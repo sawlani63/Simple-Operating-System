@@ -4,13 +4,13 @@
 #include "ut.h"
 
 #define NUM_THREADS 2
-#define QUEUE_SIZE 4
+#define THREAD_QUEUE_SIZE 4
 #define NUM_MSG_REGISTERS 4
 
 struct task {
-    ut_t *reply_ut;
-    seL4_CPtr reply;
-    seL4_Word msg[NUM_MSG_REGISTERS];
+    int target;
+    int result;
+    seL4_CPtr signal_cap;
 };
 
 void submit_task(struct task task);

@@ -5,6 +5,7 @@
 #include <stdbool.h>
 
 #include "open_file.h"
+#include "addrspace.h"
 
 #define FDT_SIZE 16         // Starting size of the fd table
 
@@ -15,6 +16,13 @@ typedef struct {
     uint32_t *free_list;    // Stack of free file descriptor indices
     uint32_t free_count;    // Number of free slots available
 } fdt;
+
+typedef struct io_args {
+    int err;
+    void *buff;
+    seL4_CPtr signal_cap;
+    pt_entry *entry;
+} io_args;
 
 /**
  * Allocate memory for a per-process file descriptor table.
@@ -35,7 +43,9 @@ void fdt_destroy(fdt *fdt);
  * @param fd The file descriptor index into the fd table.
  * @return True if the given fd is valid and false otherwise.
  */
-bool fdt_validfd(fdt *fdt, uint32_t fd);
+static inline bool fdt_validfd(fdt *fdt, uint32_t fd) {
+    return fd < fdt->size - 1;
+}
 
 /**
  * Returns a reference to the open file indexed by the given fd.
@@ -43,7 +53,9 @@ bool fdt_validfd(fdt *fdt, uint32_t fd);
  * @param fd The file descriptor index into the fd table.
  * @return A reference (pointer) to the open file.
  */
-open_file *fdt_get_file(fdt *fdt, uint32_t fd);
+static inline open_file *fdt_get_file(fdt *fdt, uint32_t fd) {
+    return !fdt_validfd(fdt, fd) ? NULL : fdt->files[fd];
+}
 
 /**
  * Puts the given file into the per-process fd table.

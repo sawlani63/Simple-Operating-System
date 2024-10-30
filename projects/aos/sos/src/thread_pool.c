@@ -6,7 +6,7 @@
 #include <sync/condition_var.h>
 
 struct {
-    struct task tasks[QUEUE_SIZE];
+    struct task tasks[THREAD_QUEUE_SIZE];
     int front;
     int rear;
     int size;
@@ -20,11 +20,11 @@ sync_cv_t *signal_cv = NULL;
 
 void submit_task(struct task task) {
     sync_bin_sem_wait(tpool_sem);
-    if (queue.size == QUEUE_SIZE) {
+    if (queue.size == THREAD_QUEUE_SIZE) {
         printf("Tried to add to a full task queue!\n");
     }
     queue.tasks[queue.rear] = task;
-    queue.rear = (queue.rear + 1) % QUEUE_SIZE;
+    queue.rear = (queue.rear + 1) % THREAD_QUEUE_SIZE;
     queue.size++;
     sync_bin_sem_post(tpool_sem);
     sync_cv_signal(signal_cv);
@@ -35,7 +35,7 @@ static struct task dequeue_task() {
         printf("Tried to remove from an empty task queue!\n");
     }
     struct task task = queue.tasks[queue.front];
-    queue.front = (queue.front + 1) % QUEUE_SIZE;
+    queue.front = (queue.front + 1) % THREAD_QUEUE_SIZE;
     queue.size--;
     return task;
 }
