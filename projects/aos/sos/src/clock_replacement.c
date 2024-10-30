@@ -117,7 +117,9 @@ static int clock_page_out() {
     
     uint64_t file_offset = get_page_file_offset();
     GET_PAGE(as->page_table, vaddr).pinned = 1;
+    sync_bin_sem_wait(data_sem);
     char *data = (char *)frame_data(entry.page.frame_ref);
+    sync_bin_sem_post(data_sem);
     io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, &GET_PAGE(as->page_table, vaddr)};
     int res = nfs_pwrite_file(nfs_pagefile, data, file_offset, PAGE_SIZE_4K, nfs_pagefile_write_cb, &args);
     if (res < 0) {
@@ -133,7 +135,9 @@ static int clock_page_out() {
     seL4_Error err = seL4_ARM_Page_Unmap(frame_cptr);
     ZF_LOGF_IFERR(err != seL4_NoError, "Failed to unmap page");
     free_untype(&frame_cptr, NULL);
+    sync_bin_sem_wait(data_sem);
     free_frame(entry.page.frame_ref);
+    sync_bin_sem_post(data_sem);
 
     pt_entry new_entry = {.valid = 0, .swapped = 1, .pinned = 0 , .perms = GET_PAGE(as->page_table, vaddr).perms,
                           .swap_map_index = file_offset / PAGE_SIZE_4K};
@@ -191,8 +195,10 @@ int clock_try_page_in(seL4_Word vaddr, addrspace_t *as) {
 
         uint64_t file_offset = l4_pt[l4_index].swap_map_index * PAGE_SIZE_4K;
         l4_pt[l4_index].pinned = 1;
+        sync_bin_sem_wait(data_sem);
         char *data = (char *)frame_data(frame_ref);
-        io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, &GET_PAGE(as->page_table, vaddr)};
+        sync_bin_sem_post(data_sem);
+        io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, &l4_pt[l4_index]};
         int res = nfs_pread_file(nfs_pagefile, NULL, file_offset, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
         if (res < (int)PAGE_SIZE_4K) {
             return -1;
@@ -201,7 +207,7 @@ int clock_try_page_in(seL4_Word vaddr, addrspace_t *as) {
         if (args.err < 0) {
             return 1;
         }
-        GET_PAGE(as->page_table, vaddr).pinned = 0;
+        l4_pt[l4_index].pinned = 0;
 
         if (swap_manager.queue_size < QUEUE_SIZE) {
             swap_manager.swap_queue[swap_manager.queue_tail] = l4_pt[l4_index].swap_map_index;
