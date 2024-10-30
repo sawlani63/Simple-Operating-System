@@ -7,6 +7,11 @@
 #define APP_PRIORITY         (0)
 #define APP_EP_BADGE         (101)
 
+/* The linker will link this symbol to the start address  *
+ * of an archive of attached applications.                */
+extern char _cpio_archive[];
+extern char _cpio_archive_end[];
+
 extern struct user_process user_process;
 extern seL4_CPtr sched_ctrl_start;
 extern seL4_CPtr sched_ctrl_end;
@@ -357,7 +362,10 @@ bool start_process(char *app_name, thread_main_f *func)
     ZF_LOGI("\nStarting \"%s\"...\n", app_name);
     elf_t elf_file = {};
     unsigned long elf_size;
-    void *elf_base = get_elf_data(app_name, &elf_size);
+    size_t cpio_len = _cpio_archive_end - _cpio_archive;
+    const char *elf_base = cpio_get_file(_cpio_archive, cpio_len, app_name, &elf_size);
+    //void *elf_base = get_elf_data(app_name, &elf_size);
+
 
     if (elf_base == NULL) {
         ZF_LOGE("Unable to open or read %s from NFS", app_name);

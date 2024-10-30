@@ -46,6 +46,12 @@
 #include "nfs.h"
 #include "fs.h"
 
+#define SYSCALL_PROC_CREATE 1000 //change later
+#define SYSCALL_PROC_DELETE 1001 //change later
+#define SYSCALL_PROC_GETID SYS_getpid
+#define SYSCALL_PROC_STATUS 1002 //change later
+#define SYSCALL_PROC_WAIT 1003 // change later
+
 /* the one process we start */
 struct user_process {
     ut_t *tcb_ut;
