@@ -16,9 +16,6 @@ int elf64_checkFile(elf_t *elf)
         return -1; /* not supported on 32-bit architecture */
     }
 
-    printf("SAMINA %d\n", elf->elfSize);
-    printf("MINA %d\n", sizeof(Elf64_Ehdr));
-
     if (elf->elfSize < sizeof(Elf64_Ehdr)) {
         return -1; /* file smaller than ELF header */
     }
@@ -28,22 +25,18 @@ int elf64_checkFile(elf_t *elf)
     }
 
     Elf64_Ehdr const *header = elf->elfFile;
-    printf("MINA %d\n", header->e_ident[EI_CLASS]);
     if (header->e_ident[EI_CLASS] != ELFCLASS64) {
         return -1; /* not a 64-bit ELF */
     }
 
-    printf("MINA %d\n", header->e_phentsize);
     if (header->e_phentsize != sizeof(Elf64_Phdr)) {
         return -1; /* unexpected program header size */
     }
 
-    printf("MINA %d\n", header->e_shentsize);
     if (header->e_shentsize != sizeof(Elf64_Shdr)) {
         return -1; /* unexpected section header size */
     }
 
-    printf("MINA %d\n", header->e_shstrndx);
     if (header->e_shstrndx >= header->e_shnum) {
         return -1; /* invalid section header string table section */
     }
