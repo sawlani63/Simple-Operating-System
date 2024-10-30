@@ -68,3 +68,5 @@ struct user_process {
 
     fdt *fdt;
 };
+
+bool start_process(char *app_name, thread_main_f *func);
