@@ -190,7 +190,7 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg)
         return;
     }
 
-    char *file_path = malloc(path_len);
+    char *file_path = calloc(path_len, sizeof(char));
     int res = perform_cpy(path_len, vaddr, true, file_path);
     if (res == -1) {
         seL4_SetMR(0, -1);
