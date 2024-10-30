@@ -43,4 +43,3 @@ void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_nu
 
 void init_semaphores(void);
 int netcon_send(open_file *file, char *data, UNUSED uint64_t offset, uint64_t len, void *callback, void *args);
-void unpin_page(seL4_Word vaddr);

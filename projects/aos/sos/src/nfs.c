@@ -36,7 +36,7 @@ void nfs_async_read_cb(int err, UNUSED struct nfs_context *nfs, void *data, void
     seL4_SetMR(0, args->err);
     seL4_SetMR(1, err);
     seL4_Send(args->signal_cap, seL4_MessageInfo_new(0, 0, 0, 2));
-    unpin_page(args->vaddr);
+    args->entry->pinned = 0;
     free(args);
 }
 
@@ -48,7 +48,7 @@ void nfs_async_write_cb(int err, UNUSED struct nfs_context *nfs, void *data, voi
     seL4_SetMR(0, args->err);
     seL4_SetMR(1, err);
     seL4_Send(args->signal_cap, seL4_MessageInfo_new(0, 0, 0, 2));
-    unpin_page(args->vaddr);
+    args->entry->pinned = 0;
     free(args);
 }
 

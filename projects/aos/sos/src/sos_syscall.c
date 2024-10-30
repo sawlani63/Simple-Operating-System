@@ -40,62 +40,16 @@ void init_semaphores(void) {
     initialise_thread_pool(netcon_reply);
 }
 
-static bool vaddr_is_mapped(seL4_Word vaddr) {
-    /* We assume the top level is mapped. */
-    page_upper_directory *l1_pt = user_process.addrspace->page_table;
-
-    uint16_t l1_index = (vaddr >> 39) & MASK(9); /* Top 9 bits */
-    uint16_t l2_index = (vaddr >> 30) & MASK(9); /* Next 9 bits */
-    uint16_t l3_index = (vaddr >> 21) & MASK(9); /* Next 9 bits */
-    uint16_t l4_index = (vaddr >> 12) & MASK(9); /* Next 9 bits */
-
-    page_directory *l2_pt = l1_pt[l1_index].l2;
-    if (l2_pt == NULL) {
-        return false;
-    }
-
-    page_table *l3_pt = l2_pt[l2_index].l3;
-    if (l3_pt == NULL) {
-        return false;
-    }
-
-    pt_entry *l4_pt = l3_pt[l3_index].l4;
-    if (l4_pt == NULL) {
-        return false;
-    }
-
-    return l4_pt[l4_index].valid;
-}
-
 static inline bool vaddr_check(seL4_Word vaddr) {
-    /* If the vaddr is not in a valid region we error out. Then if the address is not already
-     * mapped and vm_fault returns an error when trying to map it, we also error out.*/
-    return vaddr_is_mapped(vaddr) || handle_vm_fault(vaddr);
+    return vaddr_is_mapped(user_process.addrspace, vaddr) || handle_vm_fault(vaddr);
 }
 
-static inline frame_ref_t get_frame(seL4_Word vaddr) {
+static inline pt_entry *get_page(seL4_Word vaddr) {
     uint16_t l1_i = (vaddr >> 39) & MASK(9); /* Top 9 bits */
     uint16_t l2_i = (vaddr >> 30) & MASK(9); /* Next 9 bits */
     uint16_t l3_i = (vaddr >> 21) & MASK(9); /* Next 9 bits */
     uint16_t l4_i = (vaddr >> 12) & MASK(9); /* Next 9 bits */
-    return user_process.addrspace->page_table[l1_i].l2[l2_i].l3[l3_i].l4[l4_i].page.frame_ref;
-}
-
-static inline frame_ref_t pin_page_and_get_frame(seL4_Word vaddr) {
-    uint16_t l1_i = (vaddr >> 39) & MASK(9); /* Top 9 bits */
-    uint16_t l2_i = (vaddr >> 30) & MASK(9); /* Next 9 bits */
-    uint16_t l3_i = (vaddr >> 21) & MASK(9); /* Next 9 bits */
-    uint16_t l4_i = (vaddr >> 12) & MASK(9); /* Next 9 bits */
-    user_process.addrspace->page_table[l1_i].l2[l2_i].l3[l3_i].l4[l4_i].pinned = 1;
-    return user_process.addrspace->page_table[l1_i].l2[l2_i].l3[l3_i].l4[l4_i].page.frame_ref;
-}
-
-void unpin_page(seL4_Word vaddr) {
-    uint16_t l1_i = (vaddr >> 39) & MASK(9); /* Top 9 bits */
-    uint16_t l2_i = (vaddr >> 30) & MASK(9); /* Next 9 bits */
-    uint16_t l3_i = (vaddr >> 21) & MASK(9); /* Next 9 bits */
-    uint16_t l4_i = (vaddr >> 12) & MASK(9); /* Next 9 bits */
-    user_process.addrspace->page_table[l1_i].l2[l2_i].l3[l3_i].l4[l4_i].pinned = 0;
+    return &user_process.addrspace->page_table[l1_i].l2[l2_i].l3[l3_i].l4[l4_i];
 }
 
 static inline void wakeup(UNUSED uint32_t id, void* data)
@@ -118,11 +72,13 @@ static inline int perform_io_core(uint16_t data_offset, uint64_t file_offset, ui
         return -1;
     }
 
+    pt_entry *entry = get_page(vaddr);
+    entry->pinned = 1;
     sync_bin_sem_wait(data_sem);
-    char *data = (char *)frame_data(pin_page_and_get_frame(vaddr));
+    char *data = (char *)frame_data(entry->page.frame_ref);
     sync_bin_sem_post(data_sem);
     io_args *args = malloc(sizeof(io_args));
-    *args = (io_args){.err = len, .buff = data + data_offset, .signal_cap = signal_cap, .vaddr = vaddr};
+    *args = (io_args){.err = len, .buff = data + data_offset, .signal_cap = signal_cap, .entry = entry};
     int res;
     if (read) {
         res = file->file_read(file, data + data_offset, file_offset, len, callback, args);
@@ -204,7 +160,7 @@ static int perform_cpy(size_t nbyte, uintptr_t vaddr, bool data_to_buff, void *b
         }
 
         sync_bin_sem_wait(data_sem);
-        char *data = (char *)frame_data(get_frame(vaddr));
+        char *data = (char *)frame_data(get_page(vaddr)->page.frame_ref);
         if (data_to_buff) {
             memcpy(buff + (nbyte - len), data + offset, len);
         } else {
@@ -393,7 +349,7 @@ void syscall_sos_stat(seL4_MessageInfo_t *reply_msg)
 
     sos_stat_t stat = {ST_SPECIAL, 0, 0, 0, 0};
     if (strcmp(file_path, "console")) {
-        io_args args = {0, &stat, nfs_signal, path_vaddr};
+        io_args args = {0, &stat, nfs_signal, NULL};
         if (nfs_stat_file(file_path, nfs_async_stat_cb, &args)) {
             seL4_SetMR(0, -1);
             return;
@@ -453,7 +409,7 @@ void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg)
     int res = perform_cpy(size, vaddr, false, name);
 
     seL4_Word new_vaddr = vaddr + size;
-    unsigned char *data = frame_data(get_frame(new_vaddr));
+    unsigned char *data = frame_data(get_page(vaddr)->page.frame_ref);
     data[new_vaddr & (PAGE_SIZE_4K - 1)] = 0;
     nfs_close_dir(args.buff);
     
