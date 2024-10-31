@@ -351,6 +351,7 @@ int nfs_pread_file(open_file *file, UNUSED char *data, uint64_t offset, uint64_t
     sync_bin_sem_wait(net_sync_sem);
     int res = nfs_pread_async(nfs, file->handle, offset, count, cb, private_data);
     sync_bin_sem_post(net_sync_sem);
+    ZF_LOGE("%d", res);
     return res < 0 ? -1 : (int)count;
 }
 

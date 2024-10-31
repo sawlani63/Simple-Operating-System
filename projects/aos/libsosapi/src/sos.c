@@ -115,7 +115,8 @@ pid_t sos_process_create(const char *path)
 
     seL4_SetMR(0, SYSCALL_PROC_CREATE);
     seL4_SetMR(1, (seL4_Word) path);
-    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 2));
+    seL4_SetMR(2, strlen(path));
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 3));
     return seL4_GetMR(0);
 }
 

@@ -23,7 +23,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "sosh"
+#define APP_NAME             "console_test"
 
 /* The linker will link this symbol to the start address  *
  * of an archive of attached applications.                */
@@ -148,8 +148,6 @@ seL4_MessageInfo_t handle_syscall()
     case SYSCALL_SYS_MUNMAP:
         syscall_sys_munmap(&reply_msg);
         break;
-    case SYSCALL_PROC_CREATE:
-        syscall_proc_create(&reply_msg);
     default:
         syscall_unknown_syscall(&reply_msg, syscall_number);
     }

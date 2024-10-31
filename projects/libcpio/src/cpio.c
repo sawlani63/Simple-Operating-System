@@ -215,11 +215,6 @@ const void *cpio_get_file(const void *archive, unsigned long len, const char *na
         header = header_info.next;
     }
 
-    if (!strcmp(header_info.filename, "console_test")) {
-        printf("HEADER INFO SHIT %s %d %s", header_info.filename, header_info.filesize, header_info.data);
-        printf("%d, %d", strlen(header_info.filename), sizeof(header_info.data));
-    }
-
     if (size) {
         *size = header_info.filesize;
     }
