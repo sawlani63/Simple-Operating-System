@@ -151,6 +151,9 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
     case SYSCALL_PROC_CREATE:
         syscall_proc_create(&reply_msg, badge);
         break;
+    case SYSCALL_PROC_GETID:
+        syscall_proc_getid(&reply_msg, badge);
+        break;
     default:
         syscall_unknown_syscall(&reply_msg, syscall_number);
     }

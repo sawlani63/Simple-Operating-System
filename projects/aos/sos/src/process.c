@@ -424,12 +424,12 @@ int start_process(char *app_name, thread_main_f *func)
     elf_t elf_file = {};
     unsigned long elf_size;
     char *elf_base = get_elf_data(app_name, &elf_size);
-
     if (elf_base == NULL) {
         ZF_LOGE("Unable to open or read %s from NFS", app_name);
         free_mem(user_process, user_ep, region, ep, ut);
         return -1;
     }
+
     /* Ensure that the file is an elf file. */
     if (elf_newFile(elf_base, elf_size, &elf_file)) {
         ZF_LOGE("Invalid elf file");
@@ -535,8 +535,13 @@ void syscall_proc_create(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     }
     path[len - 1] = '\0';
 
-    ZF_LOGE("PATH %s", path);
     pid_t pid = start_process(path, NULL);
-    ZF_LOGE("Pid %d", pid);
     seL4_SetMR(0, pid);
+}
+
+void syscall_proc_getid(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
+{
+    ZF_LOGV("syscall: some thread made syscall %d", SYSCALL_PROC_GETID);
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    seL4_SetMR(0, user_process_list[badge].pid);
 }

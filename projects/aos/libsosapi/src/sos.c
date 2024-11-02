@@ -133,7 +133,6 @@ pid_t sos_my_id(void)
     seL4_SetMR(0, SYSCALL_PROC_GETID);
     seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
     return seL4_GetMR(0);
-
 }
 
 int sos_process_status(sos_process_t *processes, unsigned max)

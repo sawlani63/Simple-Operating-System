@@ -228,6 +228,9 @@ int main(void)
     res = sos_close(fd);
     assert(!res);
 
-    int pid = sos_process_create("console_test");
+    int pid = sos_process_create("percy");
+    assert(pid == -1); // process creation should fail
+    pid = sos_process_create("console_test");
     assert(pid == 1); // second running process
+    // will test concurrently soon
 }
