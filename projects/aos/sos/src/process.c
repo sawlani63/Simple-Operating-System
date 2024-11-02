@@ -32,7 +32,7 @@ char *get_elf_data(char *app_name, unsigned long *elf_size)
     args.buff = data;
     error = nfs_pread_file(file, NULL, 0, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
     if (error < (int) PAGE_SIZE_4K) {
-        ZF_LOGE("NFS: Error in reading app");
+        ZF_LOGE("NFS: Error in reading ELF and program headers");
         return NULL;
     }
     seL4_Wait(nfs_signal, 0);
@@ -42,21 +42,19 @@ char *get_elf_data(char *app_name, unsigned long *elf_size)
 
     Elf64_Ehdr const *header = (void *) data;
     *elf_size = header->e_shoff + (header->e_shentsize * header->e_shnum);
+    data = realloc(data, *elf_size);
+    args.buff = data;
 
-    /*ZF_LOGE("SIZE OF %p", args.buff);
-    args.buff = data + args.err;
-    ZF_LOGE("SIZE OF %p", args.buff);
-    ZF_LOGE("%d", *elf_size - PAGE_SIZE_4K);
-    error = nfs_pread_file(file, NULL, (*elf_size - PAGE_SIZE_4K), PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
-    ZF_LOGE("%d", error);
-    if (error < (int) PAGE_SIZE_4K) {
-        ZF_LOGE("NFS: Error in reading app");
+    error = nfs_pread_file(file, NULL, 0, *elf_size, nfs_pagefile_read_cb, &args);
+    if (error < (int) *elf_size) {
+        ZF_LOGE("NFS: Error in reading ELF");
         return NULL;
     }
     seL4_Wait(nfs_signal, 0);
     if (args.err < 0) {
         return NULL;
-    }*/
+    }
+
     // close file in fdt and nfs
     return data;
 }

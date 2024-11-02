@@ -46,6 +46,9 @@
 #include "nfs.h"
 #include "fs.h"
 
+/* Number of concurrently running processes supported */
+#define NUM_PROC 16
+
 #define SYSCALL_PROC_CREATE 1000 //change later
 #define SYSCALL_PROC_DELETE 1001 //change later
 #define SYSCALL_PROC_GETID SYS_getpid
