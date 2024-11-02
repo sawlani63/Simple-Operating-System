@@ -148,7 +148,7 @@ static int perform_io(user_process_t user_process, size_t nbyte, uintptr_t vaddr
     return bytes_received;
 }
 
-static int perform_cpy(user_process_t user_process, size_t nbyte, uintptr_t vaddr, bool data_to_buff, void *buff) {
+int perform_cpy(user_process_t user_process, size_t nbyte, uintptr_t vaddr, bool data_to_buff, void *buff) {
     size_t bytes_left = nbyte;
     uint16_t offset = vaddr & (PAGE_SIZE_4K - 1);
 

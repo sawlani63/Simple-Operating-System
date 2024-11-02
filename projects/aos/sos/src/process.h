@@ -49,11 +49,12 @@
 /* Number of concurrently running processes supported */
 #define NUM_PROC 16
 
-#define SYSCALL_PROC_CREATE 1000 //change later
-#define SYSCALL_PROC_DELETE 1001 //change later
+// Could not find constants for the others so just set to numbers around sys_getpid
+#define SYSCALL_PROC_CREATE 170
+#define SYSCALL_PROC_DELETE 171
 #define SYSCALL_PROC_GETID SYS_getpid
-#define SYSCALL_PROC_STATUS 1002 //change later
-#define SYSCALL_PROC_WAIT 1003 // change later
+#define SYSCALL_PROC_STATUS 173
+#define SYSCALL_PROC_WAIT 174
 
 typedef int pid_t;
 
@@ -84,4 +85,5 @@ typedef struct user_process {
 } user_process_t;
 
 int init_proc_obj();
-bool start_process(char *app_name, thread_main_f *func);
+int start_process(char *app_name, thread_main_f *func);
+void syscall_proc_create(seL4_MessageInfo_t *reply_msg, seL4_Word badge);

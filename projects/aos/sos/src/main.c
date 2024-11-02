@@ -148,6 +148,9 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
     case SYSCALL_SYS_MUNMAP:
         syscall_sys_munmap(&reply_msg, badge);
         break;
+    case SYSCALL_PROC_CREATE:
+        syscall_proc_create(&reply_msg, badge);
+        break;
     default:
         syscall_unknown_syscall(&reply_msg, syscall_number);
     }
@@ -386,8 +389,8 @@ NORETURN void *main_continued(UNUSED void *arg)
 
     /* Start the user application */
     printf("Start process\n");
-    bool success = start_process(APP_NAME, syscall_loop);
-    ZF_LOGF_IF(!success, "Failed to start process");
+    int success = start_process(APP_NAME, syscall_loop);
+    ZF_LOGF_IF(success == -1, "Failed to start process");
 
     /* Since our main thread has no other tasks left, we swap the task of irq handling from the temp thread to our main thread, and destroy our temp thread */
     seL4_TCB_UnbindNotification(irq_temp_thread->tcb);

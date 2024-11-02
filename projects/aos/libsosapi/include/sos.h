@@ -27,11 +27,11 @@
 #define SYSCALL_SOS_TIME_STAMP SYS_clock_gettime
 #define SYSCALL_SOS_GETDIRENT SYS_getdents64
 #define SYSCALL_SOS_STAT SYS_statfs
-#define SYSCALL_PROC_CREATE 1000 //change later
-#define SYSCALL_PROC_DELETE 1001 //change later
+#define SYSCALL_PROC_CREATE 170
+#define SYSCALL_PROC_DELETE 171
 #define SYSCALL_PROC_GETID SYS_getpid
-#define SYSCALL_PROC_STATUS 1002 //change later
-#define SYSCALL_PROC_WAIT 1003 // change later
+#define SYSCALL_PROC_STATUS 173
+#define SYSCALL_PROC_WAIT 174
 
 /* Endpoint for talking to SOS */
 #define SOS_IPC_EP_CAP     (0x1)

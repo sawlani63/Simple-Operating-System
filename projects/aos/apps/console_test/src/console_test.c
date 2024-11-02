@@ -225,4 +225,9 @@ int main(void)
 
     test_buffers(fd);
     printf("Passed read/write buffer test\n");
+    res = sos_close(fd);
+    assert(!res);
+
+    int pid = sos_process_create("console_test");
+    assert(pid == 1); // second running process
 }
