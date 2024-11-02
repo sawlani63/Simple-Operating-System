@@ -55,6 +55,8 @@
 #define SYSCALL_PROC_STATUS 1002 //change later
 #define SYSCALL_PROC_WAIT 1003 // change later
 
+typedef int pid_t;
+
 /* the one process we start */
 typedef struct user_process {
     ut_t *tcb_ut;
@@ -78,7 +80,8 @@ typedef struct user_process {
     fdt *fdt;
     sos_thread_t *handler_thread;
     seL4_CPtr ep;
+    pid_t pid;
 } user_process_t;
 
-int init_proc_list();
+int init_proc_obj();
 bool start_process(char *app_name, thread_main_f *func);

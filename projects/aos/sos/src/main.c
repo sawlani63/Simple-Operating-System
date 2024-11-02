@@ -381,7 +381,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     nfs_pagefile->handle = args.buff;
 
     /* Initialise the list of processes */
-    error = init_proc_list();
+    error = init_proc_obj();
     ZF_LOGF_IF(error, "Failed to initialise the list of processes");
 
     /* Start the user application */

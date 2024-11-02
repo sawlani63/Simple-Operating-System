@@ -7,25 +7,54 @@
 #define APP_PRIORITY         (0)
 #define APP_EP_BADGE         (101)
 
-/* The linker will link this symbol to the start address  *
- * of an archive of attached applications.                */
-extern char _cpio_archive[];
-extern char _cpio_archive_end[];
-
 extern seL4_CPtr sched_ctrl_start;
 extern seL4_CPtr sched_ctrl_end;
 extern seL4_CPtr nfs_signal;
 thread_main_f *handler_func = NULL;
 
 user_process_t *user_process_list;
+uint8_t *pid_map;
 
-int init_proc_list()
+int init_proc_obj()
 {
     user_process_list = calloc(NUM_PROC, sizeof(user_process_t));
     if (user_process_list == NULL) {
         return 1;
     }
+    pid_map = calloc(NUM_PROC, sizeof(uint8_t));
+    if (pid_map == NULL) {
+        free(user_process_list);
+        return 1;
+    }
     return 0;
+}
+
+void mark_pid_used(uint32_t block_num) {
+    uint32_t index = block_num / 8;
+    uint8_t bit_index = block_num % 8;
+    pid_map[index] |= (1 << bit_index);
+}
+
+void mark_pid_free(uint32_t block_num) {
+    uint32_t index = block_num / 8;
+    uint8_t bit_index = block_num % 8;
+    pid_map[index] &= ~(1 << bit_index);
+}
+
+/* Find first free block (returns block number, or -1 if none found) */
+int find_first_free_block() {
+    for (uint32_t index = 0; index < NUM_PROC; index++) {
+        // If not all blocks in this byte are used
+        if (pid_map[index] != 0xFF) {
+            for (uint8_t bit_index = 0; bit_index < 8; bit_index++) {
+                if (!(pid_map[index] & (1 << bit_index))) {
+                    mark_pid_used((index * 8) + bit_index);
+                    return (index * 8) + bit_index;
+                }
+            }
+        }
+    }
+    return -1;
 }
 
 char *get_elf_data(char *app_name, unsigned long *elf_size)
@@ -254,6 +283,11 @@ static uintptr_t init_process_stack(user_process_t user_process, cspace_t *cspac
 bool start_process(char *app_name, thread_main_f *func)
 {
     user_process_t user_process;
+    user_process.pid = find_first_free_block();
+    if (user_process.pid == -1) {
+        ZF_LOGE("Ran out of IDs for processes");
+        return false;
+    }
 
     if (func != NULL) {
         handler_func = func;
@@ -437,13 +471,14 @@ bool start_process(char *app_name, thread_main_f *func)
     }
 
     init_threads(ep, ep, sched_ctrl_start, sched_ctrl_end);
-    user_process.handler_thread = thread_create(handler_func, 0, 0, true, seL4_MaxPrio, seL4_CapNull, true);
+    user_process.ep = ep;
+
+    user_process.handler_thread = thread_create(handler_func, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true);
     if (user_process.handler_thread == NULL) {
         ZF_LOGE("Could not create system call handler thread for %s\n", app_name);
         // will see, can probably put earlier for less frees
         return false;
     }
-    user_process.ep = ep;
 
     /* Initialise the per-process file descriptor table */
     char error;
@@ -469,6 +504,6 @@ bool start_process(char *app_name, thread_main_f *func)
         free_mem(user_process, user_ep, region, ep, ut);
     }
 
-    user_process_list[0] = user_process;
+    user_process_list[user_process.pid] = user_process;
     return err == seL4_NoError;
 }
