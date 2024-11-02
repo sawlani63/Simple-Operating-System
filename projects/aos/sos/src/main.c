@@ -39,15 +39,15 @@ cspace_t cspace;
 seL4_CPtr sched_ctrl_start;
 seL4_CPtr sched_ctrl_end;
 
-struct user_process user_process;
-
+extern user_process_t *user_process_list;
 struct network_console *console;
 
 extern seL4_CPtr nfs_signal;
 
 open_file *nfs_pagefile;
 
-bool handle_vm_fault(seL4_Word fault_addr) {
+bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
+    user_process_t user_process = user_process_list[badge];
     addrspace_t *as = user_process.addrspace;
 
     if (as == NULL || as->page_table == NULL || fault_addr == 0) {
@@ -55,7 +55,7 @@ bool handle_vm_fault(seL4_Word fault_addr) {
         return false;
     }
 
-    int try_page_in_res = clock_try_page_in(fault_addr, as);
+    int try_page_in_res = clock_try_page_in(user_process, fault_addr);
     if (try_page_in_res < 0) {
         return false;
     } else if (!try_page_in_res) {
@@ -86,7 +86,7 @@ bool handle_vm_fault(seL4_Word fault_addr) {
     }
 
     /* Allocate a new frame to be mapped by the shadow page table. */
-    frame_ref_t frame_ref = clock_alloc_frame(fault_addr);
+    frame_ref_t frame_ref = clock_alloc_frame(as, fault_addr);
     if (frame_ref == NULL_FRAME) {
         ZF_LOGD("Failed to alloc frame");
         return false;
@@ -105,7 +105,7 @@ bool handle_vm_fault(seL4_Word fault_addr) {
  * Deals with a syscall and sets the message registers before returning the
  * message info to be passed through to seL4_ReplyRecv()
  */
-seL4_MessageInfo_t handle_syscall()
+seL4_MessageInfo_t handle_syscall(seL4_Word badge)
 {
     seL4_MessageInfo_t reply_msg;
 
@@ -116,16 +116,16 @@ seL4_MessageInfo_t handle_syscall()
     /* Process system call */
     switch (syscall_number) {
     case SYSCALL_SOS_OPEN:
-        syscall_sos_open(&reply_msg);
+        syscall_sos_open(&reply_msg, badge);
         break;
     case SYSCALL_SOS_CLOSE:
-        syscall_sos_close(&reply_msg);
+        syscall_sos_close(&reply_msg, badge);
         break;
     case SYSCALL_SOS_READ:
-        syscall_sos_read(&reply_msg);
+        syscall_sos_read(&reply_msg, badge);
         break;
     case SYSCALL_SOS_WRITE:
-        syscall_sos_write(&reply_msg);
+        syscall_sos_write(&reply_msg, badge);
         break;
     case SYSCALL_SOS_USLEEP:
         syscall_sos_usleep(&reply_msg);
@@ -134,19 +134,19 @@ seL4_MessageInfo_t handle_syscall()
         syscall_sos_time_stamp(&reply_msg);
         break;
     case SYSCALL_SYS_BRK:
-        syscall_sys_brk(&reply_msg);
+        syscall_sys_brk(&reply_msg, badge);
         break;
     case SYSCALL_SOS_STAT:
-        syscall_sos_stat(&reply_msg);
+        syscall_sos_stat(&reply_msg, badge);
         break;
     case SYSCALL_SOS_GETDIRENT:
-        syscall_sos_getdirent(&reply_msg);
+        syscall_sos_getdirent(&reply_msg, badge);
         break;
     case SYSCALL_SYS_MMAP:
-        syscall_sys_mmap(&reply_msg);
+        syscall_sys_mmap(&reply_msg, badge);
         break;
     case SYSCALL_SYS_MUNMAP:
-        syscall_sys_munmap(&reply_msg);
+        syscall_sys_munmap(&reply_msg, badge);
         break;
     default:
         syscall_unknown_syscall(&reply_msg, syscall_number);
@@ -157,7 +157,8 @@ seL4_MessageInfo_t handle_syscall()
 
 NORETURN void syscall_loop(void *arg)
 {
-    seL4_CPtr ep = (seL4_CPtr) arg;
+    seL4_Word badge = (seL4_Word) arg;
+    seL4_CPtr ep = user_process_list[badge].ep;
     seL4_CPtr reply;
 
     /* Create reply object */
@@ -182,20 +183,19 @@ NORETURN void syscall_loop(void *arg)
         /* Awake! We got a message - check the label and badge to
          * see what the message is about */
         seL4_Word label = seL4_MessageInfo_get_label(message);
-
         if (label == seL4_Fault_NullFault) {
             /* It's not a fault or an interrupt, it must be an IPC
              * message from console_test! */
-            reply_msg = handle_syscall();
+            reply_msg = handle_syscall(badge);
             have_reply = true;
         } else if (label == seL4_Fault_VMFault) {
             reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
-            have_reply = handle_vm_fault(seL4_GetMR(seL4_VMFault_Addr));
+            have_reply = handle_vm_fault(seL4_GetMR(seL4_VMFault_Addr), badge);
         } else {
             /* some kind of fault */
             debug_print_fault(message, APP_NAME);
             /* dump registers too */
-            debug_dump_registers(user_process.tcb);
+            //debug_dump_registers(user_process.tcb);
             /* Don't reply and recv on nothing */
             have_reply = false;
 
@@ -204,9 +204,9 @@ NORETURN void syscall_loop(void *arg)
     }
 }
 
-NORETURN void irq_loop(void *ipc_ep)
+NORETURN void irq_loop(void* arg)
 {
-    seL4_CPtr ep = (seL4_CPtr) ipc_ep;
+    seL4_CPtr ep = (seL4_CPtr) arg;
     seL4_CPtr reply;
 
     /* Create reply object */
@@ -226,7 +226,7 @@ NORETURN void irq_loop(void *ipc_ep)
             /* some kind of fault */
             debug_print_fault(message, APP_NAME);
             /* dump registers too */
-            debug_dump_registers(user_process.tcb);
+            //debug_dump_registers(user_process.tcb);
 
             ZF_LOGF("The SOS skeleton does not know how to handle faults!");
         }
@@ -333,11 +333,6 @@ NORETURN void *main_continued(UNUSED void *arg)
      * so touching the watchdog timers here is not recommended!) */
     void *timer_vaddr = sos_map_device(&cspace, PAGE_ALIGN_4K(TIMER_MAP_BASE), PAGE_SIZE_4K);
 
-    /* Initialise the per-process file descriptor table */
-    char err;
-    user_process.fdt = fdt_create(&err);
-    ZF_LOGF_IF(err, "Failed to initialise the per-process file descriptor table");
-
     /* Initialise semaphores for synchronisation */
     init_nfs_sem();
     init_semaphores();
@@ -348,13 +343,6 @@ NORETURN void *main_continued(UNUSED void *arg)
     console = network_console_init();
     network_console_register_handler(console, enqueue);
     init_console_sem();
-    
-    open_file *file = file_create("console", O_WRONLY, netcon_send, deque);
-    uint32_t fd;
-    err = fdt_put(user_process.fdt, file, &fd); // initialise stdout
-    ZF_LOGF_IF(err, "No memory for new file object");
-    err = fdt_put(user_process.fdt, file, &fd); // initialise stderr
-    ZF_LOGF_IF(err, "No memory for new file object");
 
     init_bitmap();
 
@@ -364,7 +352,6 @@ NORETURN void *main_continued(UNUSED void *arg)
     ZF_LOGF_IF(err, "Failed to initialize debugger %d", err);
 #endif /* CONFIG_SOS_GDB_ENABLED */
 
-    // seL4_TCB_UnbindNotification(seL4_CapInitThreadTCB);
     /* Initialize a temporary irq handling thread that binds the notification object to its TCB and handles irqs until the main thread is done with its tasks */
     sos_thread_t *irq_temp_thread = thread_create(irq_loop, (void *)ipc_ep, 0, true, seL4_MaxPrio, ntfn, false);
     if (irq_temp_thread == NULL) {
@@ -392,6 +379,10 @@ NORETURN void *main_continued(UNUSED void *arg)
     int error = nfs_open_file(nfs_pagefile, nfs_async_open_cb, &args);
     ZF_LOGF_IF(error, "NFS: Error in opening pagefile");
     nfs_pagefile->handle = args.buff;
+
+    /* Initialise the list of processes */
+    error = init_proc_list();
+    ZF_LOGF_IF(error, "Failed to initialise the list of processes");
 
     /* Start the user application */
     printf("Start process\n");

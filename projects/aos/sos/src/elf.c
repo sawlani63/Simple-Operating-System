@@ -85,7 +85,7 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
         uintptr_t loadee_vaddr = (ROUND_DOWN(dst, PAGE_SIZE_4K));
 
         /* allocate the frame for the loadees address space */
-        frame_ref_t frame = clock_alloc_frame(loadee_vaddr);
+        frame_ref_t frame = clock_alloc_frame(as, loadee_vaddr);
         if (frame == NULL_FRAME) {
             ZF_LOGD("Failed to alloc frame");
             return -1;

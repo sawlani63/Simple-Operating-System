@@ -1,6 +1,6 @@
 #include "sos_syscall.h"
 
-extern struct user_process user_process;
+extern user_process_t *user_process_list;
 bool console_open_for_read = false;
 
 seL4_CPtr data_sem_cptr;
@@ -40,11 +40,11 @@ void init_semaphores(void) {
     initialise_thread_pool(netcon_reply);
 }
 
-static inline bool vaddr_check(seL4_Word vaddr) {
+static inline bool vaddr_check(user_process_t user_process, seL4_Word vaddr) {
     return vaddr_is_mapped(user_process.addrspace, vaddr) || handle_vm_fault(vaddr);
 }
 
-static inline pt_entry *get_page(seL4_Word vaddr) {
+static inline pt_entry *get_page(user_process_t user_process, seL4_Word vaddr) {
     uint16_t l1_i = (vaddr >> 39) & MASK(9); /* Top 9 bits */
     uint16_t l2_i = (vaddr >> 30) & MASK(9); /* Next 9 bits */
     uint16_t l3_i = (vaddr >> 21) & MASK(9); /* Next 9 bits */
@@ -66,13 +66,13 @@ int netcon_send(open_file *file, char *data, UNUSED uint64_t offset, uint64_t le
     return res;
 }
 
-static inline int perform_io_core(uint16_t data_offset, uint64_t file_offset, uintptr_t vaddr,
+static inline int perform_io_core(user_process_t user_process, uint16_t data_offset, uint64_t file_offset, uintptr_t vaddr,
                                   open_file *file, void *callback, bool read, uint16_t len) {
-    if (!vaddr_check(vaddr)) {
+    if (!vaddr_check(user_process, vaddr)) {
         return -1;
     }
 
-    pt_entry *entry = get_page(vaddr);
+    pt_entry *entry = get_page(user_process, vaddr);
     entry->pinned = 1;
     sync_bin_sem_wait(data_sem);
     char *data = (char *)frame_data(entry->page.frame_ref);
@@ -97,7 +97,7 @@ static inline int cleanup_pending_requests(int outstanding_requests) {
     return -1;
 }
 
-static int perform_io(size_t nbyte, uintptr_t vaddr, open_file *file, void *callback, bool read) {
+static int perform_io(user_process_t user_process, size_t nbyte, uintptr_t vaddr, open_file *file, void *callback, bool read) {
     #define MAX_BATCH_SIZE (NUM_FRAMES < BIT(19) - 1 ? 1 : 3)
     size_t bytes_received = 0;
     size_t bytes_left = nbyte;
@@ -108,7 +108,7 @@ static int perform_io(size_t nbyte, uintptr_t vaddr, open_file *file, void *call
         /* Start the new batch of I/O requests. */
         while (outstanding_requests < MAX_BATCH_SIZE && bytes_left > 0) {
             uint16_t len = MIN(bytes_left, PAGE_SIZE_4K - offset);
-            int res = perform_io_core(offset, file->offset + (nbyte - bytes_left), vaddr, file, callback, read, len);
+            int res = perform_io_core(user_process, offset, file->offset + (nbyte - bytes_left), vaddr, file, callback, read, len);
             
             if (res < 0) {
                 return cleanup_pending_requests(outstanding_requests);
@@ -148,19 +148,19 @@ static int perform_io(size_t nbyte, uintptr_t vaddr, open_file *file, void *call
     return bytes_received;
 }
 
-static int perform_cpy(size_t nbyte, uintptr_t vaddr, bool data_to_buff, void *buff) {
+static int perform_cpy(user_process_t user_process, size_t nbyte, uintptr_t vaddr, bool data_to_buff, void *buff) {
     size_t bytes_left = nbyte;
     uint16_t offset = vaddr & (PAGE_SIZE_4K - 1);
 
     while (bytes_left > 0) {
         uint16_t len = MIN(bytes_left, PAGE_SIZE_4K - offset);
 
-        if (!vaddr_check(vaddr)) {
+        if (!vaddr_check(user_process, vaddr)) {
             return -1;
         }
 
         sync_bin_sem_wait(data_sem);
-        char *data = (char *)frame_data(get_page(vaddr)->page.frame_ref);
+        char *data = (char *)frame_data(get_page(user_process, vaddr)->page.frame_ref);
         if (data_to_buff) {
             memcpy(buff + (nbyte - len), data + offset, len);
         } else {
@@ -176,22 +176,24 @@ static int perform_cpy(size_t nbyte, uintptr_t vaddr, bool data_to_buff, void *b
     return nbyte - bytes_left;
 }
 
-void syscall_sos_open(seL4_MessageInfo_t *reply_msg) 
+void syscall_sos_open(seL4_MessageInfo_t *reply_msg, seL4_Word badge) 
 {
+    ZF_LOGV("syscall: thread example made syscall %d!\n", SYSCALL_SOS_OPEN);
+    /* construct a reply message of length 1 */
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    user_process_t user_process = user_process_list[badge];
+
     seL4_Word vaddr = seL4_GetMR(1);
     int path_len = seL4_GetMR(2) + 1;
     int mode = seL4_GetMR(3);
 
-    ZF_LOGV("syscall: thread example made syscall %d!\n", SYSCALL_SOS_OPEN);
-    /* construct a reply message of length 1 */
-    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     if ((mode != O_WRONLY) && (mode != O_RDONLY) && (mode != O_RDWR)) {
         seL4_SetMR(0, -1);
         return;
     }
 
     char *file_path = malloc(path_len);
-    int res = perform_cpy(path_len, vaddr, true, file_path);
+    int res = perform_cpy(user_process, path_len, vaddr, true, file_path);
     if (res == -1) {
         seL4_SetMR(0, -1);
         return;
@@ -226,11 +228,12 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg)
     seL4_SetMR(0, err ? -1 : (int) fd);
 }
 
-void syscall_sos_close(seL4_MessageInfo_t *reply_msg)
+void syscall_sos_close(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_CLOSE);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    user_process_t user_process = user_process_list[badge];
     int close_fd = seL4_GetMR(1);
 
     open_file *found = fdt_get_file(user_process.fdt, close_fd);
@@ -257,11 +260,12 @@ void syscall_sos_close(seL4_MessageInfo_t *reply_msg)
     seL4_SetMR(0, 0);
 }
 
-void syscall_sos_read(seL4_MessageInfo_t *reply_msg) 
+void syscall_sos_read(seL4_MessageInfo_t *reply_msg, seL4_Word badge) 
 {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_READ);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    user_process_t user_process = user_process_list[badge];
     /* Receive a fd from sos.c */
     int read_fd = seL4_GetMR(1);
     seL4_Word vaddr = seL4_GetMR(2);
@@ -274,18 +278,19 @@ void syscall_sos_read(seL4_MessageInfo_t *reply_msg)
         return;
     }
 
-    int res = perform_io(nbyte, vaddr, found, nfs_async_read_cb, true);
+    int res = perform_io(user_process, nbyte, vaddr, found, nfs_async_read_cb, true);
     if (res > 0) {
         found->offset += res;
     }
     seL4_SetMR(0, res);
 }
 
-void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
+void syscall_sos_write(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_WRITE);
     /* Construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    user_process_t user_process = user_process_list[badge];
 
     /* Receive fd, virtual address, and number of bytes from sos.c */
     int write_fd = seL4_GetMR(1);
@@ -299,7 +304,7 @@ void syscall_sos_write(seL4_MessageInfo_t *reply_msg)
         seL4_SetMR(0, -1);
         return;
     }
-    int res = perform_io(nbyte, vaddr, found, nfs_async_write_cb, false);
+    int res = perform_io(user_process, nbyte, vaddr, found, nfs_async_write_cb, false);
     if (res > 0) {
         found->offset += res;
     }
@@ -332,17 +337,18 @@ inline void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
     seL4_SetMR(0, timestamp_us(timestamp_get_freq()));
 }
 
-void syscall_sos_stat(seL4_MessageInfo_t *reply_msg)
+void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_STAT);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    user_process_t user_process = user_process_list[badge];
     seL4_Word path_vaddr = seL4_GetMR(1);
     seL4_Word buf_vaddr = seL4_GetMR(2);
     size_t path_len = seL4_GetMR(3);
 
     /* Perform stat operation. We don't assume it's only on 1 page */
     char *file_path = calloc(path_len, sizeof(char));
-    int res = perform_cpy(path_len, path_vaddr, true, file_path);
+    int res = perform_cpy(user_process, path_len, path_vaddr, true, file_path);
     if (res == -1) {
         seL4_SetMR(0, -1);
         return;
@@ -362,14 +368,15 @@ void syscall_sos_stat(seL4_MessageInfo_t *reply_msg)
         stat.st_fmode >>= 6;
     }
     
-    res = perform_cpy(sizeof(sos_stat_t), buf_vaddr, false, &stat);
+    res = perform_cpy(user_process, sizeof(sos_stat_t), buf_vaddr, false, &stat);
     seL4_SetMR(0, res < 0 ? res : 0);
 }
 
-void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg)
+void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_GETDIRENT);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    user_process_t user_process = user_process_list[badge];
     int pos = seL4_GetMR(1);
     seL4_Word vaddr = seL4_GetMR(2);
     size_t nbyte = seL4_GetMR(3);
@@ -407,10 +414,10 @@ void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg)
 
     size_t path_len = strlen(name);
     size_t size = nbyte < path_len ? nbyte : path_len;
-    int res = perform_cpy(size, vaddr, false, name);
+    int res = perform_cpy(user_process, size, vaddr, false, name);
 
     seL4_Word new_vaddr = vaddr + size;
-    unsigned char *data = frame_data(get_page(vaddr)->page.frame_ref);
+    unsigned char *data = frame_data(get_page(user_process, vaddr)->page.frame_ref);
     data[new_vaddr & (PAGE_SIZE_4K - 1)] = 0;
     nfs_close_dir(args.buff);
     
@@ -425,10 +432,11 @@ void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_nu
     seL4_SetMR(0, -1);
 }
 
-inline void syscall_sys_brk(seL4_MessageInfo_t *reply_msg)
+inline void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SYS_BRK);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    user_process_t user_process = user_process_list[badge];
 
     uintptr_t newbrk = seL4_GetMR(1);
     if (newbrk <= 0) {
@@ -441,10 +449,11 @@ inline void syscall_sys_brk(seL4_MessageInfo_t *reply_msg)
     }
 }
 
-void syscall_sys_mmap(seL4_MessageInfo_t *reply_msg)
+void syscall_sys_mmap(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SYS_MMAP);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    user_process_t user_process = user_process_list[badge];
 
     /* For malloc, we only care about the first 3 arguments of mmap. Even the 3rd one
      * we can technically hard-code, but we'll take it in case we want to extend later.*/
@@ -467,7 +476,7 @@ void syscall_sys_mmap(seL4_MessageInfo_t *reply_msg)
     }
 }
 
-static inline void free_page(seL4_Word vaddr) {
+static inline void free_page(user_process_t user_process, seL4_Word vaddr) {
     uint16_t l1_i = (vaddr >> 39) & MASK(9); /* Top 9 bits */
     uint16_t l2_i = (vaddr >> 30) & MASK(9); /* Next 9 bits */
     uint16_t l3_i = (vaddr >> 21) & MASK(9); /* Next 9 bits */
@@ -483,9 +492,10 @@ static inline void free_page(seL4_Word vaddr) {
     l4_table[l4_i] = (pt_entry){0};
 }
 
-void syscall_sys_munmap(seL4_MessageInfo_t *reply_msg) {
+void syscall_sys_munmap(seL4_MessageInfo_t *reply_msg, seL4_Word badge) {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SYS_MUNMAP);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    user_process_t user_process = user_process_list[badge];
 
     seL4_Word addr = PAGE_ALIGN(seL4_GetMR(1), PAGE_SIZE_4K);
     size_t length = PAGE_ALIGN(seL4_GetMR(2), PAGE_SIZE_4K);
@@ -511,12 +521,12 @@ void syscall_sys_munmap(seL4_MessageInfo_t *reply_msg) {
     /* Remove the page and its contents. */
     size_t vaddr = addr;
     for (size_t bytes_left = length; bytes_left > 0; bytes_left -= PAGE_SIZE_4K) {
-        if (!vaddr_check(vaddr)) {
+        if (!vaddr_check(user_process, vaddr)) {
             seL4_SetMR(0, -1);
             return;
         }
 
-        free_page(vaddr);
+        free_page(user_process, vaddr);
         vaddr += PAGE_SIZE_4K;
     }
 
