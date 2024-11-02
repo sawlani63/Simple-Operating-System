@@ -31,7 +31,8 @@ typedef struct {
     ut_t *sched_context_ut;
     seL4_CPtr sched_context;
 
-    ut_t *stack_ut;
+    ut_t **frame_ut;
+    seL4_CPtr *frame_cap;
     seL4_CPtr stack;
     seL4_Word badge;
 

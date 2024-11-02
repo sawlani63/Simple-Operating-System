@@ -48,7 +48,7 @@ void init_threads(seL4_CPtr _ipc_ep, seL4_CPtr _fault_ep, seL4_CPtr sched_ctrl_s
 
 
 /* leaking a lot of memory if failed! */
-static bool alloc_stack(seL4_Word *sp)
+static bool alloc_stack(sos_thread_t *new_thread, seL4_Word *sp)
 {
     static seL4_Word curr_stack = SOS_STACK + SOS_STACK_PAGES * PAGE_SIZE_4K;
     // Skip guard page
@@ -67,24 +67,27 @@ static bool alloc_stack(seL4_Word *sp)
             return false;
         }
         curr_stack += PAGE_SIZE_4K;
+        new_thread->frame_ut[i] = frame;
+        new_thread->frame_cap[i] = frame_cap;
     }
     *sp = curr_stack;
+    new_thread->stack = curr_stack;
     return true;
 }
 
-static bool dealloc_stack(ut_t *stack_ut, seL4_CPtr stack)
+static bool dealloc_stack(ut_t **frame_ut, seL4_CPtr *frame_cap, seL4_CPtr stack)
 {
-    for (int i = 0; i < SOS_STACK_PAGES; i++) {
+    stack -= PAGE_SIZE_4K;
+    for (int i = SOS_STACK_PAGES - 1; i < 0; i--) {
         seL4_Error err = seL4_ARM_Page_Unmap(stack);
         if (err != seL4_NoError) {
             ZF_LOGE("Failed to unmap stack");
             return false;
         }
         stack -= PAGE_SIZE_4K;
+        free_untype(&frame_cap[i], frame_ut[i]);
     }
-    free_untype(&stack, stack_ut); // probs doesnt work because stack CPtr isnt retyped
     return true;
-    //need to improve this function
 }
 
 int thread_suspend(sos_thread_t *thread)
@@ -258,8 +261,10 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
     NAME_THREAD(new_thread->tcb, "second sos thread");
 
     /* set up the stack */
+    new_thread->frame_ut = calloc(SOS_STACK_PAGES, sizeof(ut_t *));
+    new_thread->frame_cap = calloc(SOS_STACK_PAGES, sizeof(seL4_CPtr));
     seL4_Word sp;
-    if (!alloc_stack(&sp)) {
+    if (!alloc_stack(new_thread, &sp)) {
         return NULL;
     }
 
@@ -311,10 +316,12 @@ int thread_destroy(sos_thread_t *thread)
         ZF_LOGE("Unable to unmap ipc buffer");
         return 1;
     }
-    /*if (!dealloc_stack(thread->stack_ut, thread->stack)) {
+    if (!dealloc_stack(thread->frame_ut, thread->frame_cap, thread->stack)) {
         ZF_LOGE("Unable to dealloc stack");
         return 1;
-    }*/ // doesnt work rn
+    }
+    free(thread->frame_ut);
+    free(thread->frame_cap);
     err = seL4_TCB_UnbindNotification(thread->tcb);
     if (err != seL4_NoError) {
         ZF_LOGE("Unable to unbind notification");

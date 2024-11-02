@@ -102,13 +102,16 @@ char *get_elf_data(char *app_name, unsigned long *elf_size)
 /* helper to conduct freeing operations in the event of an error in a function to prevent memory leaks */
 void free_mem(user_process_t user_process, seL4_CPtr user_ep, mem_region_t *region, seL4_CPtr ep, ut_t *ut)
 {
-    // free elf
     // free handler thread
+    // unmap elf
+    // unmap ipc buffer
     /* Free the heap region in the address space */
     if (user_process.addrspace != NULL && user_process.addrspace->heap_reg != NULL) {
         free(user_process.addrspace->heap_reg);
     }
     // free stack
+    /* Free the array of ELF data */
+    //free(elf_file->elfFile);
     /* Free the scheduling context and tcb */
     free_untype(&user_process.sched_context, user_process.sched_context_ut);
     free_untype(&user_process.tcb, user_process.tcb_ut);
@@ -349,7 +352,6 @@ int start_process(char *app_name, thread_main_f *func)
     }
     user_process.ipc_buffer = frame_page(user_process.ipc_buffer_frame);
 
-    // huh
     /* allocate a new slot in the target cspace which we will mint a badged endpoint cap into --
      * the badge is used to identify the process, which will come in handy when you have multiple
      * processes. */

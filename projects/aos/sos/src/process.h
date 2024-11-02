@@ -87,3 +87,4 @@ typedef struct user_process {
 int init_proc_obj();
 int start_process(char *app_name, thread_main_f *func);
 void syscall_proc_create(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
+void syscall_proc_getid(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
