@@ -14,7 +14,7 @@ fdt *fdt_create(char *err) {
         *err = 0;
         new->size = FDT_SIZE;
         new->free_count = FDT_SIZE;
-        /* Save fd = 0 for stdout. */
+        /* Save fd = 0 for stdin. */
         for (uint32_t fd = 1; fd < FDT_SIZE; fd++) {
             new->free_list[FDT_SIZE - fd] = fd;
         }

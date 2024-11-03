@@ -100,9 +100,16 @@ char *get_elf_data(char *app_name, unsigned long *elf_size)
 }
 
 /* helper to conduct freeing operations in the event of an error in a function to prevent memory leaks */
-void free_mem(user_process_t user_process, seL4_CPtr user_ep, mem_region_t *region, seL4_CPtr ep, ut_t *ut)
+void free_process(user_process_t user_process, seL4_CPtr user_ep, mem_region_t *region, seL4_CPtr ep, ut_t *ut)
 {
-    // free handler thread
+    /* Free the file descriptor table */
+    if (user_process.fdt != NULL) {
+        fdt_destroy(user_process.fdt);
+    }
+    /* Free all allocated memory for the syscall thread */
+    if (user_process.handler_thread != NULL) {
+        thread_destroy(user_process.handler_thread);
+    }
     // unmap elf
     // unmap ipc buffer
     /* Free the heap region in the address space */
@@ -188,6 +195,7 @@ static uintptr_t init_process_stack(user_process_t user_process, cspace_t *cspac
         ZF_LOGE("Unable to map stack for user app");
         return 0;
     }
+    user_process.size++;
 
     /* allocate a slot to duplicate the stack frame cap so we can map it into our address space */
     seL4_CPtr local_stack_cptr = cspace_alloc_slot(cspace);
@@ -272,6 +280,7 @@ static uintptr_t init_process_stack(user_process_t user_process, cspace_t *cspac
 
         err = sos_map_frame(cspace, user_process.vspace, stack_bottom,
                             REGION_RD | REGION_WR, frame, as);
+        user_process.size++;
     }
 
     return stack_top;
@@ -291,6 +300,8 @@ int start_process(char *app_name, thread_main_f *func)
         ZF_LOGE("Ran out of IDs for processes");
         return -1;
     }
+    user_process.app_name = app_name;
+    user_process.size = 0;
 
     if (func != NULL) {
         handler_func = func;
@@ -308,7 +319,7 @@ int start_process(char *app_name, thread_main_f *func)
                                               seL4_PGDBits);
     if (user_process.vspace_ut == NULL) {
         ZF_LOGE("Failed to create vspace");
-        free_mem(user_process, seL4_CapNull, NULL, ep, ut);
+        free_process(user_process, seL4_CapNull, NULL, ep, ut);
         return -1;
     }
 
@@ -316,7 +327,7 @@ int start_process(char *app_name, thread_main_f *func)
     seL4_Word err = seL4_ARM_ASIDPool_Assign(seL4_CapInitThreadASIDPool, user_process.vspace);
     if (err != seL4_NoError) {
         ZF_LOGE("Failed to assign asid pool");
-        free_mem(user_process, seL4_CapNull, NULL, ep, ut);
+        free_process(user_process, seL4_CapNull, NULL, ep, ut);
         return -1;
     }
 
@@ -324,7 +335,7 @@ int start_process(char *app_name, thread_main_f *func)
     err = cspace_create_one_level(&cspace, &user_process.cspace);
     if (err != CSPACE_NOERROR) {
         ZF_LOGE("Failed to create cspace");
-        free_mem(user_process, seL4_CapNull, NULL, ep, ut);
+        free_process(user_process, seL4_CapNull, NULL, ep, ut);
         return -1;
     }
 
@@ -332,14 +343,14 @@ int start_process(char *app_name, thread_main_f *func)
     user_process.addrspace = as_create();
     if (user_process.addrspace == NULL) {
         ZF_LOGE("Failed to create address space");
-        free_mem(user_process, seL4_CapNull, NULL, ep, ut);
+        free_process(user_process, seL4_CapNull, NULL, ep, ut);
         return -1;
     }
 
     mem_region_t *region = as_define_ipc_buff(user_process.addrspace);
     if (region == NULL) {
         ZF_LOGE("Failed to create ipc buffer region");
-        free_mem(user_process, seL4_CapNull, region, ep, ut);
+        free_process(user_process, seL4_CapNull, region, ep, ut);
         return -1;
     }
 
@@ -347,7 +358,7 @@ int start_process(char *app_name, thread_main_f *func)
     user_process.ipc_buffer_frame = clock_alloc_frame(user_process.addrspace, PROCESS_IPC_BUFFER);
     if (user_process.ipc_buffer_frame == NULL_FRAME) {
         ZF_LOGE("Failed to alloc ipc buffer ut");
-        free_mem(user_process, seL4_CapNull, region, ep, ut);
+        free_process(user_process, seL4_CapNull, region, ep, ut);
         return -1;
     }
     user_process.ipc_buffer = frame_page(user_process.ipc_buffer_frame);
@@ -358,7 +369,7 @@ int start_process(char *app_name, thread_main_f *func)
     seL4_CPtr user_ep = cspace_alloc_slot(&user_process.cspace);
     if (user_ep == seL4_CapNull) {
         ZF_LOGE("Failed to alloc user ep slot");
-        free_mem(user_process, user_ep, region, ep, ut);
+        free_process(user_process, user_ep, region, ep, ut);
         return -1;
     }
 
@@ -366,7 +377,7 @@ int start_process(char *app_name, thread_main_f *func)
     err = cspace_mint(&user_process.cspace, user_ep, &cspace, ep, seL4_AllRights, APP_EP_BADGE);
     if (err) {
         ZF_LOGE("Failed to mint user ep");
-        free_mem(user_process, user_ep, region, ep, ut);
+        free_process(user_process, user_ep, region, ep, ut);
         return -1;
     }
 
@@ -374,7 +385,7 @@ int start_process(char *app_name, thread_main_f *func)
     user_process.tcb_ut = alloc_retype(&user_process.tcb, seL4_TCBObject, seL4_TCBBits);
     if (user_process.tcb_ut == NULL) {
         ZF_LOGE("Failed to alloc tcb ut");
-        free_mem(user_process, user_ep, region, ep, ut);
+        free_process(user_process, user_ep, region, ep, ut);
         return -1;
     }
 
@@ -385,7 +396,7 @@ int start_process(char *app_name, thread_main_f *func)
                              user_process.ipc_buffer);
     if (err != seL4_NoError) {
         ZF_LOGE("Unable to configure new TCB");
-        free_mem(user_process, user_ep, region, ep, ut);
+        free_process(user_process, user_ep, region, ep, ut);
         return -1;
     }
 
@@ -394,7 +405,7 @@ int start_process(char *app_name, thread_main_f *func)
                                                      seL4_MinSchedContextBits);
     if (user_process.sched_context_ut == NULL) {
         ZF_LOGE("Failed to alloc sched context ut");
-        free_mem(user_process, user_ep, region, ep, ut);
+        free_process(user_process, user_ep, region, ep, ut);
         return -1;
     }
 
@@ -402,7 +413,7 @@ int start_process(char *app_name, thread_main_f *func)
     err = seL4_SchedControl_Configure(sched_ctrl_start, user_process.sched_context, US_IN_MS, US_IN_MS, 0, 0);
     if (err != seL4_NoError) {
         ZF_LOGE("Unable to configure scheduling context");
-        free_mem(user_process, user_ep, region, ep, ut);
+        free_process(user_process, user_ep, region, ep, ut);
         return -1;
     }
 
@@ -414,7 +425,7 @@ int start_process(char *app_name, thread_main_f *func)
                                   user_process.sched_context, ep);
     if (err != seL4_NoError) {
         ZF_LOGE("Unable to set scheduling params");
-        free_mem(user_process, user_ep, region, ep, ut);
+        free_process(user_process, user_ep, region, ep, ut);
         return -1;
     }
 
@@ -428,14 +439,14 @@ int start_process(char *app_name, thread_main_f *func)
     char *elf_base = get_elf_data(app_name, &elf_size);
     if (elf_base == NULL) {
         ZF_LOGE("Unable to open or read %s from NFS", app_name);
-        free_mem(user_process, user_ep, region, ep, ut);
+        //free_process(user_process, user_ep, region, ep, ut);
         return -1;
     }
 
     /* Ensure that the file is an elf file. */
     if (elf_newFile(elf_base, elf_size, &elf_file)) {
         ZF_LOGE("Invalid elf file");
-        free_mem(user_process, user_ep, region, ep, ut);
+        free_process(user_process, user_ep, region, ep, ut);
         return -1;
     }
 
@@ -443,7 +454,7 @@ int start_process(char *app_name, thread_main_f *func)
     seL4_Word sp = init_process_stack(user_process, &cspace, seL4_CapInitThreadVSpace, &elf_file);
     if ((int) sp == -1) {
         ZF_LOGE("Failed to set up the stack");
-        free_mem(user_process, user_ep, region, ep, ut);
+        free_process(user_process, user_ep, region, ep, ut);
         return -1;
     }
 
@@ -451,7 +462,7 @@ int start_process(char *app_name, thread_main_f *func)
     user_process.addrspace->heap_reg = as_define_heap(user_process.addrspace);
     if (user_process.addrspace->heap_reg == NULL) {
         ZF_LOGE("Failed to create the heap region");
-        free_mem(user_process, user_ep, region, ep, ut);
+        free_process(user_process, user_ep, region, ep, ut);
         return -1;
     }
 
@@ -460,15 +471,16 @@ int start_process(char *app_name, thread_main_f *func)
                         user_process.ipc_buffer_frame, user_process.addrspace);
     if (err != 0) {
         ZF_LOGE("Unable to map IPC buffer for user app");
-        free_mem(user_process, user_ep, region, ep, ut);
+        free_process(user_process, user_ep, region, ep, ut);
         return -1;
     }
+    user_process.size++;
 
     /* load the elf image from nfs */
-    err = elf_load(&cspace, user_process.vspace, &elf_file, user_process.addrspace);
+    err = elf_load(&cspace, user_process.vspace, &elf_file, user_process.addrspace, &user_process.size);
     if (err) {
         ZF_LOGE("Failed to load elf image");
-        free_mem(user_process, user_ep, region, ep, ut);
+        free_process(user_process, user_ep, region, ep, ut);
         return -1;
     }
 
@@ -512,10 +524,11 @@ int start_process(char *app_name, thread_main_f *func)
     err = seL4_TCB_WriteRegisters(user_process.tcb, 1, 0, 2, &context);
     if (err) {
         ZF_LOGE("Failed to write registers");
-        free_mem(user_process, user_ep, region, ep, ut);
+        free_process(user_process, user_ep, region, ep, ut);
         return -1;
     }
 
+    user_process.stime = timestamp_ms(timestamp_get_freq());
     user_process_list[user_process.pid] = user_process;
     return user_process.pid;
 }
@@ -546,4 +559,35 @@ void syscall_proc_getid(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     ZF_LOGV("syscall: some thread made syscall %d", SYSCALL_PROC_GETID);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     seL4_SetMR(0, user_process_list[badge].pid);
+}
+
+void syscall_proc_status(seL4_MessageInfo_t *reply_msg)
+{
+    ZF_LOGV("syscall: some thread made syscall %d", SYSCALL_PROC_STATUS);
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    seL4_Word vaddr = seL4_GetMR(1);
+    unsigned max = seL4_GetMR(2);
+
+    unsigned num_proc = 0;
+    for (int i = 0; i < NUM_PROC; i++) {
+        if (user_process_list[i].stime == 0) {
+            continue;
+        }
+        user_process_t user_process = user_process_list[i];
+        sos_process_t pinfo = {.pid = user_process.pid, .size = user_process.size, .stime = user_process.stime};
+        for (int i = 0; i < strlen(user_process.app_name); i++) {
+            pinfo.command[i] = user_process.app_name[i];
+        }
+        int res = perform_cpy(user_process, sizeof(sos_process_t), vaddr, false, &pinfo);
+        if (res < (int) sizeof(sos_process_t)) {
+            seL4_SetMR(0, -1);
+            return;
+        }
+        vaddr += res;
+        num_proc++;
+        if (num_proc >= max) {
+            break;
+        }
+    }
+    seL4_SetMR(0, num_proc);
 }

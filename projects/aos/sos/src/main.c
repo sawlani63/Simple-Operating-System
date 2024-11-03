@@ -97,6 +97,7 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
         ZF_LOGE("Could not map the frame into the two page tables");
         return false;
     }
+    user_process.size++;
 
     return true;
 }
@@ -153,6 +154,9 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
         break;
     case SYSCALL_PROC_GETID:
         syscall_proc_getid(&reply_msg, badge);
+        break;
+    case SYSCALL_PROC_STATUS:
+        syscall_proc_status(&reply_msg);
         break;
     default:
         syscall_unknown_syscall(&reply_msg, syscall_number);
@@ -396,8 +400,9 @@ NORETURN void *main_continued(UNUSED void *arg)
     ZF_LOGF_IF(success == -1, "Failed to start process");
 
     /* Since our main thread has no other tasks left, we swap the task of irq handling from the temp thread to our main thread, and destroy our temp thread */
-    error = thread_destroy(irq_temp_thread);
-    ZF_LOGF_IFERR(error, "Failed to destroy the temp irq thread");
+    //error = thread_destroy(irq_temp_thread);
+    //ZF_LOGF_IFERR(error, "Failed to destroy the temp irq thread");
+    seL4_TCB_UnbindNotification(irq_temp_thread->tcb);
     seL4_Error bind_err = seL4_TCB_BindNotification(seL4_CapInitThreadTCB, ntfn);
     ZF_LOGF_IFERR(bind_err, "Failed to bind notification object to TCB");
 

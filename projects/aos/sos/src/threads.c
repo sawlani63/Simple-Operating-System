@@ -25,7 +25,6 @@
 #ifdef CONFIG_SOS_GDB_ENABLED
 #include "debugger.h"
 #endif /* CONFIG_SOS_GDB_ENABLED */
-#include "process.h"
 
 #define SOS_THREAD_PRIORITY     (100)
 

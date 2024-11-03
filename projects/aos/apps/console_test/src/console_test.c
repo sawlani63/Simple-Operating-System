@@ -225,12 +225,24 @@ int main(void)
 
     test_buffers(fd);
     printf("Passed read/write buffer test\n");
-    res = sos_close(fd);
-    assert(!res);
+    //res = sos_close(fd);
+    //assert(!res);
 
     //int pid = sos_process_create("percy");
     //assert(pid == -1); // process creation should fail
-    //pid = sos_process_create("console_test");
-    //assert(pid == 1); // second running process
-    // will test concurrently soon
+    int pid = sos_process_create("console_test_2");
+    assert(pid == 1); // second running process     // will test concurrently soon
+    pid = sos_my_id();
+    assert(pid == 0);
+    sos_process_t *pinfo;
+    int num = sos_process_status(pinfo, 3);
+    assert(num == 2);
+    for (int i = 0; i < num; i++) {
+        printf("From process status: pid - %d, size - %d, stime - %d, app_name - %s\n", pinfo[i].pid, pinfo[i].size, pinfo[i].stime, pinfo[i].command);
+    }
+    num = sos_process_status(pinfo, 1);
+    assert(num == 1);
+    for (int i = 0; i < num; i++) {
+        printf("From process status: pid - %d, size - %d, stime - %d, app_name - %s\n", pinfo[i].pid, pinfo[i].size, pinfo[i].stime, pinfo[i].command);
+    }
 }

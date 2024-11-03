@@ -56,6 +56,11 @@
         "clock_replacement.h": "c",
         "utils.h": "c",
         "elfload.h": "c",
-        "mapping.h": "c"
+        "mapping.h": "c",
+        "syscalls.h": "c",
+        "addrspace.h": "c",
+        "vmem_layout.h": "c",
+        "clock.h": "c",
+        "vsyscall.h": "c"
     }
 }

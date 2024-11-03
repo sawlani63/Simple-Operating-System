@@ -4,11 +4,7 @@
 #include <assert.h>
 #include <fcntl.h>
 
-#include <sel4/sel4.h>
 #include <sos.h>
-
-#include <utils/page.h>
-
 int main (void)
 {
     int fd = sos_open("chirag.txt", O_RDWR);

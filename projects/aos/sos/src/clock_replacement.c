@@ -223,5 +223,6 @@ int clock_try_page_in(user_process_t user_process, seL4_Word vaddr) {
         ZF_LOGE("Could not map the frame into the two page tables");
         return -1;
     }
+    user_process.size++;
     return 0;
 }

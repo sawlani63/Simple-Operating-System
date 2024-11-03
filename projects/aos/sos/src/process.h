@@ -49,6 +49,8 @@
 /* Number of concurrently running processes supported */
 #define NUM_PROC 16
 
+#define N_NAME 32
+
 // Could not find constants for the others so just set to numbers around sys_getpid
 #define SYSCALL_PROC_CREATE 170
 #define SYSCALL_PROC_DELETE 171
@@ -56,9 +58,6 @@
 #define SYSCALL_PROC_STATUS 173
 #define SYSCALL_PROC_WAIT 174
 
-typedef int pid_t;
-
-/* the one process we start */
 typedef struct user_process {
     ut_t *tcb_ut;
     seL4_CPtr tcb;
@@ -76,15 +75,29 @@ typedef struct user_process {
     frame_ref_t stack_frame;
     seL4_CPtr stack;
 
+    // stuff we added
     addrspace_t *addrspace;
 
     fdt *fdt;
     sos_thread_t *handler_thread;
     seL4_CPtr ep;
     pid_t pid;
+    unsigned size;
+    unsigned stime;
+    char *app_name;
 } user_process_t;
+
+typedef struct {
+    pid_t     pid;
+    unsigned  size;            /* in pages */
+    unsigned  stime;           /* start time in msec since booting */
+    char      command[N_NAME]; /* Name of exectuable */
+} sos_process_t;
+
+typedef int pid_t;
 
 int init_procid_list();
 int start_process(char *app_name, thread_main_f *func);
 void syscall_proc_create(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_proc_getid(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
+void syscall_proc_status(seL4_MessageInfo_t *reply_msg);

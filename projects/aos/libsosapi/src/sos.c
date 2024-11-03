@@ -137,8 +137,13 @@ pid_t sos_my_id(void)
 
 int sos_process_status(sos_process_t *processes, unsigned max)
 {
-    seL4_SetMR(0, 0);
-    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
+    if (!max) {
+        return -1;
+    }
+    seL4_SetMR(0, SYSCALL_PROC_STATUS);
+    seL4_SetMR(1, (seL4_Word) processes);
+    seL4_SetMR(2, max);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 3));
     return seL4_GetMR(0);
 }
 
