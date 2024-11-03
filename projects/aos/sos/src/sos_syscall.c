@@ -154,7 +154,6 @@ int perform_cpy(user_process_t user_process, size_t nbyte, uintptr_t vaddr, bool
 
     while (bytes_left > 0) {
         uint16_t len = MIN(bytes_left, PAGE_SIZE_4K - offset);
-
         if (!vaddr_check(user_process, vaddr)) {
             return -1;
         }

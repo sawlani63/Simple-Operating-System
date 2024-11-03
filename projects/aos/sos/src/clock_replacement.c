@@ -157,8 +157,8 @@ int clock_add_page(addrspace_t *as, seL4_Word vaddr) {
     return 0;
 }
 
-int clock_try_page_in(user_process_t user_process, seL4_Word vaddr) {
-    addrspace_t *as = user_process.addrspace;
+int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
+    addrspace_t *as = user_process->addrspace;
 
     uint16_t l1_index = (vaddr >> 39) & MASK(9); /* Top 9 bits */
     uint16_t l2_index = (vaddr >> 30) & MASK(9); /* Next 9 bits */
@@ -219,10 +219,10 @@ int clock_try_page_in(user_process_t user_process, seL4_Word vaddr) {
     }
 
     assert(frame_ref != NULL_FRAME);
-    if (sos_map_frame(&cspace, user_process.vspace, vaddr, l4_pt[l4_index].perms, frame_ref, as) != 0) {
+    if (sos_map_frame(&cspace, user_process->vspace, vaddr, l4_pt[l4_index].perms, frame_ref, as) != 0) {
         ZF_LOGE("Could not map the frame into the two page tables");
         return -1;
     }
-    user_process.size++;
+    user_process->size++;
     return 0;
 }

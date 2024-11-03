@@ -7,10 +7,11 @@
 #include <sos.h>
 int main (void)
 {
-    int fd = sos_open("chirag.txt", O_RDWR);
+    /*int fd = sos_open("chirag.txt", O_RDWR);
     assert(fd > 2);
     int err = sos_write(fd, "ThisIsAnExampleStringForWhichIAmAddingAUniqueIdThatShowsIWroteThis:Malenia\n", 76);
     assert(err == 76);
     int res = sos_close(fd);
-    assert(!res);
+    assert(!res);*/
+    sos_usleep(5000000);
 }

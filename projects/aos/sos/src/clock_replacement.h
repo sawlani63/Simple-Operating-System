@@ -21,7 +21,7 @@ void mark_block_free(uint32_t block_num);
  */
 int clock_add_page(addrspace_t *as, seL4_Word vaddr);
 
-int clock_try_page_in(user_process_t user_process, seL4_Word vaddr);
+int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr);
 
 extern sync_bin_sem_t *data_sem;
 

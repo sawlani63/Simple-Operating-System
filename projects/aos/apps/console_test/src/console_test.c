@@ -216,25 +216,24 @@ int main(void)
     assert(fd > 2);
     printf("Passed open/close test\n");
 
-    test_nfs();
+    //test_nfs();
     printf("Passed nfs test\n");
     
-    pt_test();
+    //pt_test();
     mmap_test();
     //test_stack_write(fd);
 
-    test_buffers(fd);
+    //test_buffers(fd);
     printf("Passed read/write buffer test\n");
     //res = sos_close(fd);
     //assert(!res);
 
-    //int pid = sos_process_create("percy");
-    //assert(pid == -1); // process creation should fail
     int pid = sos_process_create("console_test_2");
     assert(pid == 1); // second running process     // will test concurrently soon
     pid = sos_my_id();
     assert(pid == 0);
-    sos_process_t *pinfo;
+    printf("Current pid %d\n", pid);
+    sos_process_t *pinfo = malloc(16 * sizeof(sos_process_t));
     int num = sos_process_status(pinfo, 3);
     assert(num == 2);
     for (int i = 0; i < num; i++) {

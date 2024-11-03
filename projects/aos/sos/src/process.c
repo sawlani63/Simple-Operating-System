@@ -156,9 +156,9 @@ static int stack_write(seL4_Word *mapped_stack, int index, uintptr_t val)
 
 /* set up System V ABI compliant stack, so that the process can
  * start up and initialise the C library */
-static uintptr_t init_process_stack(user_process_t user_process, cspace_t *cspace, seL4_CPtr local_vspace, elf_t *elf_file)
+static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspace, seL4_CPtr local_vspace, elf_t *elf_file)
 {
-    addrspace_t *as = user_process.addrspace;
+    addrspace_t *as = user_process->addrspace;
     /* Allocating a region for the stack */
     as->stack_reg = as_define_stack(as);
     if (as->stack_reg == NULL) {
@@ -174,12 +174,12 @@ static uintptr_t init_process_stack(user_process_t user_process, cspace_t *cspac
     uintptr_t local_stack_bottom = SOS_SCRATCH - PAGE_SIZE_4K;
 
     /* Create a stack frame */
-    user_process.stack_frame = clock_alloc_frame(as, stack_bottom);
-    if (user_process.stack_frame == NULL_FRAME) {
+    user_process->stack_frame = clock_alloc_frame(as, stack_bottom);
+    if (user_process->stack_frame == NULL_FRAME) {
         ZF_LOGD("Failed to alloc frame");
         return -1;
     }
-    user_process.stack = frame_page(user_process.stack_frame);
+    user_process->stack = frame_page(user_process->stack_frame);
 
     /* find the vsyscall table */
     uintptr_t *sysinfo = (uintptr_t *) elf_getSectionNamed(elf_file, "__vsyscall", NULL);
@@ -189,13 +189,13 @@ static uintptr_t init_process_stack(user_process_t user_process, cspace_t *cspac
     }
 
     /* Map in the stack frame for the user app */
-    seL4_Error err = sos_map_frame(cspace, user_process.vspace, stack_bottom, REGION_RD | REGION_WR,
-                                   user_process.stack_frame, as);
+    seL4_Error err = sos_map_frame(cspace, user_process->vspace, stack_bottom, REGION_RD | REGION_WR,
+                                   user_process->stack_frame, as);
     if (err != 0) {
         ZF_LOGE("Unable to map stack for user app");
         return 0;
     }
-    user_process.size++;
+    user_process->size++;
 
     /* allocate a slot to duplicate the stack frame cap so we can map it into our address space */
     seL4_CPtr local_stack_cptr = cspace_alloc_slot(cspace);
@@ -205,7 +205,7 @@ static uintptr_t init_process_stack(user_process_t user_process, cspace_t *cspac
     }
 
     /* copy the stack frame cap into the slot */
-    err = cspace_copy(cspace, local_stack_cptr, cspace, user_process.stack, seL4_AllRights);
+    err = cspace_copy(cspace, local_stack_cptr, cspace, user_process->stack, seL4_AllRights);
     if (err != seL4_NoError) {
         cspace_free_slot(cspace, local_stack_cptr);
         ZF_LOGE("Failed to copy cap");
@@ -278,9 +278,9 @@ static uintptr_t init_process_stack(user_process_t user_process, cspace_t *cspac
             return 0;
         }
 
-        err = sos_map_frame(cspace, user_process.vspace, stack_bottom,
+        err = sos_map_frame(cspace, user_process->vspace, stack_bottom,
                             REGION_RD | REGION_WR, frame, as);
-        user_process.size++;
+        user_process->size++;
     }
 
     return stack_top;
@@ -451,7 +451,7 @@ int start_process(char *app_name, thread_main_f *func)
     }
 
     /* set up the stack */
-    seL4_Word sp = init_process_stack(user_process, &cspace, seL4_CapInitThreadVSpace, &elf_file);
+    seL4_Word sp = init_process_stack(&user_process, &cspace, seL4_CapInitThreadVSpace, &elf_file);
     if ((int) sp == -1) {
         ZF_LOGE("Failed to set up the stack");
         free_process(user_process, user_ep, region, ep, ut);
@@ -561,10 +561,11 @@ void syscall_proc_getid(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     seL4_SetMR(0, user_process_list[badge].pid);
 }
 
-void syscall_proc_status(seL4_MessageInfo_t *reply_msg)
+void syscall_proc_status(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d", SYSCALL_PROC_STATUS);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    user_process_t user_process = user_process_list[badge];
     seL4_Word vaddr = seL4_GetMR(1);
     unsigned max = seL4_GetMR(2);
 
@@ -573,18 +574,18 @@ void syscall_proc_status(seL4_MessageInfo_t *reply_msg)
         if (user_process_list[i].stime == 0) {
             continue;
         }
-        user_process_t user_process = user_process_list[i];
-        sos_process_t pinfo = {.pid = user_process.pid, .size = user_process.size, .stime = user_process.stime};
-        for (int i = 0; i < strlen(user_process.app_name); i++) {
-            pinfo.command[i] = user_process.app_name[i];
+        user_process_t process = user_process_list[i];
+        sos_process_t pinfo = {.pid = process.pid, .size = process.size, .stime = process.stime};
+        for (int i = 0; i < strlen(process.app_name); i++) {
+            pinfo.command[i] = process.app_name[i];
         }
         int res = perform_cpy(user_process, sizeof(sos_process_t), vaddr, false, &pinfo);
         if (res < (int) sizeof(sos_process_t)) {
             seL4_SetMR(0, -1);
             return;
         }
-        vaddr += res;
         num_proc++;
+        vaddr += res;
         if (num_proc >= max) {
             break;
         }

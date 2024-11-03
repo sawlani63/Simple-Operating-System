@@ -55,7 +55,7 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
         return false;
     }
 
-    int try_page_in_res = clock_try_page_in(user_process, fault_addr);
+    int try_page_in_res = clock_try_page_in(&user_process, fault_addr);
     if (try_page_in_res < 0) {
         return false;
     } else if (!try_page_in_res) {
@@ -98,6 +98,7 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
         return false;
     }
     user_process.size++;
+    user_process_list[badge] = user_process;
 
     return true;
 }
@@ -156,7 +157,7 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
         syscall_proc_getid(&reply_msg, badge);
         break;
     case SYSCALL_PROC_STATUS:
-        syscall_proc_status(&reply_msg);
+        syscall_proc_status(&reply_msg, badge);
         break;
     default:
         syscall_unknown_syscall(&reply_msg, syscall_number);
