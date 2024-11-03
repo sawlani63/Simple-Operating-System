@@ -33,7 +33,6 @@ typedef struct {
 
     ut_t **frame_ut;
     seL4_CPtr *frame_cap;
-    seL4_CPtr stack;
     seL4_Word badge;
 
     uintptr_t tls_base;

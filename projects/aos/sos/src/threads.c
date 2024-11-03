@@ -47,8 +47,7 @@ void init_threads(seL4_CPtr _ipc_ep, seL4_CPtr _fault_ep, seL4_CPtr sched_ctrl_s
 }
 
 
-/* leaking a lot of memory if failed! */
-static bool alloc_stack(sos_thread_t *new_thread, seL4_Word *sp)
+static bool alloc_stack(ut_t **frame_ut, seL4_CPtr *frame_cp, seL4_Word *sp)
 {
     static seL4_Word curr_stack = SOS_STACK + SOS_STACK_PAGES * PAGE_SIZE_4K;
     // Skip guard page
@@ -64,29 +63,14 @@ static bool alloc_stack(sos_thread_t *new_thread, seL4_Word *sp)
                                    curr_stack, seL4_AllRights, seL4_ARM_Default_VMAttributes);
         if (err != seL4_NoError) {
             ZF_LOGE("Failed to map stack");
+            free_untype(&frame_cap, frame);
             return false;
         }
         curr_stack += PAGE_SIZE_4K;
-        new_thread->frame_ut[i] = frame;
-        new_thread->frame_cap[i] = frame_cap;
+        frame_ut[i] = frame;
+        frame_cp[i] = frame_cap;
     }
     *sp = curr_stack;
-    new_thread->stack = curr_stack;
-    return true;
-}
-
-static bool dealloc_stack(ut_t **frame_ut, seL4_CPtr *frame_cap, seL4_CPtr stack)
-{
-    stack -= PAGE_SIZE_4K;
-    for (int i = SOS_STACK_PAGES - 1; i < 0; i--) {
-        seL4_Error err = seL4_ARM_Page_Unmap(stack);
-        if (err != seL4_NoError) {
-            ZF_LOGE("Failed to unmap stack");
-            return false;
-        }
-        stack -= PAGE_SIZE_4K;
-        free_untype(&frame_cap[i], frame_ut[i]);
-    }
     return true;
 }
 
@@ -117,7 +101,6 @@ static void thread_trampoline(sos_thread_t *thread, thread_main_f *function, voi
 /*
  * Spawn a new kernel (SOS) thread to execute function with arg
  *
- * TODO: fix memory leaks
  */
 sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, bool resume,
                             seL4_Word prio, seL4_CPtr bound_ntfn, bool debugger_add)
@@ -128,6 +111,7 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
 
     sos_thread_t *new_thread = malloc(sizeof(*new_thread));
     if (new_thread == NULL) {
+        ZF_LOGE("Failed to malloc thread");
         return NULL;
     }
 
@@ -138,6 +122,7 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
                                              seL4_ARM_SmallPageObject, seL4_PageBits);
     if (new_thread->ipc_buffer_ut == NULL) {
         ZF_LOGE("Failed to alloc ipc buffer ut");
+        thread_destroy(new_thread);
         return NULL;
     }
 
@@ -145,11 +130,13 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
     void *tls_memory = malloc(sel4runtime_get_tls_size());
     if (tls_memory == NULL) {
         ZF_LOGE("Failed to alloc memory for tls");
+        thread_destroy(new_thread);
         return NULL;
     }
     new_thread->tls_base = sel4runtime_write_tls_image(tls_memory);
     if (new_thread->tls_base == (uintptr_t) NULL) {
         ZF_LOGE("Failed to write tls image");
+        thread_destroy(new_thread);
         return NULL;
     }
 
@@ -159,6 +146,7 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
     new_thread->user_ep = cspace_alloc_slot(&cspace);
     if (new_thread->user_ep == seL4_CapNull) {
         ZF_LOGE("Failed to alloc user ep slot");
+        thread_destroy(new_thread);
         return NULL;
     }
 
@@ -167,6 +155,7 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
                                 badge);
     if (err) {
         ZF_LOGE("Failed to mint user ep");
+        thread_destroy(new_thread);
         return NULL;
     }
 
@@ -174,6 +163,7 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
     new_thread->tcb_ut = alloc_retype(&new_thread->tcb, seL4_TCBObject, seL4_TCBBits);
     if (new_thread->tcb_ut == NULL) {
         ZF_LOGE("Failed to alloc tcb ut");
+        thread_destroy(new_thread);
         return NULL;
     }
 
@@ -184,6 +174,7 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
                              new_thread->ipc_buffer);
     if (err != seL4_NoError) {
         ZF_LOGE("Unable to configure new TCB");
+        thread_destroy(new_thread);
         return NULL;
     }
 
@@ -193,6 +184,7 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
                                                 seL4_MinSchedContextBits);
     if (new_thread->sched_context_ut == NULL) {
         ZF_LOGE("Failed to alloc sched context ut");
+        thread_destroy(new_thread);
         return NULL;
     }
 
@@ -207,6 +199,7 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
                                       US_IN_MS, US_IN_MS, 0, 0);
     if (err != seL4_NoError) {
         ZF_LOGE("Unable to configure scheduling context");
+        thread_destroy(new_thread);
         return NULL;
     }
 
@@ -219,12 +212,14 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
             /* Create a badged fault endpoint cap  */
             if (badge & DEBUGGER_FAULT_BIT) {
                 ZF_LOGE("Badge conflicts with acceptable debugger format");
+                thread_destroy(new_thread);
                 return NULL;
             }
 
             new_thread->fault_ep = cspace_alloc_slot(&cspace);
             if (!new_thread->fault_ep) {
                 ZF_LOGE("Failed to allocate slot for fault endpoint");
+                thread_destroy(new_thread);
                 return NULL;
             }
 
@@ -232,6 +227,7 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
                                         badge | DEBUGGER_FAULT_BIT);
             if (err) {
                 ZF_LOGE("Failed to mint user ep");
+                thread_destroy(new_thread);
                 return NULL;
             }
         } else {
@@ -245,6 +241,7 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
                                   new_thread->fault_ep);
     if (err != seL4_NoError) {
         ZF_LOGE("Unable to set scheduling params");
+        thread_destroy(new_thread);
         return NULL;
     }
 
@@ -253,6 +250,7 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
         seL4_Error err = seL4_TCB_BindNotification(new_thread->tcb, bound_ntfn);
         if (err != seL4_NoError) {
             ZF_LOGE("Unable to bind notification");
+            thread_destroy(new_thread);
             return NULL;
         }
     }
@@ -262,9 +260,18 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
 
     /* set up the stack */
     new_thread->frame_ut = calloc(SOS_STACK_PAGES, sizeof(ut_t *));
+    if (new_thread->frame_ut == NULL) {
+        thread_destroy(new_thread);
+        return NULL;
+    }
     new_thread->frame_cap = calloc(SOS_STACK_PAGES, sizeof(seL4_CPtr));
+    if (new_thread->frame_cap == NULL) {
+        thread_destroy(new_thread);
+        return NULL;
+    }
     seL4_Word sp;
-    if (!alloc_stack(new_thread, &sp)) {
+    if (!alloc_stack(new_thread->frame_ut, new_thread->frame_cap, &sp)) {
+        thread_destroy(new_thread);
         return NULL;
     }
 
@@ -273,6 +280,7 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
                     seL4_AllRights, seL4_ARM_Default_VMAttributes);
     if (err != 0) {
         ZF_LOGE("Unable to map IPC buffer for user app");
+        thread_destroy(new_thread);
         return NULL;
     }
     new_thread->ipc_buffer_vaddr = curr_ipc_buf;
@@ -293,6 +301,7 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
     err = seL4_TCB_WriteRegisters(new_thread->tcb, resume, 0, 7, &context);
     if (err != seL4_NoError) {
         ZF_LOGE("Failed to write registers");
+        thread_destroy(new_thread);
         return NULL;
     }
 
@@ -306,32 +315,55 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
     return new_thread;
 }
 
+static bool dealloc_stack(ut_t **frame_ut, seL4_CPtr *frame_cap)
+{
+    /* Unmap stack pages from the hardware page table and free the respective frame uts and caps */
+    for (int i = SOS_STACK_PAGES - 1; i < 0; i--) {
+        if (!frame_cap[i]) {
+            continue;
+        } // find a way to not call dealloc stack if alloc stack fails on first alloc
+        seL4_Error err = seL4_ARM_Page_Unmap(frame_cap[i]);
+        if (err != seL4_NoError) {
+            ZF_LOGE("Failed to unmap stack");
+            return false;
+        }
+        free_untype(&frame_cap[i], frame_ut[i]);
+    }
+    return true;
+}
+
 int thread_destroy(sos_thread_t *thread)
 {
     if (thread == NULL) {
         return 1;
     }
-    seL4_Error err = seL4_ARM_Page_Unmap(thread->ipc_buffer);
-    if (err != seL4_NoError) {
-        ZF_LOGE("Unable to unmap ipc buffer");
-        return 1;
-    }
-    if (!dealloc_stack(thread->frame_ut, thread->frame_cap, thread->stack)) {
+    /* Unmap the thread's ipc buffer from the hardware page table */
+    seL4_ARM_Page_Unmap(thread->ipc_buffer);
+    /* Deallocate the stack of the thread */
+    if (!dealloc_stack(thread->frame_ut, thread->frame_cap)) {
         ZF_LOGE("Unable to dealloc stack");
         return 1;
     }
-    free(thread->frame_ut);
-    free(thread->frame_cap);
-    err = seL4_TCB_UnbindNotification(thread->tcb);
-    if (err != seL4_NoError) {
-        ZF_LOGE("Unable to unbind notification");
-        return 1;
+    if (thread->frame_cap != NULL) {
+        free(thread->frame_cap);
     }
+    if (thread->frame_ut != NULL) {
+        free(thread->frame_ut);
+    }
+    // find better way to keep track of each stack page ut and frame cap?
+    /* Unbind the bound notification object from the tcb */
+    seL4_TCB_UnbindNotification(thread->tcb);
+    /* Free the scheduling context and tcb */
     free_untype(&thread->sched_context, thread->sched_context_ut);
     free_untype(&thread->tcb, thread->tcb_ut);
-    cspace_delete(&cspace, thread->user_ep);
-    cspace_free_slot(&cspace, thread->user_ep);
-    free(thread->tls_base);
+    /* Delete the user_ep capability and free the cslot from the cspace */
+    free_untype(&thread->fault_ep, NULL);
+    free_untype(&thread->user_ep, NULL);
+    /* Free the tls_base, ipc buffer and the thread */
+    if (thread->tls_base != NULL) {
+        free(thread->tls_base);
+        // free tls memory?
+    }
     free_untype(&thread->ipc_buffer, thread->ipc_buffer_ut);
     free(thread);
     return 0;

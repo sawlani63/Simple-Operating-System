@@ -386,9 +386,9 @@ NORETURN void *main_continued(UNUSED void *arg)
     ZF_LOGF_IF(error, "NFS: Error in opening pagefile");
     nfs_pagefile->handle = args.buff;
 
-    /* Initialise the list of processes */
-    error = init_proc_obj();
-    ZF_LOGF_IF(error, "Failed to initialise the list of processes");
+    /* Initialise the list of processes and process id bitmap */
+    error = init_procid_list();
+    ZF_LOGF_IF(error, "Failed to initialise process list / bitmap");
 
     /* Start the user application */
     printf("Start process\n");

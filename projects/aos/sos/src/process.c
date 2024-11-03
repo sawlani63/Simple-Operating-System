@@ -15,7 +15,7 @@ thread_main_f *handler_func = NULL;
 user_process_t *user_process_list;
 uint8_t *pid_map;
 
-int init_proc_obj()
+int init_procid_list()
 {
     user_process_list = calloc(NUM_PROC, sizeof(user_process_t));
     if (user_process_list == NULL) {
