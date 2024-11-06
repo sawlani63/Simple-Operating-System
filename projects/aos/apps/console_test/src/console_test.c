@@ -237,11 +237,10 @@ int main(void)
         assert(res == 0);
     }*/
 
-    /*int pid = sos_process_create("console_test");
+    int pid = sos_process_create("console_test");
     assert(pid == 1); // second running process     // will test concurrently soon
     pid = sos_my_id();
     assert(pid == 0);
-    test_nfs();
     printf("Current pid %d\n", pid);
     sos_process_t *pinfo = malloc(16 * sizeof(sos_process_t));
     int num = sos_process_status(pinfo, 3);
@@ -253,5 +252,5 @@ int main(void)
     assert(num == 1);
     for (int i = 0; i < num; i++) {
         printf("From process status: pid - %d, size - %d, stime - %d, app_name - %s\n", pinfo[i].pid, pinfo[i].size, pinfo[i].stime, pinfo[i].command);
-    }*/
+    }
 }

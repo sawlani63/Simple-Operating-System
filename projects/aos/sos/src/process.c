@@ -15,15 +15,6 @@ thread_main_f *handler_func = NULL;
 user_process_t *user_process_list;
 uint8_t *pid_map;
 
-seL4_CPtr ep;
-ut_t *ut;
-
-void syscall_ipc_init()
-{
-    ut = alloc_retype(&ep, seL4_EndpointObject, seL4_EndpointBits);
-    ZF_LOGF_IF(!ut, "No memory for endpoint");
-}
-
 int init_procid_list()
 {
     user_process_list = calloc(NUM_PROC, sizeof(user_process_t));
@@ -108,8 +99,14 @@ char *get_elf_data(char *app_name, unsigned long *elf_size)
     return data;
 }
 
+void free_process_stack(user_process_t *user_process, cspace_t *cspace, seL4_CPtr local_vspace, elf_t *elf_file)
+{
+    free_frame(user_process->stack_frame);
+    remove_region(user_process->addrspace, PROCESS_STACK_TOP - PAGE_SIZE_4K);
+}
+
 /* helper to conduct freeing operations in the event of an error in a function to prevent memory leaks */
-void free_process(user_process_t user_process, mem_region_t *region)
+void free_process(user_process_t user_process)
 {
     /* Free the file descriptor table */
     if (user_process.fdt != NULL) {
@@ -122,24 +119,21 @@ void free_process(user_process_t user_process, mem_region_t *region)
     // unmap elf
     // unmap ipc buffer
     /* Free the heap region in the address space */
-    if (user_process.addrspace != NULL && user_process.addrspace->heap_reg != NULL) {
-        free(user_process.addrspace->heap_reg);
-    }
-    // free stack
+    /* Free the stack */
+    free_process_stack(&user_process, &cspace, seL4_CapInitThreadVSpace, &elf_file);
     /* Free the array of ELF data */
     //free(elf_file->elfFile);
     /* Free the scheduling context and tcb */
     free_untype(&user_process.sched_context, user_process.sched_context_ut);
     free_untype(&user_process.tcb, user_process.tcb_ut);
-    /* Delete the user_ep from the user process cspace if in that cspace */
+    /* Delete the cap from the user process cspace if in that cspace and free the slot */
     if (!cspace_delete(&user_process.cspace, user_process.slot)) {
         cspace_free_slot(&user_process.cspace, user_process.slot);   
     }
     free_frame(user_process.ipc_buffer_frame);
-    free_untype(&user_process.ipc_buffer, NULL);
-    if (region != NULL) {
-        free(region);
-    }
+    //free_untype(&user_process.ipc_buffer, NULL); test, not sure if needed
+    /* Free the ipc buffer region */
+    remove_region(user_process.addrspace, PROCESS_IPC_BUFFER);
     /* Free the user process page table and address space */
     if (user_process.addrspace->page_table != NULL) {
         free(user_process.addrspace->page_table);
@@ -149,9 +143,9 @@ void free_process(user_process_t user_process, mem_region_t *region)
     if (&user_process.cspace != NULL) {
         cspace_destroy(&user_process.cspace);
     }
-    // unassign vspace from ASID
-    /* Free the user process vspace and ep */
+    /* Free the user process vspace and ep (vspace unassigned from ASID upon freeing) */
     free_untype(&user_process.vspace, user_process.vspace_ut);
+    free_untype(&user_process.ep, user_process.ep_ut);
     mark_pid_free(user_process.pid);
 }
 
@@ -170,6 +164,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
     as->stack_reg = as_define_stack(as);
     if (as->stack_reg == NULL) {
         ZF_LOGD("Failed to alloc stack region");
+        free_process(*user_process);
         return -1;
     }
 
@@ -184,6 +179,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
     user_process->stack_frame = clock_alloc_frame(as, stack_bottom);
     if (user_process->stack_frame == NULL_FRAME) {
         ZF_LOGD("Failed to alloc frame");
+        free_process(*user_process);
         return -1;
     }
     user_process->stack = frame_page(user_process->stack_frame);
@@ -192,6 +188,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
     uintptr_t *sysinfo = (uintptr_t *) elf_getSectionNamed(elf_file, "__vsyscall", NULL);
     if (!sysinfo || !*sysinfo) {
         ZF_LOGE("could not find syscall table for c library");
+        free_process(*user_process);
         return 0;
     }
 
@@ -314,12 +311,19 @@ int start_process(char *app_name, thread_main_f *func)
         handler_func = func;
     }
 
+    user_process.ep_ut = alloc_retype(&user_process.ep, seL4_EndpointObject, seL4_EndpointBits);
+    if (user_process.ep == seL4_CapNull) {
+        ZF_LOGE("No memory for endpoints");
+        free_process(user_process);
+        return -1;
+    }
+
     /* Create a VSpace */
     user_process.vspace_ut = alloc_retype(&user_process.vspace, seL4_ARM_PageGlobalDirectoryObject,
                                               seL4_PGDBits);
     if (user_process.vspace_ut == NULL) {
         ZF_LOGE("Failed to create vspace");
-        free_process(user_process, NULL);
+        free_process(user_process);
         return -1;
     }
 
@@ -327,7 +331,7 @@ int start_process(char *app_name, thread_main_f *func)
     seL4_Word err = seL4_ARM_ASIDPool_Assign(seL4_CapInitThreadASIDPool, user_process.vspace);
     if (err != seL4_NoError) {
         ZF_LOGE("Failed to assign asid pool");
-        free_process(user_process, NULL);
+        free_process(user_process);
         return -1;
     }
 
@@ -335,7 +339,7 @@ int start_process(char *app_name, thread_main_f *func)
     err = cspace_create_one_level(&cspace, &user_process.cspace);
     if (err != CSPACE_NOERROR) {
         ZF_LOGE("Failed to create cspace");
-        free_process(user_process, NULL);
+        free_process(user_process);
         return -1;
     }
 
@@ -343,14 +347,14 @@ int start_process(char *app_name, thread_main_f *func)
     user_process.addrspace = as_create();
     if (user_process.addrspace == NULL) {
         ZF_LOGE("Failed to create address space");
-        free_process(user_process, NULL);
+        free_process(user_process);
         return -1;
     }
 
     mem_region_t *region = as_define_ipc_buff(user_process.addrspace);
     if (region == NULL) {
         ZF_LOGE("Failed to create ipc buffer region");
-        free_process(user_process, region);
+        free_process(user_process);
         return -1;
     }
 
@@ -358,7 +362,7 @@ int start_process(char *app_name, thread_main_f *func)
     user_process.ipc_buffer_frame = clock_alloc_frame(user_process.addrspace, PROCESS_IPC_BUFFER);
     if (user_process.ipc_buffer_frame == NULL_FRAME) {
         ZF_LOGE("Failed to alloc ipc buffer ut");
-        free_process(user_process, region);
+        free_process(user_process);
         return -1;
     }
     user_process.ipc_buffer = frame_page(user_process.ipc_buffer_frame);
@@ -369,15 +373,15 @@ int start_process(char *app_name, thread_main_f *func)
     user_process.slot = cspace_alloc_slot(&user_process.cspace);
     if (user_process.slot == seL4_CapNull) {
         ZF_LOGE("Failed to alloc user ep slot");
-        free_process(user_process, region);
+        free_process(user_process);
         return -1;
     }
 
     /* now mutate the cap, thereby setting the badge */
-    err = cspace_mint(&user_process.cspace, user_process.slot, &cspace, ep, seL4_AllRights, (seL4_Word) user_process.pid);
+    err = cspace_mint(&user_process.cspace, user_process.slot, &cspace, user_process.ep, seL4_AllRights, (seL4_Word) user_process.pid);
     if (err) {
         ZF_LOGE("Failed to mint user ep");
-        free_process(user_process, region);
+        free_process(user_process);
         return -1;
     }
 
@@ -385,7 +389,7 @@ int start_process(char *app_name, thread_main_f *func)
     user_process.tcb_ut = alloc_retype(&user_process.tcb, seL4_TCBObject, seL4_TCBBits);
     if (user_process.tcb_ut == NULL) {
         ZF_LOGE("Failed to alloc tcb ut");
-        free_process(user_process, region);
+        free_process(user_process);
         return -1;
     }
 
@@ -396,7 +400,7 @@ int start_process(char *app_name, thread_main_f *func)
                              user_process.ipc_buffer);
     if (err != seL4_NoError) {
         ZF_LOGE("Unable to configure new TCB");
-        free_process(user_process, region);
+        free_process(user_process);
         return -1;
     }
 
@@ -405,7 +409,7 @@ int start_process(char *app_name, thread_main_f *func)
                                                      seL4_MinSchedContextBits);
     if (user_process.sched_context_ut == NULL) {
         ZF_LOGE("Failed to alloc sched context ut");
-        free_process(user_process, region);
+        free_process(user_process);
         return -1;
     }
 
@@ -413,7 +417,7 @@ int start_process(char *app_name, thread_main_f *func)
     err = seL4_SchedControl_Configure(sched_ctrl_start, user_process.sched_context, US_IN_MS, US_IN_MS, 0, 0);
     if (err != seL4_NoError) {
         ZF_LOGE("Unable to configure scheduling context");
-        free_process(user_process, region);
+        free_process(user_process);
         return -1;
     }
 
@@ -422,10 +426,10 @@ int start_process(char *app_name, thread_main_f *func)
      * NOTE this will use the unbadged ep unlike above, you might want to mint it with a badge
      * so you can identify which thread faulted in your fault handler */
     err = seL4_TCB_SetSchedParams(user_process.tcb, seL4_CapInitThreadTCB, seL4_MinPrio, APP_PRIORITY,
-                                  user_process.sched_context, ep);
+                                  user_process.sched_context, user_process.ep);
     if (err != seL4_NoError) {
         ZF_LOGE("Unable to set scheduling params");
-        free_process(user_process, region);
+        free_process(user_process);
         return -1;
     }
 
@@ -439,14 +443,14 @@ int start_process(char *app_name, thread_main_f *func)
     char *elf_base = get_elf_data(app_name, &elf_size);
     if (elf_base == NULL) {
         ZF_LOGE("Unable to open or read %s from NFS", app_name);
-        free_process(user_process, region);
+        free_process(user_process);
         return -1;
     }
 
     /* Ensure that the file is an elf file. */
     if (elf_newFile(elf_base, elf_size, &elf_file)) {
         ZF_LOGE("Invalid elf file");
-        free_process(user_process, region);
+        free_process(user_process);
         return -1;
     }
 
@@ -454,7 +458,7 @@ int start_process(char *app_name, thread_main_f *func)
     seL4_Word sp = init_process_stack(&user_process, &cspace, seL4_CapInitThreadVSpace, &elf_file);
     if ((int) sp == -1) {
         ZF_LOGE("Failed to set up the stack");
-        free_process(user_process, region);
+        free_process(user_process);
         return -1;
     }
 
@@ -486,7 +490,7 @@ int start_process(char *app_name, thread_main_f *func)
 
     init_threads(ep, ep, sched_ctrl_start, sched_ctrl_end);
 
-    user_process.handler_thread = thread_create(handler_func, (void *) ep, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true);
+    user_process.handler_thread = thread_create(handler_func, (void *) user_process.ep, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true);
     if (user_process.handler_thread == NULL) {
         ZF_LOGE("Could not create system call handler thread for %s\n", app_name);
         // will see, can probably put earlier for less frees

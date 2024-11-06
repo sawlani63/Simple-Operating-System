@@ -173,7 +173,7 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
 
 NORETURN void syscall_loop(void *arg)
 {
-    seL4_Word ep = (seL4_Word) arg;
+    seL4_CPtr ep = (seL4_CPtr) arg;
     seL4_CPtr reply;
 
     /* Create reply object */
@@ -400,20 +400,16 @@ NORETURN void *main_continued(UNUSED void *arg)
     error = init_procid_list();
     ZF_LOGF_IF(error, "Failed to initialise process list / bitmap");
 
-    /* Initialise a new irq endpoint for all processes */
-    syscall_ipc_init();
+    /* We swap the task of irq handling from the temp thread to our main thread, and destroy our temp thread */
+    error = thread_destroy(irq_temp_thread); //test
+    ZF_LOGF_IFERR(error, "Failed to destroy the temp irq thread");
+    seL4_Error bind_err = seL4_TCB_BindNotification(seL4_CapInitThreadTCB, ntfn);
+    ZF_LOGF_IFERR(bind_err, "Failed to bind notification object to TCB");
 
     /* Start the user application */
     printf("Start process\n");
     int success = start_process(APP_NAME, syscall_loop);
     ZF_LOGF_IF(success == -1, "Failed to start process");
-
-    /* Since our main thread has no other tasks left, we swap the task of irq handling from the temp thread to our main thread, and destroy our temp thread */
-    //error = thread_destroy(irq_temp_thread);
-    //ZF_LOGF_IFERR(error, "Failed to destroy the temp irq thread");
-    seL4_TCB_UnbindNotification(irq_temp_thread->tcb);
-    seL4_Error bind_err = seL4_TCB_BindNotification(seL4_CapInitThreadTCB, ntfn);
-    ZF_LOGF_IFERR(bind_err, "Failed to bind notification object to TCB");
 
     printf("\nSOS entering irq loop\n");
     irq_loop((void *) ipc_ep);

@@ -486,7 +486,7 @@ static inline void free_page(user_process_t user_process, seL4_Word vaddr) {
     free_frame(l4_table[l4_i].page.frame_ref);
     sync_bin_sem_post(data_sem);
     seL4_CPtr frame_cptr = l4_table[l4_i].page.frame_cptr;
-    seL4_ARM_PageTable_Unmap(frame_cptr);
+    seL4_ARM_Page_Unmap(frame_cptr);
     free_untype(&frame_cptr, NULL);
     l4_table[l4_i] = (pt_entry){0};
 }
