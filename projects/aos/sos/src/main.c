@@ -153,12 +153,17 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
     case SYSCALL_PROC_CREATE:
         syscall_proc_create(&reply_msg, badge);
         break;
+    case SYSCALL_PROC_DELETE:
+        syscall_proc_delete(&reply_msg);
+        break;
     case SYSCALL_PROC_GETID:
         syscall_proc_getid(&reply_msg, badge);
         break;
     case SYSCALL_PROC_STATUS:
         syscall_proc_status(&reply_msg, badge);
         break;
+    case SYSCALL_PROC_WAIT:
+        syscall_proc_wait(&reply_msg, badge);
     default:
         syscall_unknown_syscall(&reply_msg, syscall_number);
     }
@@ -168,8 +173,7 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
 
 NORETURN void syscall_loop(void *arg)
 {
-    seL4_Word badge = (seL4_Word) arg;
-    seL4_CPtr ep = user_process_list[badge].ep;
+    seL4_Word ep = (seL4_Word) arg;
     seL4_CPtr reply;
 
     /* Create reply object */
@@ -183,12 +187,13 @@ NORETURN void syscall_loop(void *arg)
 
     while (1) {
         seL4_MessageInfo_t message;
+        seL4_Word sender = 0;
 
         /* Reply (if there is a reply) and block on ep, waiting for an IPC sent over ep */
         if (have_reply) {
-            message = seL4_ReplyRecv(ep, reply_msg, 0, reply);
+            message = seL4_ReplyRecv(ep, reply_msg, &sender, reply);
         } else {
-            message = seL4_Recv(ep, 0, reply);
+            message = seL4_Recv(ep, &sender, reply);
         }
 
         /* Awake! We got a message - check the label and badge to
@@ -197,11 +202,11 @@ NORETURN void syscall_loop(void *arg)
         if (label == seL4_Fault_NullFault) {
             /* It's not a fault or an interrupt, it must be an IPC
              * message from console_test! */
-            reply_msg = handle_syscall(badge);
+            reply_msg = handle_syscall(sender);
             have_reply = true;
         } else if (label == seL4_Fault_VMFault) {
             reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
-            have_reply = handle_vm_fault(seL4_GetMR(seL4_VMFault_Addr), badge);
+            have_reply = handle_vm_fault(seL4_GetMR(seL4_VMFault_Addr), sender);
         } else {
             /* some kind of fault */
             debug_print_fault(message, APP_NAME);
@@ -394,6 +399,9 @@ NORETURN void *main_continued(UNUSED void *arg)
     /* Initialise the list of processes and process id bitmap */
     error = init_procid_list();
     ZF_LOGF_IF(error, "Failed to initialise process list / bitmap");
+
+    /* Initialise a new irq endpoint for all processes */
+    syscall_ipc_init();
 
     /* Start the user application */
     printf("Start process\n");

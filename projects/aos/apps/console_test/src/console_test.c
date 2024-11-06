@@ -127,6 +127,7 @@ int test_nfs() {
      * WE RERUN TEST SINCE NFS IS PERSISTENT STORAGE*/
     char *file = "Pikachu10.txt";
 
+    printf("%d", sos_time_stamp());
     int fd = sos_open(file, O_RDWR);
     assert(fd > 2);
 
@@ -134,6 +135,7 @@ int test_nfs() {
     sos_stat(file, &stat);
     printf("From stat - type: %d, mode: %d, size: %u, atime: %ld, ctime: %ld\n",
            stat.st_type, stat.st_fmode, stat.st_size, stat.st_atime, stat.st_ctime);
+    printf("%d", sos_time_stamp());
 
     char *buffer = calloc(81, sizeof(char));
 
@@ -219,19 +221,27 @@ int main(void)
     //test_nfs();
     printf("Passed nfs test\n");
     
-    //pt_test();
+    pt_test();
     mmap_test();
     //test_stack_write(fd);
 
-    //test_buffers(fd);
+    test_buffers(fd);
     printf("Passed read/write buffer test\n");
-    //res = sos_close(fd);
-    //assert(!res);
+    res = sos_close(fd);
+    assert(!res);
 
-    int pid = sos_process_create("console_test_2");
+    /*for (int i = 0; i < 50; i++) { // testing proc delete
+        int pid = sos_process_create("console_test_2");
+        assert(pid == 1);
+        int res = sos_process_delete(pid);
+        assert(res == 0);
+    }*/
+
+    /*int pid = sos_process_create("console_test");
     assert(pid == 1); // second running process     // will test concurrently soon
     pid = sos_my_id();
     assert(pid == 0);
+    test_nfs();
     printf("Current pid %d\n", pid);
     sos_process_t *pinfo = malloc(16 * sizeof(sos_process_t));
     int num = sos_process_status(pinfo, 3);
@@ -243,5 +253,5 @@ int main(void)
     assert(num == 1);
     for (int i = 0; i < num; i++) {
         printf("From process status: pid - %d, size - %d, stime - %d, app_name - %s\n", pinfo[i].pid, pinfo[i].size, pinfo[i].stime, pinfo[i].command);
-    }
+    }*/
 }
