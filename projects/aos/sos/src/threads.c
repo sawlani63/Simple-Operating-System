@@ -54,7 +54,6 @@ static bool alloc_stack(ut_t **frame_ut, seL4_CPtr *frame_cp, seL4_Word *sp)
     for (int i = 0; i < SOS_STACK_PAGES; i++) {
         seL4_CPtr frame_cap;
         ut_t *frame = alloc_retype(&frame_cap, seL4_ARM_SmallPageObject, seL4_PageBits);
-        ZF_LOGE(" FRAME CAP %d", frame_cap);
         if (frame == NULL) {
             ZF_LOGE("Failed to allocate stack page");
             return false;
@@ -118,8 +117,7 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
     new_thread->badge = badge;
 
     /* Create an IPC buffer */
-    new_thread->ipc_buffer_ut = alloc_retype(&new_thread->ipc_buffer,
-                                             seL4_ARM_SmallPageObject, seL4_PageBits);
+    new_thread->ipc_buffer_ut = alloc_retype(&new_thread->ipc_buffer, seL4_ARM_SmallPageObject, seL4_PageBits);
     if (new_thread->ipc_buffer_ut == NULL) {
         ZF_LOGE("Failed to alloc ipc buffer ut");
         thread_destroy(new_thread);

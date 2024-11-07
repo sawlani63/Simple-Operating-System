@@ -71,9 +71,8 @@ int find_first_free_block() {
     return -1;
 }
 
-char *get_elf_data(char *app_name, unsigned long *elf_size)
+char *get_elf_data(unsigned long *elf_size, open_file *file)
 {
-    open_file *file = file_create(app_name, O_RDWR, nfs_pwrite_file, nfs_pread_file);
     io_args args = {.signal_cap = nfs_signal};
     int error = nfs_open_file(file, nfs_async_open_cb, &args);
     if (error) {
@@ -87,34 +86,32 @@ char *get_elf_data(char *app_name, unsigned long *elf_size)
     error = nfs_pread_file(file, NULL, 0, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
     if (error < (int) PAGE_SIZE_4K) {
         ZF_LOGE("NFS: Error in reading ELF and program headers");
+        free(data);
         return NULL;
     }
     seL4_Wait(nfs_signal, 0);
     if (args.err < 0) {
+        free(data);
         return NULL;
     }
 
     Elf64_Ehdr const *header = (void *) data;
     *elf_size = header->e_shoff + (header->e_shentsize * header->e_shnum);
-    data = realloc(data, *elf_size);
-    args.buff = data;
+    uint32_t header_size = header->e_ehsize + (header->e_phentsize * header->e_phnum) + (header->e_shentsize * header->e_shnum);
+    data = realloc(data, header_size);
+    args.buff = data + (header->e_ehsize + (header->e_phentsize * header->e_phnum));
 
-    error = nfs_pread_file(file, NULL, 0, *elf_size, nfs_pagefile_read_cb, &args);
-    if (error < (int) *elf_size) {
+    error = nfs_pread_file(file, NULL, header->e_shoff, (header->e_shentsize * header->e_shnum), nfs_pagefile_read_cb, &args);
+    if (error < (int) (header->e_shentsize * header->e_shnum)) {
         ZF_LOGE("NFS: Error in reading ELF");
+        free(data);
         return NULL;
     }
     seL4_Wait(nfs_signal, 0);
     if (args.err < 0) {
+        free(data);
         return NULL;
     }
-
-    error = nfs_close_file(file, nfs_async_close_cb, &args);
-    if (error < 0) {
-        ZF_LOGE("NFS: Error in closing ELF");
-        return NULL;
-    }
-    file_destroy(file);
     return data;
 }
 
@@ -144,7 +141,6 @@ void free_process(user_process_t user_process)
     if (!cspace_delete(&user_process.cspace, user_process.ep_slot)) {
         cspace_free_slot(&user_process.cspace, user_process.ep_slot);
     }
-    //free_untype(&user_process.ipc_buffer, NULL); test, not sure if needed
     /* Free the ipc buffer region */
     remove_region(user_process.addrspace, PROCESS_IPC_BUFFER);
     /* Free the user process page table and address space */
@@ -328,6 +324,7 @@ int start_process(char *app_name, thread_main_f *func)
         free_process(user_process);
         return -1;
     }
+    //ZF_LOGE("ep CAP %d", user_process.ep);
 
     /* Create a VSpace */
     user_process.vspace_ut = alloc_retype(&user_process.vspace, seL4_ARM_PageGlobalDirectoryObject,
@@ -337,6 +334,12 @@ int start_process(char *app_name, thread_main_f *func)
         free_process(user_process);
         return -1;
     }
+    //ZF_LOGE("vspace CAP %d", user_process.vspace);
+
+    //seL4_CPtr ep;
+    //ut_t *ut = alloc_retype(&ep, seL4_ARM_SmallPageObject, seL4_PageBits);
+   // ZF_LOGE("EEEEEEEEEEEEEEEEE %d", ep);
+   // free_untype(&ep, ut);
 
     /* assign the vspace to an asid pool */
     seL4_Word err = seL4_ARM_ASIDPool_Assign(seL4_CapInitThreadASIDPool, user_process.vspace);
@@ -346,6 +349,10 @@ int start_process(char *app_name, thread_main_f *func)
         return -1;
     }
 
+   //ut = alloc_retype(&ep, seL4_ARM_SmallPageObject, seL4_PageBits);
+   // ZF_LOGE("EEEEEEEEEEEEEEEEE %d", ep);
+   // free_untype(&ep, ut);
+
     /* Create a simple 1 level CSpace */
     err = cspace_create_one_level(&cspace, &user_process.cspace);
     if (err != CSPACE_NOERROR) {
@@ -353,6 +360,10 @@ int start_process(char *app_name, thread_main_f *func)
         free_process(user_process);
         return -1;
     }
+    
+   // ut = alloc_retype(&ep, seL4_ARM_SmallPageObject, seL4_PageBits);
+   // ZF_LOGE("EEEEEEEEEEEEEEEEE %d", ep);
+   // free_untype(&ep, ut);
 
     /* Initialise the process address space */
     user_process.addrspace = as_create();
@@ -362,12 +373,20 @@ int start_process(char *app_name, thread_main_f *func)
         return -1;
     }
 
+  // ut = alloc_retype(&ep, seL4_ARM_SmallPageObject, seL4_PageBits);
+  //  ZF_LOGE("EEEEEEEEEEEEEEEEE %d", ep);
+  //  free_untype(&ep, ut);
+
     mem_region_t *region = as_define_ipc_buff(user_process.addrspace);
     if (region == NULL) {
         ZF_LOGE("Failed to create ipc buffer region");
         free_process(user_process);
         return -1;
     }
+
+  //  ut = alloc_retype(&ep, seL4_ARM_SmallPageObject, seL4_PageBits);
+  //  ZF_LOGE("EEEEEEEEEEEEEEEEE %d", ep);
+  //  free_untype(&ep, ut);
 
     /* Create an IPC buffer */
     user_process.ipc_buffer_frame = clock_alloc_frame(user_process.addrspace, PROCESS_IPC_BUFFER);
@@ -377,6 +396,10 @@ int start_process(char *app_name, thread_main_f *func)
         return -1;
     }
     user_process.ipc_buffer = frame_page(user_process.ipc_buffer_frame);
+
+   // ut = alloc_retype(&ep, seL4_ARM_SmallPageObject, seL4_PageBits);
+   // ZF_LOGE("EEEEEEEEEEEEEEEEE %d", ep);
+   // free_untype(&ep, ut);
 
     /* allocate a new slot in the target cspace which we will mint a badged endpoint cap into --
      * the badge is used to identify the process, which will come in handy when you have multiple
@@ -395,6 +418,7 @@ int start_process(char *app_name, thread_main_f *func)
         free_process(user_process);
         return -1;
     }
+  //  ZF_LOGE("ep slot CAP %d", user_process.ep_slot);
 
     user_process.ntfn_slot = cspace_alloc_slot(&user_process.cspace);
     if (user_process.ntfn_slot == seL4_CapNull) {
@@ -410,6 +434,7 @@ int start_process(char *app_name, thread_main_f *func)
         free_process(user_process);
         return -1;
     }
+   // ZF_LOGE("ntfn slot CAP %d", user_process.ntfn_slot);
 
     /* Create a new TCB object */
     user_process.tcb_ut = alloc_retype(&user_process.tcb, seL4_TCBObject, seL4_TCBBits);
@@ -418,6 +443,7 @@ int start_process(char *app_name, thread_main_f *func)
         free_process(user_process);
         return -1;
     }
+  //  ZF_LOGE("tcb CAP %d", user_process.tcb);
     
     /* Configure the TCB */
     err = seL4_TCB_Configure(user_process.tcb,
@@ -438,6 +464,7 @@ int start_process(char *app_name, thread_main_f *func)
         free_process(user_process);
         return -1;
     }
+  //  ZF_LOGE("sched CAP %d", user_process.sched_context);
     
     /* Configure the scheduling context to use the first core with budget equal to period */
     err = seL4_SchedControl_Configure(sched_ctrl_start, user_process.sched_context, US_IN_MS, US_IN_MS, 0, 0);
@@ -464,11 +491,12 @@ int start_process(char *app_name, thread_main_f *func)
 
     /* Read the ELF header from NFS */
     ZF_LOGI("\nStarting \"%s\"...\n", app_name);
-    elf_t elf_file = {};
     unsigned long elf_size;
-    //char *elf_base = get_elf_data(app_name, &elf_size);
+    elf_t elf_file = {};
     size_t cpio_len = _cpio_archive_end - _cpio_archive;
     const char *elf_base = cpio_get_file(_cpio_archive, cpio_len, app_name, &elf_size);
+    //open_file *elf = file_create(app_name, O_RDWR, nfs_pwrite_file, nfs_pread_file);
+    //char *elf_base = get_elf_data(&elf_size, elf);
     if (elf_base == NULL) {
         ZF_LOGE("Unable to open or read %s from NFS", app_name);
         free_process(user_process);
@@ -548,6 +576,12 @@ int start_process(char *app_name, thread_main_f *func)
         free_process(user_process);
         return -1;
     }
+    //err = fdt_put(user_process.fdt, elf, &fd);
+    //if (err) {
+    //    ZF_LOGE("Failed to store elf file");
+    //    free_process(user_process);
+    //    return -1;
+    //}
 
     /* Start the new process */
     seL4_UserContext context = {
@@ -562,7 +596,6 @@ int start_process(char *app_name, thread_main_f *func)
         return -1;
     }
 
-    //free(elf_base);
     user_process.stime = timestamp_ms(timestamp_get_freq());
     user_process_list[user_process.pid] = user_process;
     return user_process.pid;
@@ -608,7 +641,7 @@ void syscall_proc_delete(seL4_MessageInfo_t *reply_msg)
         seL4_Signal(proc_signal); // maybe have after freeing // find better way
     }
     free_process(user_process);
-    user_process_list[pid].stime = 0;
+    user_process_list[pid] = (user_process_t){0};
     seL4_SetMR(0, 0);
 }
 
@@ -634,7 +667,7 @@ void syscall_proc_status(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         }
         user_process_t process = user_process_list[i];
         sos_process_t pinfo = {.pid = process.pid, .size = process.size, .stime = process.stime};
-        for (int i = 0; i < strlen(process.app_name); i++) {
+        for (size_t i = 0; i < strlen(process.app_name); i++) {
             pinfo.command[i] = process.app_name[i];
         }
         int res = perform_cpy(user_process, sizeof(sos_process_t), vaddr, false, &pinfo);
@@ -661,13 +694,13 @@ void syscall_proc_wait(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         seL4_SetMR(0, -1);
         return;
     }
-    if (pid >= 0 && user_process_list[pid].stime == 0) {
-        seL4_SetMR(0, pid);
-        return;
-    }
 
     while (1) {
         seL4_Word sender = 0;
+        if (pid >= 0 && user_process_list[pid].stime == 0) {
+            seL4_SetMR(0, pid);
+            return;
+        }
         seL4_Wait(proc_signal, &sender);
         if (pid == -1 || sender == (seL4_Word) pid) {
             seL4_SetMR(0, sender);

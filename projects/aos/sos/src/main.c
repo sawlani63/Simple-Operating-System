@@ -23,7 +23,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "sosh"
+#define APP_NAME             "console_test"
 
 /* The linker will link this symbol to the start address  *
  * of an archive of attached applications.                */
@@ -212,7 +212,7 @@ NORETURN void syscall_loop(void *arg)
             /* some kind of fault */
             debug_print_fault(message, APP_NAME);
             /* dump registers too */
-            //debug_dump_registers(user_process.tcb);
+            debug_dump_registers(user_process_list[sender].tcb);
             /* Don't reply and recv on nothing */
             have_reply = false;
 

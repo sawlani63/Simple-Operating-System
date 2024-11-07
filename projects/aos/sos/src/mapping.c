@@ -273,13 +273,14 @@ void sos_destroy_page_table(addrspace_t *as)
                 }
                 for (size_t m = 0; m < PAGE_TABLE_ENTRIES; m++) {
                     pt_entry entry = l4_pt[m];
-                    if (entry.perms == 0) {
+                    if (entry.valid == 0 && entry.swapped == 0) {
                         continue;
                     }
                     seL4_CPtr frame_cptr = entry.page.frame_cptr;
                     seL4_ARM_Page_Unmap(frame_cptr);
                     free_untype(&frame_cptr, NULL);
                     free_frame(entry.page.frame_ref);
+                    l4_pt[m] = (pt_entry){0};
                 }
                 seL4_ARM_PageTable_Unmap(l3_pt[k].slot);
                 free_untype(&l3_pt[k].slot, l3_pt[k].ut);

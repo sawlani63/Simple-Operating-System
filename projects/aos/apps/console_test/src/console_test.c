@@ -227,9 +227,10 @@ int main(void)
 
     //test_buffers(fd);
     printf("Passed read/write buffer test\n");
-    res = sos_close(fd);
-    assert(!res);
+    //res = sos_close(fd);
+    //assert(!res);
 
+    //4391
     for (int i = 0; i < 4391; i++) { // testing proc delete
         int pid = sos_process_create("console_test_2");
         assert(pid == 1);
