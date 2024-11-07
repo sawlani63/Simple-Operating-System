@@ -23,7 +23,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "console_test"
+#define APP_NAME             "sosh"
 
 /* The linker will link this symbol to the start address  *
  * of an archive of attached applications.                */
@@ -164,6 +164,7 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
         break;
     case SYSCALL_PROC_WAIT:
         syscall_proc_wait(&reply_msg, badge);
+        break;
     default:
         syscall_unknown_syscall(&reply_msg, syscall_number);
     }
@@ -242,7 +243,7 @@ NORETURN void irq_loop(void* arg)
             /* some kind of fault */
             debug_print_fault(message, APP_NAME);
             /* dump registers too */
-            //debug_dump_registers(user_process.tcb);
+            //debug_dump_registers(user_process_list[].tcb);
 
             ZF_LOGF("The SOS skeleton does not know how to handle faults!");
         }
@@ -258,10 +259,6 @@ static void sos_ipc_init(seL4_CPtr *ipc_ep, seL4_CPtr *ntfn)
     /* Create an notification object for interrupts */
     ut_t *ut = alloc_retype(ntfn, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!ut, "No memory for notification object");
-
-    /* Bind the notification object to our TCB */
-    // seL4_Error err = seL4_TCB_BindNotification(seL4_CapInitThreadTCB, *ntfn);
-    // ZF_LOGF_IFERR(err, "Failed to bind notification object to TCB");
 
     /* Create an endpoint for user application IPC */
     ut = alloc_retype(ipc_ep, seL4_EndpointObject, seL4_EndpointBits);

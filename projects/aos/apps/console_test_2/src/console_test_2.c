@@ -13,7 +13,7 @@ int main (void)
     assert(err == 76);
     int res = sos_close(fd);
     assert(!res);*/
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < 1; i++) {
         uint64_t prev_seconds = sos_time_stamp();
         sos_usleep(1000000);
         uint64_t next_seconds = sos_time_stamp();

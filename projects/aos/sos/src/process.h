@@ -71,7 +71,8 @@ typedef struct user_process {
     seL4_CPtr ep;
     ut_t *ep_ut;
 
-    seL4_CPtr slot;
+    seL4_CPtr ep_slot;
+    seL4_CPtr ntfn_slot;
     ut_t *tcb_ut;
     seL4_CPtr tcb;
     ut_t *vspace_ut;

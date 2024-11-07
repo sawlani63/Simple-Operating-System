@@ -54,6 +54,7 @@ static bool alloc_stack(ut_t **frame_ut, seL4_CPtr *frame_cp, seL4_Word *sp)
     for (int i = 0; i < SOS_STACK_PAGES; i++) {
         seL4_CPtr frame_cap;
         ut_t *frame = alloc_retype(&frame_cap, seL4_ARM_SmallPageObject, seL4_PageBits);
+        ZF_LOGE(" FRAME CAP %d", frame_cap);
         if (frame == NULL) {
             ZF_LOGE("Failed to allocate stack page");
             return false;
@@ -310,14 +311,13 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
         debugger_register_thread(fault_ep, new_thread->badge, new_thread->tcb);
     }
 #endif
-
     return new_thread;
 }
 
 static bool dealloc_stack(ut_t **frame_ut, seL4_CPtr *frame_cap)
 {
     /* Unmap stack pages from the hardware page table and free the respective frame uts and caps */
-    for (int i = SOS_STACK_PAGES - 1; i < 0; i--) {
+    for (int i = SOS_STACK_PAGES - 1; i >= 0; i--) {
         if (!frame_cap[i]) {
             continue;
         } // find a way to not call dealloc stack if alloc stack fails on first alloc

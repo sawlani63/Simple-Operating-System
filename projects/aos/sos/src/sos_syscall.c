@@ -14,7 +14,7 @@ seL4_CPtr nfs_signal;
 seL4_CPtr signal_cap;
 seL4_CPtr reply;
 
-bool handle_vm_fault(seL4_Word fault_addr);
+bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge);
 
 void init_semaphores(void) {
     data_sem = malloc(sizeof(sync_bin_sem_t));
@@ -41,7 +41,7 @@ void init_semaphores(void) {
 }
 
 static inline bool vaddr_check(user_process_t user_process, seL4_Word vaddr) {
-    return vaddr_is_mapped(user_process.addrspace, vaddr) || handle_vm_fault(vaddr);
+    return vaddr_is_mapped(user_process.addrspace, vaddr) || handle_vm_fault(vaddr, user_process.pid);
 }
 
 static inline pt_entry *get_page(user_process_t user_process, seL4_Word vaddr) {
