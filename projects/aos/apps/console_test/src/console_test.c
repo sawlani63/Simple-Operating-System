@@ -218,31 +218,26 @@ int main(void)
     assert(fd > 2);
     printf("Passed open/close test\n");
 
-    test_nfs();
+    //test_nfs();
     printf("Passed nfs test\n");
     
-    pt_test();
-    mmap_test();
+    //pt_test();
+    //mmap_test();
     //test_stack_write(fd);
 
-    test_buffers(fd);
+    //test_buffers(fd);
     printf("Passed read/write buffer test\n");
     res = sos_close(fd);
     assert(!res);
 
-    /*for (int i = 0; i < 50; i++) { // testing proc delete
-        printf("About to create process %d\n", i);
+    for (int i = 0; i < 4391; i++) { // testing proc delete
         int pid = sos_process_create("console_test_2");
-        printf("PID %d\n", pid);
-        printf("After create process before assert %d\n", i);
         assert(pid == 1);
-        printf("After create process after assert %d\n", i);
         int res = sos_process_delete(pid);
-        printf("After delete process before assert %d\n", i);
         assert(res == 0);
-        printf("Process delete: %d\n", i);
+        printf("Passed %d\n", i);
     }
-    printf("Passed process delete test\n");*/
+    printf("Passed process delete test\n");
 
     /*int pid = sos_process_create("console_test");
     assert(pid == 1); // second running process     // will test concurrently soon

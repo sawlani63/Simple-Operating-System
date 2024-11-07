@@ -13,6 +13,7 @@
 
 #include <stdbool.h>
 #include "addrspace.h"
+#include "utils.h"
 
 seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
                           seL4_CapRights_t rights, seL4_ARM_VMAttributes attr,

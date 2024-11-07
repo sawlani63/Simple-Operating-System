@@ -107,63 +107,42 @@ char *get_elf_data(char *app_name, unsigned long *elf_size)
 /* helper to conduct freeing operations in the event of an error in a function to prevent memory leaks */
 void free_process(user_process_t user_process)
 {
-    ZF_LOGE("ID %d", user_process.pid);
-    ZF_LOGE("stuck");
     /* Free the file descriptor table */
     if (user_process.fdt != NULL) {
-        ZF_LOGE("stuck");
         fdt_destroy(user_process.fdt);
     }
-    ZF_LOGE("stuck");
     /* Free all allocated memory for the syscall thread */
     if (user_process.handler_thread != NULL) {
         thread_destroy(user_process.handler_thread);
     }
-    ZF_LOGE("stuck");
     /* Free the heap region in the address space */
     remove_region(user_process.addrspace, PROCESS_HEAP_START);
-    ZF_LOGE("stuck");
     /* Free the stack region */
     remove_region(user_process.addrspace, PROCESS_STACK_TOP - PAGE_SIZE_4K);
-    ZF_LOGE("stuck");
     /* Free the scheduling context and tcb */
     free_untype(&user_process.sched_context, user_process.sched_context_ut);
-    ZF_LOGE("stuck");
     free_untype(&user_process.tcb, user_process.tcb_ut);
-    ZF_LOGE("stuck");
-    /* Delete the cap from the user process cspace if in that cspace and free the slot */
+    /* Delete the ep cap from the user process cspace if in that cspace and free the slot */
     if (!cspace_delete(&user_process.cspace, user_process.slot)) {
-        ZF_LOGE("stuck");
         cspace_free_slot(&user_process.cspace, user_process.slot);
-        ZF_LOGE("stuck");
     }
     //free_untype(&user_process.ipc_buffer, NULL); test, not sure if needed
     /* Free the ipc buffer region */
     remove_region(user_process.addrspace, PROCESS_IPC_BUFFER);
-    ZF_LOGE("stuck");
     /* Free the user process page table and address space */
     if (user_process.addrspace->page_table != NULL) {
-        ZF_LOGE("stuck");
         sos_destroy_page_table(user_process.addrspace);
-        ZF_LOGE("stuck");
         free_region_tree(user_process.addrspace);
-        ZF_LOGE("stuck");
         free(user_process.addrspace);
-        ZF_LOGE("stuck");
     }
     /* Destroy the user process cspace */
     if (&user_process.cspace != NULL) {
-        ZF_LOGE("stuck");
         cspace_destroy(&user_process.cspace);
-        ZF_LOGE("stuck");
     }
     /* Free the user process vspace and ep (vspace unassigned from ASID upon freeing) */
     free_untype(&user_process.vspace, user_process.vspace_ut);
-    ZF_LOGE("stuck");
     free_untype(&user_process.ep, user_process.ep_ut);
-    ZF_LOGE("stuck");
     mark_pid_free(user_process.pid);
-    ZF_LOGE("stuck");
 }
 
 static int stack_write(seL4_Word *mapped_stack, int index, uintptr_t val)

@@ -351,7 +351,7 @@ int thread_destroy(sos_thread_t *thread)
     }
     // find better way to keep track of each stack page ut and frame cap?
     /* Unbind the bound notification object from the tcb */
-    seL4_TCB_UnbindNotification(thread->tcb);
+    //seL4_TCB_UnbindNotification(thread->tcb); // i think? unbinded upon freeing tcb
     /* Free the scheduling context and tcb */
     free_untype(&thread->sched_context, thread->sched_context_ut);
     free_untype(&thread->tcb, thread->tcb_ut);
