@@ -218,7 +218,7 @@ int main(void)
     assert(fd > 2);
     printf("Passed open/close test\n");
 
-    //test_nfs();
+    test_nfs();
     printf("Passed nfs test\n");
     
     pt_test();
@@ -231,13 +231,20 @@ int main(void)
     assert(!res);
 
     /*for (int i = 0; i < 50; i++) { // testing proc delete
+        printf("About to create process %d\n", i);
         int pid = sos_process_create("console_test_2");
+        printf("PID %d\n", pid);
+        printf("After create process before assert %d\n", i);
         assert(pid == 1);
+        printf("After create process after assert %d\n", i);
         int res = sos_process_delete(pid);
+        printf("After delete process before assert %d\n", i);
         assert(res == 0);
-    }*/
+        printf("Process delete: %d\n", i);
+    }
+    printf("Passed process delete test\n");*/
 
-    int pid = sos_process_create("console_test");
+    /*int pid = sos_process_create("console_test");
     assert(pid == 1); // second running process     // will test concurrently soon
     pid = sos_my_id();
     assert(pid == 0);
@@ -252,5 +259,5 @@ int main(void)
     assert(num == 1);
     for (int i = 0; i < num; i++) {
         printf("From process status: pid - %d, size - %d, stime - %d, app_name - %s\n", pinfo[i].pid, pinfo[i].size, pinfo[i].stime, pinfo[i].command);
-    }
+    }*/
 }

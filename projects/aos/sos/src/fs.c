@@ -24,6 +24,7 @@ fdt *fdt_create(char *err) {
 
 void fdt_destroy(fdt *fdt) {
     for (uint32_t i = 0; i < fdt->size; i++) {
+        ZF_LOGE("HOW MANY TIMES AM I RUNNING %d %d", i, fdt->size);
         file_destroy(fdt->files[i]);
     }
     free(fdt->files);

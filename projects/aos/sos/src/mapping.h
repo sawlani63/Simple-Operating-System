@@ -98,6 +98,8 @@ seL4_Error sos_map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr
 seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
                          size_t perms, frame_ref_t frame_ref, addrspace_t *as);
 
+void sos_destroy_page_table(addrspace_t *as);
+
 /*
  * Map a device and return the virtual address it is mapped to.
  *

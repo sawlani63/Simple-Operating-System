@@ -253,6 +253,36 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
     return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, l1_pt);
 }
 
+void sos_destroy_page_table(addrspace_t *as)
+{
+    page_upper_directory *l1_pt = as->page_table;
+    for (size_t i = 0; i < PAGE_TABLE_ENTRIES; i++) {
+        page_directory *l2_pt = l1_pt[i].l2;
+        for (size_t j = 0; j < PAGE_TABLE_ENTRIES; j++) {
+            page_table *l3_pt = l2_pt[j].l3;
+            for (size_t k = 0; k < PAGE_TABLE_ENTRIES; k++) {
+                pt_entry *l4_pt = l3_pt[k].l4;
+                for (size_t m = 0; m < PAGE_TABLE_ENTRIES; m++) {
+                    pt_entry entry = l4_pt[m];
+                    seL4_CPtr frame_cptr = entry.page.frame_cptr;
+                    seL4_ARM_Page_Unmap(frame_cptr);
+                    free_untype(&frame_cptr, NULL);
+                    free_frame(entry.page.frame_ref);
+                }
+                free(l4_pt);
+            }
+            seL4_ARM_PageTable_Unmap(l3_pt->slot);
+            free_untype(&l3_pt->slot, l3_pt->ut);
+            free(l3_pt);
+        }
+        seL4_ARM_PageTable_Unmap(l2_pt->slot);
+        free_untype(&l2_pt->slot, l2_pt->ut);
+        free(l2_pt);
+    }
+    seL4_ARM_PageTable_Unmap(l1_pt->slot);
+    free_untype(&l1_pt->slot, l1_pt->ut);
+    free(l1_pt);
+}
 
 static uintptr_t device_virt = SOS_DEVICE_START;
 

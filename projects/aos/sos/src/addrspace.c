@@ -150,7 +150,7 @@ addrspace_t *as_create() {
 	}
 
     as->region_tree = NULL;
-    as->page_table = calloc(sizeof(page_upper_directory), PAGE_TABLE_ENTRIES);
+    as->page_table = calloc(PAGE_TABLE_ENTRIES, sizeof(page_upper_directory));
     if (as->page_table == NULL) {
         free(as);
         return NULL;
