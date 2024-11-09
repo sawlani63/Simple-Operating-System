@@ -364,7 +364,6 @@ int thread_destroy(sos_thread_t *thread)
         ZF_LOGE("Unable to dealloc stack");
         return 1;
     }
-    // find better way to keep track of each stack page ut and frame cap?
     /* Unbind the bound notification object from the tcb */
     //seL4_TCB_UnbindNotification(thread->tcb); // i think? unbinded upon freeing tcb
     /* Free the scheduling context and tcb */
