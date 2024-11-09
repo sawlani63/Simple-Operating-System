@@ -158,6 +158,8 @@ char *get_elf_data(unsigned long *elf_size, char *app_name)
 /* helper to conduct freeing operations in the event of an error in a function to prevent memory leaks */
 void free_process(user_process_t user_process)
 {
+    sync_bin_sem_wait(user_process.async_sem); // (for now here) will optimize to delete unnecessary stuff before wait // do for other irqs
+    thread_suspend(user_process.handler_thread); // depends
     /* Free the file descriptor table */
     if (user_process.fdt != NULL) {
         fdt_destroy(user_process.fdt);
@@ -196,6 +198,8 @@ void free_process(user_process_t user_process)
     /* Free the user process vspace and ep (vspace unassigned from ASID upon freeing) */
     free_untype(&user_process.vspace, user_process.vspace_ut);
     free_untype(&user_process.ep, user_process.ep_ut);
+    free_untype(&user_process.async_cptr, user_process.async_ut);
+    free(user_process.async_sem);
     uint8_t id = (uint8_t) user_process.pid;
     user_process_list[(pid_t) id] = (user_process_t){0};
     pid_manager.pid_queue[id] = id + 1;
@@ -359,6 +363,20 @@ int start_process(char *app_name, thread_main_f *func)
     if (func != NULL) {
         handler_func = func;
     }
+
+    user_process.async_sem = malloc(sizeof(sync_bin_sem_t));
+    if (user_process.async_sem == NULL) {
+        ZF_LOGE("No memory for new semaphore object");
+        free_process(user_process);
+        return -1;
+    }
+    user_process.async_ut = alloc_retype(&user_process.async_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    if (user_process.async_cptr == seL4_CapNull) {
+        ZF_LOGE("No memory for new notification object");
+        free_process(user_process);
+        return -1;
+    }
+    sync_bin_sem_init(user_process.async_sem, user_process.async_cptr, 1);
 
     user_process.ep_ut = alloc_retype(&user_process.ep, seL4_EndpointObject, seL4_EndpointBits);
     if (user_process.ep == seL4_CapNull) {

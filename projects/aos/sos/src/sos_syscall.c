@@ -10,6 +10,7 @@ seL4_CPtr file_sem_cptr;
 sync_bin_sem_t *file_sem = NULL;
 
 seL4_CPtr nfs_signal;
+seL4_CPtr sleep_signal;
 
 seL4_CPtr signal_cap;
 seL4_CPtr reply;
@@ -31,6 +32,8 @@ void init_semaphores(void) {
 
     ut_t *nfs_ut = alloc_retype(&nfs_signal, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!nfs_ut, "No memory for notification");
+    ut_t *sleep_ut = alloc_retype(&sleep_signal, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!sleep_ut, "No memory for notification");
 
     alloc_retype(&signal_cap, seL4_EndpointObject, seL4_EndpointBits);
     ut_t *reply_ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
@@ -52,10 +55,9 @@ static inline pt_entry *get_page(user_process_t user_process, seL4_Word vaddr) {
     return &user_process.addrspace->page_table[l1_i].l2[l2_i].l3[l3_i].l4[l4_i];
 }
 
-static inline void wakeup(UNUSED uint32_t id, void* data)
+static inline void wakeup(UNUSED uint32_t id, UNUSED void* data)
 {
-    sync_bin_sem_t *sleep_sem = (sync_bin_sem_t *) data;
-    sync_bin_sem_post(sleep_sem);
+    seL4_Signal(sleep_signal);
 }
 
 int netcon_send(open_file *file, char *data, UNUSED uint64_t offset, uint64_t len, void *callback, void *args) {
@@ -80,11 +82,13 @@ static inline int perform_io_core(user_process_t user_process, uint16_t data_off
     io_args *args = malloc(sizeof(io_args));
     *args = (io_args){.err = len, .buff = data + data_offset, .signal_cap = signal_cap, .entry = entry};
     int res;
+    sync_bin_sem_wait(user_process.async_sem);
     if (read) {
         res = file->file_read(file, data + data_offset, file_offset, len, callback, args);
     } else {
         res = file->file_write(file, data + data_offset, file_offset, len, callback, args);
     }
+    sync_bin_sem_post(user_process.async_sem);
 
     return res < 0 ? -1 : res;
 }
@@ -203,11 +207,14 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     if (strcmp(file_path, "console")) {
         file = file_create(file_path, mode, nfs_pwrite_file, nfs_pread_file);
         io_args args = {.signal_cap = nfs_signal};
+        sync_bin_sem_wait(user_process.async_sem);
         if (nfs_open_file(file, nfs_async_open_cb, &args) < 0) {
             file_destroy(file);
+            sync_bin_sem_post(user_process.async_sem);
             seL4_SetMR(0, -1);
             return;
         }
+        sync_bin_sem_post(user_process.async_sem);
         file->handle = args.buff;
     } else {
         sync_bin_sem_wait(file_sem);
@@ -241,14 +248,13 @@ void syscall_sos_close(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         return;
     } else if (strcmp(found->path, "console")) {
         io_args args = {.signal_cap = nfs_signal};
+        sync_bin_sem_wait(user_process.async_sem);
         if (nfs_close_file(found, nfs_async_close_cb, &args) < 0) {
+            sync_bin_sem_post(user_process.async_sem);
             seL4_SetMR(0, -1);
             return;
         }
-        if (args.err) {
-            seL4_SetMR(0, -1);
-            return;
-        }
+        sync_bin_sem_post(user_process.async_sem);
     } else if (found->mode != O_WRONLY) {
         sync_bin_sem_wait(file_sem);
         console_open_for_read = false;
@@ -310,21 +316,17 @@ void syscall_sos_write(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     seL4_SetMR(0, res);
 }
 
-void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg)
+void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_USLEEP);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
+    user_process_t user_process = user_process_list[badge];
 
-    seL4_CPtr sleep_sem_cptr;
-    sync_bin_sem_t sleep_sem;
-    ut_t *sleep_ut = alloc_retype(&sleep_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
-    ZF_LOGF_IF(!sleep_ut, "No memory for notification");
-    sync_bin_sem_init(&sleep_sem, sleep_sem_cptr, 0);
+    register_timer(seL4_GetMR(1), wakeup, NULL);
 
-    register_timer(seL4_GetMR(1), wakeup, (void *) &sleep_sem);
-
-    sync_bin_sem_wait(&sleep_sem);
-    free_untype(&sleep_sem_cptr, sleep_ut);
+    sync_bin_sem_wait(user_process.async_sem);
+    seL4_Wait(sleep_signal, 0);
+    sync_bin_sem_post(user_process.async_sem);
 }
 
 inline void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
@@ -356,14 +358,13 @@ void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     sos_stat_t stat = {ST_SPECIAL, 0, 0, 0, 0};
     if (strcmp(file_path, "console")) {
         io_args args = {0, &stat, nfs_signal, NULL};
+        sync_bin_sem_wait(user_process.async_sem);
         if (nfs_stat_file(file_path, nfs_async_stat_cb, &args)) {
+            sync_bin_sem_post(user_process.async_sem);
             seL4_SetMR(0, -1);
             return;
         }
-        if (args.err < 0) {
-            seL4_SetMR(0, -1);
-            return;
-        }
+        sync_bin_sem_post(user_process.async_sem);
         stat.st_fmode >>= 6;
     }
     
@@ -381,14 +382,13 @@ void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     size_t nbyte = seL4_GetMR(3);
 
     io_args args = {.err = 0, .signal_cap = nfs_signal};
+    sync_bin_sem_wait(user_process.async_sem);
     if (nfs_open_dir(nfs_async_opendir_cb, &args)) {
+        sync_bin_sem_post(user_process.async_sem);
         seL4_SetMR(0, -1);
         return;
     }
-    if (args.err) {
-        seL4_SetMR(0, -1);
-        return;
-    }
+    sync_bin_sem_post(user_process.async_sem);
 
     struct nfsdirent *nfsdirent = nfs_read_dir(args.buff);
     int i = 0;

@@ -59,6 +59,7 @@ static bool alloc_stack(thread_frame *head, seL4_Word *sp, seL4_Word badge)
             ZF_LOGE("Failed to allocate stack page");
             return false;
         }
+        curr->badge = badge;
         seL4_Error err = thread_map_frame(&cspace, frame_cap, seL4_CapInitThreadVSpace,
                                 curr_stack, seL4_AllRights, seL4_ARM_Default_VMAttributes, curr);
         if (err != seL4_NoError) {

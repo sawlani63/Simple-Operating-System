@@ -130,7 +130,7 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
         syscall_sos_write(&reply_msg, badge);
         break;
     case SYSCALL_SOS_USLEEP:
-        syscall_sos_usleep(&reply_msg);
+        syscall_sos_usleep(&reply_msg, badge);
         break;
     case SYSCALL_SOS_TIME_STAMP:
         syscall_sos_time_stamp(&reply_msg);

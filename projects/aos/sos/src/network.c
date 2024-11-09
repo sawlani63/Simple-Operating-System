@@ -372,7 +372,7 @@ int nfs_stat_file(const char *path, nfs_cb cb, void *private_data)
     }
     io_args *args = (io_args *) private_data;
     seL4_Wait(args->signal_cap, 0);
-    return 0;
+    return ((io_args *) private_data)->err;
 }
 
 int nfs_open_dir(nfs_cb cb, void* private_data)
@@ -385,7 +385,7 @@ int nfs_open_dir(nfs_cb cb, void* private_data)
     }
     io_args *args = (io_args *) private_data;
     seL4_Wait(args->signal_cap, 0);
-    return 0;
+    return ((io_args *) private_data)->err;
 }
 
 void nfs_close_dir(struct nfsdir *nfsdir)

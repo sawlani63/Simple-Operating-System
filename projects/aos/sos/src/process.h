@@ -68,6 +68,10 @@ typedef struct user_process {
     fdt *fdt;
     sos_thread_t *handler_thread;
 
+    sync_bin_sem_t *async_sem; // remove malloc for this
+    seL4_CPtr async_cptr;
+    ut_t *async_ut;
+
     seL4_CPtr ep;
     ut_t *ep_ut;
 
