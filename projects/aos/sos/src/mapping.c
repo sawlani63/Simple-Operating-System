@@ -75,7 +75,7 @@ static seL4_Error retype_map_pud(cspace_t *cspace, seL4_CPtr vspace, seL4_Word v
 
 seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
                           seL4_CapRights_t rights, seL4_ARM_VMAttributes attr,
-                          seL4_CPtr *free_slots, seL4_Word *used, page_upper_directory *page_table)
+                          seL4_CPtr *free_slots, seL4_Word *used, page_upper_directory *page_table, thread_frame *curr)
 {
     /* We use our shadow page table which follows the same structure as the hardware one.
     * Check the seL4 Manual section 7.1.1 for hardware virtual memory objects. Importantly
@@ -120,6 +120,9 @@ seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspac
             if (page_table != NULL) {
                 page_table[l1_index].l2[l2_index].l3[l3_index].ut = ut;
                 page_table[l1_index].l2[l2_index].l3[l3_index].slot = slot;
+            } else if (curr != NULL) {
+                curr->slot[i] = slot;
+                curr->slot_ut[i] = ut;
             }
             break;
         case SEL4_MAPPING_LOOKUP_NO_PD:
@@ -127,6 +130,9 @@ seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspac
             if (page_table != NULL) {
                 page_table[l1_index].l2[l2_index].ut = ut;
                 page_table[l1_index].l2[l2_index].slot = slot;
+            } else if (curr != NULL) {
+                curr->slot[i] = slot;
+                curr->slot_ut[i] = ut;
             }
             break;
         case SEL4_MAPPING_LOOKUP_NO_PUD:
@@ -134,6 +140,9 @@ seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspac
             if (page_table != NULL) {
                 page_table[l1_index].ut = ut;
                 page_table[l1_index].slot = slot;
+            } else if (curr != NULL) {
+                curr->slot[i] = slot;
+                curr->slot_ut[i] = ut;
             }
             break;
         }
@@ -155,20 +164,26 @@ seL4_Error map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vsp
         ZF_LOGE("Invalid arguments");
         return -1;
     }
-    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, NULL);
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, NULL, NULL);
+}
+
+seL4_Error thread_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
+                            seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, thread_frame *curr)
+{
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, NULL, curr);
 }
 
 seL4_Error map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
                      seL4_CapRights_t rights, seL4_ARM_VMAttributes attr)
 {
-    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, NULL);
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, NULL, NULL);
 }
 
 seL4_Error sos_map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
                                 seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, seL4_CPtr *free_slots,
                                 seL4_Word *used, page_upper_directory *page_table)
 {
-    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, page_table);
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, page_table, NULL);
 }
 
 seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
@@ -250,7 +265,7 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
         attr |= seL4_ARM_ExecuteNever;
     }
 
-    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, l1_pt);
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, l1_pt, NULL);
 }
 
 void sos_destroy_page_table(addrspace_t *as)
@@ -282,15 +297,21 @@ void sos_destroy_page_table(addrspace_t *as)
                     free_frame(entry.page.frame_ref);
                     l4_pt[m] = (pt_entry){0};
                 }
-                seL4_ARM_PageTable_Unmap(l3_pt[k].slot);
+                if (l3_pt[k].slot != seL4_CapNull) {
+                    seL4_ARM_PageTable_Unmap(l3_pt[k].slot);
+                }
                 free_untype(&l3_pt[k].slot, l3_pt[k].ut);
                 free(l4_pt);
             }
-            seL4_ARM_PageTable_Unmap(l2_pt[j].slot);
+            if (l2_pt[j].slot != seL4_CapNull) {
+                seL4_ARM_PageTable_Unmap(l2_pt[j].slot);
+            }
             free_untype(&l2_pt[j].slot, l2_pt[j].ut);
             free(l3_pt);
         }
-        seL4_ARM_PageTable_Unmap(l1_pt[i].slot);
+        if (l1_pt[i].slot != seL4_CapNull) {
+            seL4_ARM_PageTable_Unmap(l1_pt[i].slot);
+        }
         free_untype(&l1_pt[i].slot, l1_pt[i].ut);
         free(l2_pt);
     }

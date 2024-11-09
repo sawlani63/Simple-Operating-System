@@ -18,6 +18,15 @@
 
 extern cspace_t cspace;
 
+typedef struct thread_frame {
+    seL4_CPtr frame_cap;
+    ut_t *frame_ut;
+    seL4_CPtr *slot;
+    ut_t **slot_ut;
+    seL4_Word badge;
+    struct thread_frame *next;
+} thread_frame;
+
 typedef struct {
     ut_t *tcb_ut;
     seL4_CPtr tcb;
@@ -31,8 +40,7 @@ typedef struct {
     ut_t *sched_context_ut;
     seL4_CPtr sched_context;
 
-    ut_t **frame_ut;
-    seL4_CPtr *frame_cap;
+    thread_frame *head;
     seL4_Word badge;
 
     uintptr_t tls_base;

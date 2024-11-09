@@ -71,8 +71,6 @@ typedef struct user_process {
     seL4_CPtr ep;
     ut_t *ep_ut;
 
-    elf_t elf_file;
-
     seL4_CPtr ep_slot;
     seL4_CPtr ntfn_slot;
     ut_t *tcb_ut;
@@ -101,7 +99,7 @@ typedef struct {
 
 typedef int pid_t;
 
-int init_procid_list();
+int init_proc();
 int start_process(char *app_name, thread_main_f *func);
 void syscall_proc_create(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_proc_delete(seL4_MessageInfo_t *reply_msg);

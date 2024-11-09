@@ -46,11 +46,12 @@ void init_threads(seL4_CPtr _ipc_ep, seL4_CPtr _fault_ep, seL4_CPtr sched_ctrl_s
 }
 
 
-static bool alloc_stack(ut_t **frame_ut, seL4_CPtr *frame_cp, seL4_Word *sp)
+static bool alloc_stack(thread_frame *head, seL4_Word *sp, seL4_Word badge)
 {
     static seL4_Word curr_stack = SOS_STACK + SOS_STACK_PAGES * PAGE_SIZE_4K;
     // Skip guard page
     curr_stack += PAGE_SIZE_4K;
+    thread_frame *curr = head;
     for (int i = 0; i < SOS_STACK_PAGES; i++) {
         seL4_CPtr frame_cap;
         ut_t *frame = alloc_retype(&frame_cap, seL4_ARM_SmallPageObject, seL4_PageBits);
@@ -58,16 +59,20 @@ static bool alloc_stack(ut_t **frame_ut, seL4_CPtr *frame_cp, seL4_Word *sp)
             ZF_LOGE("Failed to allocate stack page");
             return false;
         }
-        seL4_Error err = map_frame(&cspace, frame_cap, seL4_CapInitThreadVSpace,
-                                   curr_stack, seL4_AllRights, seL4_ARM_Default_VMAttributes);
+        seL4_Error err = thread_map_frame(&cspace, frame_cap, seL4_CapInitThreadVSpace,
+                                curr_stack, seL4_AllRights, seL4_ARM_Default_VMAttributes, curr);
         if (err != seL4_NoError) {
             ZF_LOGE("Failed to map stack");
             free_untype(&frame_cap, frame);
             return false;
         }
         curr_stack += PAGE_SIZE_4K;
-        frame_ut[i] = frame;
-        frame_cp[i] = frame_cap;
+        curr->frame_cap = frame_cap;
+        curr->frame_ut = frame;
+        curr->next = calloc(1, sizeof(thread_frame));
+        curr->next->slot = calloc(3, sizeof(seL4_CPtr));
+        curr->next->slot_ut = calloc(3, sizeof(ut_t *));
+        curr = curr->next;
     }
     *sp = curr_stack;
     return true;
@@ -257,18 +262,11 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
     NAME_THREAD(new_thread->tcb, "second sos thread");
 
     /* set up the stack */
-    new_thread->frame_ut = calloc(SOS_STACK_PAGES, sizeof(ut_t *));
-    if (new_thread->frame_ut == NULL) {
-        thread_destroy(new_thread);
-        return NULL;
-    }
-    new_thread->frame_cap = calloc(SOS_STACK_PAGES, sizeof(seL4_CPtr));
-    if (new_thread->frame_cap == NULL) {
-        thread_destroy(new_thread);
-        return NULL;
-    }
+    new_thread->head = calloc(1, sizeof(thread_frame));
+    new_thread->head->slot = calloc(3, sizeof(seL4_CPtr));
+    new_thread->head->slot_ut = calloc(3, sizeof(ut_t *));
     seL4_Word sp;
-    if (!alloc_stack(new_thread->frame_ut, new_thread->frame_cap, &sp)) {
+    if (!alloc_stack(new_thread->head, &sp, badge)) {
         thread_destroy(new_thread);
         return NULL;
     }
@@ -312,10 +310,34 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
     return new_thread;
 }
 
-static bool dealloc_stack(ut_t **frame_ut, seL4_CPtr *frame_cap)
+static bool dealloc_stack(thread_frame *head)
 {
+    thread_frame *curr = head;
+    thread_frame *prev;
+    while (curr != NULL) {
+        if (curr->frame_cap != seL4_CapNull && curr->frame_ut != NULL) {
+            seL4_Error err = seL4_ARM_Page_Unmap(curr->frame_cap);
+            if (err != seL4_NoError) {
+                ZF_LOGE("Failed to unmap stack");
+                return false;
+            }
+            free_untype(&curr->frame_cap, curr->frame_ut);
+            for (int i = 0; i < 3; i++) {
+                if (curr->slot[i] != seL4_CapNull) {
+                    seL4_ARM_PageTable_Unmap(curr->slot[i]);
+                }
+                free_untype(&curr->slot[i], curr->slot_ut[i]);
+            }
+        }
+        free(curr->slot_ut);
+        free(curr->slot);
+        prev = curr;
+        curr = curr->next;
+        free(prev);
+    }
+    return true;
     /* Unmap stack pages from the hardware page table and free the respective frame uts and caps */
-    for (int i = SOS_STACK_PAGES - 1; i >= 0; i--) {
+    /*for (int i = SOS_STACK_PAGES - 1; i >= 0; i--) {
         if (!frame_cap[i]) {
             continue;
         } // find a way to not call dealloc stack if alloc stack fails on first alloc
@@ -326,7 +348,8 @@ static bool dealloc_stack(ut_t **frame_ut, seL4_CPtr *frame_cap)
         }
         free_untype(&frame_cap[i], frame_ut[i]);
     }
-    return true;
+    return true;*/
+
 }
 
 int thread_destroy(sos_thread_t *thread)
@@ -337,15 +360,9 @@ int thread_destroy(sos_thread_t *thread)
     /* Unmap the thread's ipc buffer from the hardware page table */
     seL4_ARM_Page_Unmap(thread->ipc_buffer);
     /* Deallocate the stack of the thread */
-    if (!dealloc_stack(thread->frame_ut, thread->frame_cap)) {
+    if (!dealloc_stack(thread->head)) {
         ZF_LOGE("Unable to dealloc stack");
         return 1;
-    }
-    if (thread->frame_cap != NULL) {
-        free(thread->frame_cap);
-    }
-    if (thread->frame_ut != NULL) {
-        free(thread->frame_ut);
     }
     // find better way to keep track of each stack page ut and frame cap?
     /* Unbind the bound notification object from the tcb */

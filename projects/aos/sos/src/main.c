@@ -394,7 +394,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     nfs_pagefile->handle = args.buff;
 
     /* Initialise the list of processes and process id bitmap */
-    error = init_procid_list();
+    error = init_proc();
     ZF_LOGF_IF(error, "Failed to initialise process list / bitmap");
 
     /* Start the user application */
