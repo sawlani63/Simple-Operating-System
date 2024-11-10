@@ -322,12 +322,12 @@ static bool dealloc_stack(thread_frame *head)
                 return false;
             }
             free_untype(&curr->frame_cap, curr->frame_ut);
-            /*for (int i = 0; i < 3; i++) {
+            for (int i = 0; i < 3; i++) {
                 if (curr->slot[i] != seL4_CapNull) {
                     seL4_ARM_PageTable_Unmap(curr->slot[i]);
                 }
                 free_untype(&curr->slot[i], curr->slot_ut[i]);
-            }*/
+            }
         }
         free(curr->slot_ut);
         free(curr->slot);
@@ -344,14 +344,14 @@ int thread_destroy(sos_thread_t *thread)
         return 1;
     }
     /* Unmap the thread's ipc buffer from the hardware page table */
+    ZF_LOGE("THI 1");
     seL4_ARM_Page_Unmap(thread->ipc_buffer);
+    ZF_LOGE("THI 2");
     /* Deallocate the stack of the thread */
     if (!dealloc_stack(thread->head)) {
         ZF_LOGE("Unable to dealloc stack");
         return 1;
     }
-    /* Free the scheduling context and tcb */
-    free_untype(&thread->sched_context, thread->sched_context_ut);
     /* Delete the user_ep capability and free the cslot from the cspace */
     free_untype(&thread->fault_ep, NULL);
     free_untype(&thread->user_ep, NULL);
@@ -364,6 +364,8 @@ int thread_destroy(sos_thread_t *thread)
     seL4_CPtr tcb = thread->tcb;
     ut_t *ut = thread->tcb_ut;
     free(thread);
+    /* Free the scheduling context and tcb */
+    //free_untype(&thread->sched_context, thread->sched_context_ut);
     free_untype(&tcb, ut);
     return 0;
 }

@@ -409,6 +409,7 @@ NORETURN void *main_continued(UNUSED void *arg)
 
     user_process_t user_process = user_process_list[success];
     user_process.handler_thread = thread_create(syscall_loop, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true);
+    user_process_list[success] = user_process;
     ZF_LOGF_IF(user_process.handler_thread == NULL, "Failed to create syscall thread");
 
     printf("\nSOS entering irq loop\n");

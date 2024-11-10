@@ -689,6 +689,7 @@ void syscall_proc_delete(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         seL4_SetMR(0, -1);
         return;
     }
+    ZF_LOGE("BADGE AND PID %d, %d", badge, pid);
     if (badge == (seL4_Word) pid) {
         free_process(user_process, true);
     } else {
