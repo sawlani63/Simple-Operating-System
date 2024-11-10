@@ -399,8 +399,11 @@ NORETURN void *main_continued(UNUSED void *arg)
     ZF_LOGF_IF(success == -1, "Failed to start process");
 
     /* We swap the task of irq handling from the temp thread to our main thread, and destroy our temp thread */
-    error = thread_destroy(irq_temp_thread);
-    ZF_LOGF_IFERR(error, "Failed to destroy the temp irq thread");
+    //error = thread_destroy(irq_temp_thread);
+    //ZF_LOGF_IFERR(error, "Failed to destroy the temp irq thread");
+    /* Unbind its binded notification too */
+    seL4_TCB_UnbindNotification(irq_temp_thread->tcb);
+    //free_untype(&irq_temp_thread->tcb, irq_temp_thread->tcb_ut);
     seL4_Error bind_err = seL4_TCB_BindNotification(seL4_CapInitThreadTCB, ntfn);
     ZF_LOGF_IFERR(bind_err, "Failed to bind notification object to TCB");
 
