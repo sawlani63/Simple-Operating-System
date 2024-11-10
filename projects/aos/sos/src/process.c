@@ -680,12 +680,10 @@ void syscall_proc_delete(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     ZF_LOGV("syscall: some thread made syscall %d", SYSCALL_PROC_DELETE);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     pid_t pid = seL4_GetMR(1);
-    ZF_LOGE("badge and id %d, %d", badge, pid);
     if (pid < 0 || pid >= NUM_PROC) {
         seL4_SetMR(0, -1);
         return;
     }
-    ZF_LOGE("BADGE AND PID %d, %d", badge, pid);
     user_process_t user_process = user_process_list[pid];
     if (user_process.stime == 0) {
         seL4_SetMR(0, -1);

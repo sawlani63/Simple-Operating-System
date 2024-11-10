@@ -347,13 +347,15 @@ void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_STAT);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    user_process_t user_process = user_process_list[badge];
     seL4_Word path_vaddr = seL4_GetMR(1);
     seL4_Word buf_vaddr = seL4_GetMR(2);
-    size_t path_len = seL4_GetMR(3);
+    size_t path_len = seL4_GetMR(3) + 1;
+
+    user_process_t user_process = user_process_list[badge];
 
     /* Perform stat operation. We don't assume it's only on 1 page */
-    char *file_path = calloc(path_len, sizeof(char));
+    char *file_path = malloc(path_len);
+    file_path[path_len - 1] = '\0';
     int res = perform_cpy(user_process, path_len, path_vaddr, true, file_path);
     if (res == -1) {
         seL4_SetMR(0, -1);
@@ -363,13 +365,14 @@ void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     sos_stat_t stat = {ST_SPECIAL, 0, 0, 0, 0};
     if (strcmp(file_path, "console")) {
         io_args args = {0, &stat, nfs_signal, NULL};
-        sync_bin_sem_wait(user_process.async_sem);
         if (nfs_stat_file(file_path, nfs_async_stat_cb, &args)) {
-            sync_bin_sem_post(user_process.async_sem);
             seL4_SetMR(0, -1);
             return;
         }
-        sync_bin_sem_post(user_process.async_sem);
+        if (args.err < 0) {
+            seL4_SetMR(0, -1);
+            return;
+        }
         stat.st_fmode >>= 6;
     }
     
