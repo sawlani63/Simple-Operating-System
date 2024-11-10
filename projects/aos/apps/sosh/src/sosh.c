@@ -121,14 +121,11 @@ static int ps(int argc, char **argv)
     int i, processes;
 
     process = malloc(MAX_PROCESSES * sizeof(*process));
-    printf("i assume here");
 
     if (process == NULL) {
-        printf("i assumaaaaaaaaaaaaaaaae here");
         printf("%s: out of memory\n", argv[0]);
         return 1;
     }
-    printf("i assume here");
 
     processes = sos_process_status(process, MAX_PROCESSES);
     
@@ -168,7 +165,7 @@ static int exec(int argc, char **argv)
     if (pid >= 0) {
         printf("Child pid=%d\n", pid);
         if (bg == 0) {
-            sos_process_wait(-1);
+            sos_process_wait(pid);
         }
     } else {
         printf("Failed!\n");

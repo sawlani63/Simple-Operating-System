@@ -593,11 +593,13 @@ int start_process(char *app_name, thread_main_f *func)
 
     init_threads(user_process.ep, user_process.ep, sched_ctrl_start, sched_ctrl_end);
 
-    user_process.handler_thread = thread_create(handler_func, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true);
-    if (user_process.handler_thread == NULL) {
-        ZF_LOGE("Could not create system call handler thread for %s\n", app_name);
-        free_process(user_process);
-        return -1;
+    if (func == NULL) { // find better way
+        user_process.handler_thread = thread_create(handler_func, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true);
+        if (user_process.handler_thread == NULL) {
+            ZF_LOGE("Could not create system call handler thread for %s\n", app_name);
+            free_process(user_process);
+            return -1;
+        }
     }
 
     /* Initialise the per-process file descriptor table */
@@ -698,54 +700,32 @@ void syscall_proc_getid(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 void syscall_proc_status(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d", SYSCALL_PROC_STATUS);
-    ZF_LOGE("WHERE DID I DIE");
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    ZF_LOGE("WHERE DID I DIE");
     user_process_t user_process = user_process_list[badge];
-    ZF_LOGE("WHERE DID I DIE");
     seL4_Word vaddr = seL4_GetMR(1);
-    ZF_LOGE("WHERE DID I DIE");
     unsigned max = seL4_GetMR(2);
-    ZF_LOGE("WHERE DID I DIE");
 
     unsigned num_proc = 0;
-    ZF_LOGE("WHERE DID I DIE");
     for (int i = 0; i < NUM_PROC; i++) {
-        ZF_LOGE("WHERE DID I DIE");
         if (user_process_list[i].stime == 0) {
-            ZF_LOGE("WHERE DID I DIE");
             continue;
         }
-        ZF_LOGE("WHERE DID I DIE");
         user_process_t process = user_process_list[i];
-        ZF_LOGE("WHERE DID I DIE");
         sos_process_t pinfo = {.pid = process.pid, .size = process.size, .stime = process.stime};
-        ZF_LOGE("WHERE DID I DIE");
         for (size_t i = 0; i < strlen(process.app_name); i++) {
-            ZF_LOGE("WHERE DID I DIE");
             pinfo.command[i] = process.app_name[i];
-            ZF_LOGE("WHERE DID I DIE");
         }
-        ZF_LOGE("WHERE DID I DIE");
         int res = perform_cpy(user_process, sizeof(sos_process_t), vaddr, false, &pinfo);
-        ZF_LOGE("WHERE DID I DIE");
         if (res < (int) sizeof(sos_process_t)) {
-            ZF_LOGE("WHERE DID I DIE");
             seL4_SetMR(0, -1);
             return;
         }
-        ZF_LOGE("WHERE DID I DIE");
         num_proc++;
-        ZF_LOGE("WHERE DID I DIE");
         vaddr += res;
-        ZF_LOGE("WHERE DID I DIE");
         if (num_proc >= max) {
-            ZF_LOGE("WHERE DID I DIE");
             break;
         }
-        ZF_LOGE("WHERE DID I DIE");
     }
-    ZF_LOGE("WHERE DID I DIE");
     seL4_SetMR(0, num_proc);
 }
 

@@ -23,7 +23,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "sosh"
+#define APP_NAME             "console_test"
 
 /* The linker will link this symbol to the start address  *
  * of an archive of attached applications.                */
@@ -184,7 +184,7 @@ NORETURN void syscall_loop(void *arg)
 
     while (1) {
         seL4_MessageInfo_t message;
-        seL4_Word sender = 0;
+        seL4_Word sender;
 
         /* Reply (if there is a reply) and block on ep, waiting for an IPC sent over ep */
         if (have_reply) {
@@ -398,13 +398,15 @@ NORETURN void *main_continued(UNUSED void *arg)
     int success = start_process(APP_NAME, syscall_loop);
     ZF_LOGF_IF(success == -1, "Failed to start process");
 
-    // get thread suspend to work pls
     /* We swap the task of irq handling from the temp thread to our main thread, and destroy our temp thread */
-    //error = thread_destroy(irq_temp_thread, seL4_CapInitThreadTCB);
-    //ZF_LOGF_IFERR(error, "Failed to destroy the temp irq thread");
-    seL4_TCB_UnbindNotification(irq_temp_thread->tcb);
+    error = thread_destroy(irq_temp_thread);
+    ZF_LOGF_IFERR(error, "Failed to destroy the temp irq thread");
     seL4_Error bind_err = seL4_TCB_BindNotification(seL4_CapInitThreadTCB, ntfn);
     ZF_LOGF_IFERR(bind_err, "Failed to bind notification object to TCB");
+
+    user_process_t user_process = user_process_list[success];
+    user_process.handler_thread = thread_create(syscall_loop, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true);
+    ZF_LOGF_IF(user_process.handler_thread == NULL, "Failed to create syscall thread");
 
     printf("\nSOS entering irq loop\n");
     irq_loop((void *) ipc_ep);

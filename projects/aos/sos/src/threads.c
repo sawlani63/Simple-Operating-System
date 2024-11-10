@@ -343,6 +343,7 @@ int thread_destroy(sos_thread_t *thread)
     if (thread == NULL) {
         return 1;
     }
+    /* Unbind its binded notification too */
     free_untype(&thread->tcb, thread->tcb_ut);
     /* Unmap the thread's ipc buffer from the hardware page table */
     seL4_ARM_Page_Unmap(thread->ipc_buffer);
@@ -351,8 +352,6 @@ int thread_destroy(sos_thread_t *thread)
         ZF_LOGE("Unable to dealloc stack");
         return 1;
     }
-    /* Unbind the bound notification object from the tcb */
-    //seL4_TCB_UnbindNotification(thread->tcb); // i think? unbinded upon freeing tcb
     /* Free the scheduling context and tcb */
     free_untype(&thread->sched_context, thread->sched_context_ut);
     /* Delete the user_ep capability and free the cslot from the cspace */
