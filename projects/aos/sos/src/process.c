@@ -37,7 +37,7 @@ int init_proc()
         return 1;
     }
     /* Never freed so we don't keep track */
-    ut_t *ut = alloc_retype(&proc_signal, seL4_NotificationObject, seL4_NotificationBits);
+    ut_t *ut = alloc_retype(&proc_signal, seL4_EndpointObject, seL4_EndpointBits);
     if (proc_signal == seL4_CapNull) {
         ZF_LOGE("No memory for notifications");
         free(pid_manager.pid_queue);
@@ -175,10 +175,6 @@ void free_process(user_process_t user_process)
     /* Free the scheduling context and tcb */
     free_untype(&user_process.sched_context, user_process.sched_context_ut);
     free_untype(&user_process.tcb, user_process.tcb_ut);
-    /* Delete the ntfn from the user process cspace if in that cspace and free the slot */
-    if (!cspace_delete(&user_process.cspace, user_process.ntfn_slot)) {
-        cspace_free_slot(&user_process.cspace, user_process.ntfn_slot);
-    }
     /* Delete the ep from the user process cspace if in that cspace and free the slot */
     if (!cspace_delete(&user_process.cspace, user_process.ep_slot)) {
         cspace_free_slot(&user_process.cspace, user_process.ep_slot);
@@ -195,6 +191,12 @@ void free_process(user_process_t user_process)
     if (&user_process.cspace != NULL) {
         cspace_destroy(&user_process.cspace);
     }
+    for (int i = 0; i < NUM_PROC; i++) {
+        seL4_Signal(user_process.wake);
+        seL4_SetMR(0, (seL4_Word) user_process.pid);
+        seL4_NBSend(proc_signal, seL4_MessageInfo_new(0, 0, 0, 1));
+    }
+    free_untype(&user_process.wake, user_process.wake_ut);
     free_untype(&user_process.reply, user_process.reply_ut);
     /* Free the user process vspace and ep (vspace unassigned from ASID upon freeing) */
     free_untype(&user_process.vspace, user_process.vspace_ut);
@@ -360,7 +362,6 @@ int start_process(char *app_name, thread_main_f *func)
     }
     user_process.app_name = app_name;
     user_process.size = 0;
-    user_process.parent_pid = 0;
 
     if (func != NULL) {
         handler_func = func;
@@ -407,6 +408,13 @@ int start_process(char *app_name, thread_main_f *func)
     user_process.reply_ut = alloc_retype(&user_process.reply, seL4_ReplyObject, seL4_ReplyBits);
     if (user_process.reply_ut == NULL) {
         ZF_LOGE("Failed to create reply object");
+        free_process(user_process);
+        return -1;
+    }
+
+    user_process.wake_ut = alloc_retype(&user_process.wake, seL4_NotificationObject, seL4_NotificationBits);
+    if (user_process.wake_ut == NULL) {
+        ZF_LOGE("Failed to create notification object");
         free_process(user_process);
         return -1;
     }
@@ -659,7 +667,6 @@ void syscall_proc_create(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     path[len - 1] = '\0';
 
     pid_t pid = start_process(path, NULL);
-    user_process_list[pid].parent_pid = badge;
     seL4_SetMR(0, pid);
 }
 
@@ -677,10 +684,6 @@ void syscall_proc_delete(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         seL4_SetMR(0, -1);
         return;
     }
-    for (int i = 0; i < NUM_PROC; i++) {
-        seL4_Signal(proc_signal); // maybe have after freeing // find better way
-    }
-    ZF_LOGE("DEAD %d %d", badge, pid);
     free_process(user_process);
     seL4_SetMR(0, 0);
 }
@@ -757,17 +760,19 @@ void syscall_proc_wait(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         return;
     }
 
-    while (1) {
-        seL4_Word sender;
-        if (pid >= 0 && user_process_list[pid].stime == 0) {
-            seL4_SetMR(0, pid);
+    if (pid >= 0) {
+        user_process_t user_process = user_process_list[pid];
+        seL4_Wait(user_process.wake, 0);
+        seL4_SetMR(0, pid);
+    } else {
+        seL4_CPtr reply;
+        ut_t *ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
+        if (ut == NULL) {
+            seL4_SetMR(0, -1);
             return;
         }
-        seL4_Wait(proc_signal, &sender);
-        ZF_LOGE("SENDER %d", sender);
-        if (pid == -1 || sender == (seL4_Word) pid) {
-            seL4_SetMR(0, sender);
-            return;
-        }
+        seL4_Recv(proc_signal, 0, reply);
+        free_untype(&reply, ut);
+        seL4_SetMR(0, seL4_GetMR(0));
     }
 }

@@ -64,8 +64,6 @@ typedef struct user_process {
     unsigned size;
     unsigned stime;
 
-    pid_t parent_pid;
-
     addrspace_t *addrspace;
     fdt *fdt;
     sos_thread_t *handler_thread;
@@ -78,6 +76,8 @@ typedef struct user_process {
     ut_t *ep_ut;
     seL4_CPtr reply;
     ut_t *reply_ut;
+    seL4_CPtr wake;
+    ut_t *wake_ut;
 
     seL4_CPtr ep_slot;
     seL4_CPtr ntfn_slot;
