@@ -343,8 +343,6 @@ int thread_destroy(sos_thread_t *thread)
     if (thread == NULL) {
         return 1;
     }
-    /* Unbind its binded notification too */
-    free_untype(&thread->tcb, thread->tcb_ut);
     /* Unmap the thread's ipc buffer from the hardware page table */
     seL4_ARM_Page_Unmap(thread->ipc_buffer);
     /* Deallocate the stack of the thread */
@@ -363,7 +361,10 @@ int thread_destroy(sos_thread_t *thread)
         // free tls memory?
     }
     free_untype(&thread->ipc_buffer, thread->ipc_buffer_ut);
+    seL4_CPtr tcb = thread->tcb;
+    ut_t *ut = thread->tcb_ut;
     free(thread);
+    free_untype(&tcb, ut);
     return 0;
 }
 
