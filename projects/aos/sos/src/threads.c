@@ -59,7 +59,6 @@ static bool alloc_stack(thread_frame *head, seL4_Word *sp, seL4_Word badge)
             ZF_LOGE("Failed to allocate stack page");
             return false;
         }
-        curr->badge = badge;
         seL4_Error err = thread_map_frame(&cspace, frame_cap, seL4_CapInitThreadVSpace,
                                 curr_stack, seL4_AllRights, seL4_ARM_Default_VMAttributes, curr);
         if (err != seL4_NoError) {
@@ -323,12 +322,12 @@ static bool dealloc_stack(thread_frame *head)
                 return false;
             }
             free_untype(&curr->frame_cap, curr->frame_ut);
-            for (int i = 0; i < 3; i++) {
+            /*for (int i = 0; i < 3; i++) {
                 if (curr->slot[i] != seL4_CapNull) {
                     seL4_ARM_PageTable_Unmap(curr->slot[i]);
                 }
                 free_untype(&curr->slot[i], curr->slot_ut[i]);
-            }
+            }*/
         }
         free(curr->slot_ut);
         free(curr->slot);
@@ -337,20 +336,6 @@ static bool dealloc_stack(thread_frame *head)
         free(prev);
     }
     return true;
-    /* Unmap stack pages from the hardware page table and free the respective frame uts and caps */
-    /*for (int i = SOS_STACK_PAGES - 1; i >= 0; i--) {
-        if (!frame_cap[i]) {
-            continue;
-        } // find a way to not call dealloc stack if alloc stack fails on first alloc
-        seL4_Error err = seL4_ARM_Page_Unmap(frame_cap[i]);
-        if (err != seL4_NoError) {
-            ZF_LOGE("Failed to unmap stack");
-            return false;
-        }
-        free_untype(&frame_cap[i], frame_ut[i]);
-    }
-    return true;*/
-
 }
 
 int thread_destroy(sos_thread_t *thread)

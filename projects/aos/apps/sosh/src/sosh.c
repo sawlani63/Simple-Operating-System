@@ -314,11 +314,13 @@ int main(void)
     done = 0;
     new = 1;
 
-    printf("\n[SOS Starting]\n");
+    int pid = sos_my_id();
+    printf("\n[SOS Starting (%d)]\n", pid);
 
     while (!done) {
+        int pid = sos_my_id();
         if (new) {
-            printf("$ ");
+            printf("$ %d  ", pid);
         }
         new = 0;
         found = 0;

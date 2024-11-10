@@ -3,7 +3,7 @@
 #define GET_PAGE(pt, vaddr) pt[(vaddr >> 39) & MASK(9)].l2[(vaddr >> 30) & MASK(9)].l3[(vaddr >> 21) & MASK(9)].l4[(vaddr >> 12) & MASK(9)]
 #define SWAPMAP_SIZE (128 * 1024)                           // 128KB in bytes
 #define NUM_BLOCKS (SWAPMAP_SIZE * 8)                       // Total number of 4KB blocks in 4GB (can be stored in an int)
-#define QUEUE_SIZE (PAGE_SIZE_4K / sizeof(uint32_t) )       // 4KB queue size (1024 entries cached)
+#define QUEUE_SIZE (PAGE_SIZE_4K / sizeof(uint32_t))       // 4KB queue size (1024 entries cached)
 
 struct {
     seL4_Word circular_buffer[NUM_FRAMES];  // Data structure holding the circular buffer

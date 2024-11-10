@@ -34,6 +34,11 @@ void fdt_destroy(fdt *fdt) {
     free(fdt);
 }
 
+void fdt_put_console(fdt *fdt, open_file *file, uint32_t *fd) {
+    *fd = 0;
+    fdt->files[0] = file;
+}
+
 int fdt_put(fdt *fdt, open_file *file, uint32_t *fd) {
     if (!fdt->free_count) {
         return 1;
@@ -50,6 +55,8 @@ int fdt_remove(fdt *fdt, uint32_t fd) {
     }
     file_destroy(fdt->files[fd]);
     fdt->files[fd] = NULL;
-    fdt->free_list[fdt->free_count++] = fd;
+    if (fd != 0) {
+        fdt->free_list[fdt->free_count++] = fd;
+    }
     return 0;
 }

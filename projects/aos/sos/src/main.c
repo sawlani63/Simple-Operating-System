@@ -23,7 +23,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "console_test"
+#define APP_NAME             "sosh"
 
 /* The linker will link this symbol to the start address  *
  * of an archive of attached applications.                */
@@ -154,7 +154,7 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
         syscall_proc_create(&reply_msg, badge);
         break;
     case SYSCALL_PROC_DELETE:
-        syscall_proc_delete(&reply_msg);
+        syscall_proc_delete(&reply_msg, badge);
         break;
     case SYSCALL_PROC_GETID:
         syscall_proc_getid(&reply_msg, badge);
@@ -181,7 +181,7 @@ NORETURN void syscall_loop(void *arg)
     ut_t *reply_ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
     if (reply_ut == NULL) {
         ZF_LOGF("Failed to alloc reply object ut");
-    }
+    } // put in thread struct for ez free
 
     bool have_reply = false;
     seL4_MessageInfo_t reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);

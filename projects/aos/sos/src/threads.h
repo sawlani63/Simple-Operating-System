@@ -23,7 +23,6 @@ typedef struct thread_frame {
     ut_t *frame_ut;
     seL4_CPtr *slot;
     ut_t **slot_ut;
-    seL4_Word badge;
     struct thread_frame *next;
 } thread_frame;
 

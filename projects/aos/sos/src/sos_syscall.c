@@ -230,6 +230,11 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     }
 
     uint32_t fd;
+    if (!strcmp(file->path, "console") && file->mode != O_WRONLY) {
+        fdt_put_console(user_process.fdt, file, &fd);
+        seL4_SetMR(0, (int) fd);
+        return;
+    }
     int err = fdt_put(user_process.fdt, file, &fd);
     seL4_SetMR(0, err ? -1 : (int) fd);
 }

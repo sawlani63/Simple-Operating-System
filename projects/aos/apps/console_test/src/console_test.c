@@ -207,7 +207,7 @@ int mmap_test() {
 int main(void)
 {
     int fd = sos_open("console", O_RDWR);
-    assert(fd > 2);
+    assert(fd == 0);
     int fail = sos_open("console", O_RDONLY);
     assert(fail == -1);
     fail = sos_open("console", O_RDWR);
@@ -215,7 +215,7 @@ int main(void)
     int res = sos_close(fd);
     assert(!res);
     fd = sos_open("console", O_RDWR);
-    assert(fd > 2);
+    assert(fd == 0);
     printf("Passed open/close test\n");
 
     //test_nfs();
