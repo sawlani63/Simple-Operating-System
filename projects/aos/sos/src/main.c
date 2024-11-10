@@ -23,7 +23,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "console_test"
+#define APP_NAME             "sosh"
 
 /* The linker will link this symbol to the start address  *
  * of an archive of attached applications.                */
@@ -199,11 +199,11 @@ NORETURN void syscall_loop(void *arg)
         if (label == seL4_Fault_NullFault) {
             /* It's not a fault or an interrupt, it must be an IPC
              * message from console_test! */
-            reply_msg = handle_syscall(sender);
+            reply_msg = handle_syscall((seL4_Word) pid);
             have_reply = true;
         } else if (label == seL4_Fault_VMFault) {
             reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
-            have_reply = handle_vm_fault(seL4_GetMR(seL4_VMFault_Addr), sender);
+            have_reply = handle_vm_fault(seL4_GetMR(seL4_VMFault_Addr), (seL4_Word) pid);
         } else {
             /* some kind of fault */
             debug_print_fault(message, APP_NAME);
