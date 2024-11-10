@@ -164,6 +164,7 @@ void free_process(user_process_t user_process)
     }
     /* Free all allocated memory for the syscall thread */
     sync_bin_sem_wait(user_process.async_sem); // (for now here) will optimize to delete unnecessary stuff before wait // do for other irqs
+    thread_suspend(user_process.handler_thread);
     if (user_process.handler_thread != NULL) {
         thread_destroy(user_process.handler_thread);
     }
@@ -194,6 +195,7 @@ void free_process(user_process_t user_process)
     if (&user_process.cspace != NULL) {
         cspace_destroy(&user_process.cspace);
     }
+    free_untype(&user_process.reply, user_process.reply_ut);
     /* Free the user process vspace and ep (vspace unassigned from ASID upon freeing) */
     free_untype(&user_process.vspace, user_process.vspace_ut);
     free_untype(&user_process.ep, user_process.ep_ut);
@@ -402,6 +404,13 @@ int start_process(char *app_name, thread_main_f *func)
         return -1;
     }
 
+    user_process.reply_ut = alloc_retype(&user_process.reply, seL4_ReplyObject, seL4_ReplyBits);
+    if (user_process.reply_ut == NULL) {
+        ZF_LOGE("Failed to create reply object");
+        free_process(user_process);
+        return -1;
+    }
+
     /* Create a simple 1 level CSpace */
     err = cspace_create_one_level(&cspace, &user_process.cspace);
     if (err != CSPACE_NOERROR) {
@@ -576,7 +585,7 @@ int start_process(char *app_name, thread_main_f *func)
 
     init_threads(user_process.ep, user_process.ep, sched_ctrl_start, sched_ctrl_end);
 
-    user_process.handler_thread = thread_create(handler_func, (void *) user_process.ep, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true);
+    user_process.handler_thread = thread_create(handler_func, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true);
     if (user_process.handler_thread == NULL) {
         ZF_LOGE("Could not create system call handler thread for %s\n", app_name);
         free_process(user_process);
@@ -671,6 +680,7 @@ void syscall_proc_delete(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     for (int i = 0; i < NUM_PROC; i++) {
         seL4_Signal(proc_signal); // maybe have after freeing // find better way
     }
+    ZF_LOGE("DEAD %d %d", badge, pid);
     free_process(user_process);
     seL4_SetMR(0, 0);
 }
@@ -748,12 +758,13 @@ void syscall_proc_wait(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     }
 
     while (1) {
-        seL4_Word sender = 0;
+        seL4_Word sender;
         if (pid >= 0 && user_process_list[pid].stime == 0) {
             seL4_SetMR(0, pid);
             return;
         }
         seL4_Wait(proc_signal, &sender);
+        ZF_LOGE("SENDER %d", sender);
         if (pid == -1 || sender == (seL4_Word) pid) {
             seL4_SetMR(0, sender);
             return;

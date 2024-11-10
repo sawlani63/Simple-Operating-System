@@ -343,6 +343,7 @@ int thread_destroy(sos_thread_t *thread)
     if (thread == NULL) {
         return 1;
     }
+    free_untype(&thread->tcb, thread->tcb_ut);
     /* Unmap the thread's ipc buffer from the hardware page table */
     seL4_ARM_Page_Unmap(thread->ipc_buffer);
     /* Deallocate the stack of the thread */
@@ -354,7 +355,6 @@ int thread_destroy(sos_thread_t *thread)
     //seL4_TCB_UnbindNotification(thread->tcb); // i think? unbinded upon freeing tcb
     /* Free the scheduling context and tcb */
     free_untype(&thread->sched_context, thread->sched_context_ut);
-    free_untype(&thread->tcb, thread->tcb_ut);
     /* Delete the user_ep capability and free the cslot from the cspace */
     free_untype(&thread->fault_ep, NULL);
     free_untype(&thread->user_ep, NULL);

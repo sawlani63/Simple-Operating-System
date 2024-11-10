@@ -174,14 +174,10 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
 
 NORETURN void syscall_loop(void *arg)
 {
-    seL4_CPtr ep = (seL4_CPtr) arg;
-    seL4_CPtr reply;
-
-    /* Create reply object */
-    ut_t *reply_ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
-    if (reply_ut == NULL) {
-        ZF_LOGF("Failed to alloc reply object ut");
-    } // put in thread struct for ez free
+    //seL4_CPtr ep = (seL4_CPtr) arg;
+    pid_t pid = (pid_t) arg;
+    seL4_CPtr reply = user_process_list[pid].reply;
+    seL4_CPtr ep = user_process_list[pid].ep;
 
     bool have_reply = false;
     seL4_MessageInfo_t reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);

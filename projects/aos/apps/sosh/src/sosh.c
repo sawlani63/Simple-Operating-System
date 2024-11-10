@@ -121,11 +121,14 @@ static int ps(int argc, char **argv)
     int i, processes;
 
     process = malloc(MAX_PROCESSES * sizeof(*process));
+    printf("i assume here");
 
     if (process == NULL) {
+        printf("i assumaaaaaaaaaaaaaaaae here");
         printf("%s: out of memory\n", argv[0]);
         return 1;
     }
+    printf("i assume here");
 
     processes = sos_process_status(process, MAX_PROCESSES);
     
@@ -318,9 +321,8 @@ int main(void)
     printf("\n[SOS Starting (%d)]\n", pid);
 
     while (!done) {
-        int pid = sos_my_id();
         if (new) {
-            printf("$ %d  ", pid);
+            printf("$ ");
         }
         new = 0;
         found = 0;
