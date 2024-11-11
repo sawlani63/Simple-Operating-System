@@ -344,14 +344,12 @@ int thread_destroy(sos_thread_t *thread)
         return 1;
     }
     /* Unmap the thread's ipc buffer from the hardware page table */
-    ZF_LOGE("THI 1");
     seL4_ARM_Page_Unmap(thread->ipc_buffer);
-    ZF_LOGE("THI 2");
     /* Deallocate the stack of the thread */
-    if (!dealloc_stack(thread->head)) {
+    /*if (!dealloc_stack(thread->head)) {
         ZF_LOGE("Unable to dealloc stack");
         return 1;
-    }
+    }*/
     /* Delete the user_ep capability and free the cslot from the cspace */
     free_untype(&thread->fault_ep, NULL);
     free_untype(&thread->user_ep, NULL);
