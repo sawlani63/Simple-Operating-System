@@ -68,9 +68,9 @@ pid_t get_pid()
     return -1;
 }
 
-char *get_elf_data(unsigned long *elf_size, char *app_name)
+char *get_elf_data(open_file *file, unsigned long *elf_size)
 {
-    /*io_args args = {.signal_cap = nfs_signal};
+    io_args args = {.signal_cap = nfs_signal};
     int error = nfs_open_file(file, nfs_async_open_cb, &args);
     if (error) {
         ZF_LOGE("NFS: Error in opening app");
@@ -96,7 +96,8 @@ char *get_elf_data(unsigned long *elf_size, char *app_name)
     *elf_size = header->e_shoff + (header->e_shentsize * header->e_shnum);
     uint32_t header_size = header->e_ehsize + (header->e_phentsize * header->e_phnum) + (header->e_shentsize * header->e_shnum);
     data = realloc(data, header_size);
-    args.buff = data + (header->e_ehsize + (header->e_phentsize * header->e_phnum));
+    unsigned long elf_soff = (header->e_ehsize + (header->e_phentsize * header->e_phnum));
+    args.buff = data + elf_soff;
 
     error = nfs_pread_file(file, NULL, header->e_shoff, (header->e_shentsize * header->e_shnum), nfs_pagefile_read_cb, &args);
     if (error < (int) (header->e_shentsize * header->e_shnum)) {
@@ -109,49 +110,6 @@ char *get_elf_data(unsigned long *elf_size, char *app_name)
         free(data);
         return NULL;
     }
-    return data;*/
-    open_file *file = file_create(app_name, O_RDWR, nfs_pwrite_file, nfs_pread_file);
-    io_args args = {.signal_cap = nfs_signal};
-    int error = nfs_open_file(file, nfs_async_open_cb, &args);
-    if (error) {
-        ZF_LOGE("NFS: Error in opening app");
-        return NULL;
-    }
-    file->handle = args.buff;
-
-    char *data = malloc(sizeof(char) * PAGE_SIZE_4K);
-    args.buff = data;
-    error = nfs_pread_file(file, NULL, 0, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
-    if (error < (int) PAGE_SIZE_4K) {
-        ZF_LOGE("NFS: Error in reading ELF and program headers");
-        return NULL;
-    }
-    seL4_Wait(nfs_signal, 0);
-    if (args.err < 0) {
-        return NULL;
-    }
-
-    Elf64_Ehdr const *header = (void *) data;
-    *elf_size = header->e_shoff + (header->e_shentsize * header->e_shnum);
-    data = realloc(data, *elf_size);
-    args.buff = data;
-
-    error = nfs_pread_file(file, NULL, 0, *elf_size, nfs_pagefile_read_cb, &args);
-    if (error < (int) *elf_size) {
-        ZF_LOGE("NFS: Error in reading ELF");
-        return NULL;
-    }
-    seL4_Wait(nfs_signal, 0);
-    if (args.err < 0) {
-        return NULL;
-    }
-
-    error = nfs_close_file(file, nfs_async_close_cb, &args);
-    if (error < 0) {
-        ZF_LOGE("NFS: Error in closing ELF");
-        return NULL;
-    }
-    file_destroy(file);
     return data;
 }
 
@@ -542,11 +500,8 @@ int start_process(char *app_name, thread_main_f *func)
     ZF_LOGI("\nStarting \"%s\"...\n", app_name);
     unsigned long elf_size;
     elf_t elf_file = {};
-    size_t cpio_len = _cpio_archive_end - _cpio_archive;
-    const char *elf_base = cpio_get_file(_cpio_archive, cpio_len, app_name, &elf_size);
-    //open_file *elf = file_create(app_name, O_RDWR, nfs_pwrite_file, nfs_pread_file);
-    //char *elf_base = get_elf_data(&elf_size, elf);
-    //char *elf_base = get_elf_data(&elf_size, app_name);
+    open_file *elf = file_create(app_name, O_RDWR, nfs_pwrite_file, nfs_pread_file);
+    char *elf_base = get_elf_data(elf, &elf_size);
     if (elf_base == NULL) {
         ZF_LOGE("Unable to open or read %s from NFS", app_name);
         free_process(user_process, false);
