@@ -97,13 +97,22 @@ char *get_elf_header(open_file *file, unsigned long *elf_size)
     return data;
 }
 
+extern bool console_open_for_read;
+extern sync_bin_sem_t *file_sem;
 /* helper to conduct freeing operations in the event of an error in a function to prevent memory leaks */
 void free_process(user_process_t user_process, bool self)
 {
-    /* Free the file descriptor table */
+    /* Free the file descriptor table. */
     if (user_process.fdt != NULL) {
+        if (user_process.fdt->files[0] != NULL) {
+            /* Relinquish control over stdin if I ever had it in the first place. */
+            sync_bin_sem_wait(file_sem);
+            console_open_for_read = false;
+            sync_bin_sem_post(file_sem);
+        }
         fdt_destroy(user_process.fdt);
     }
+
     /* Free all allocated memory for the syscall thread */
     if (!self && user_process.handler_thread != NULL) {
         sync_bin_sem_wait(user_process.async_sem); // (for now here) will optimize to delete unnecessary stuff before wait 
