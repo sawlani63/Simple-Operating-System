@@ -203,11 +203,11 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
     user_process->stack = frame_page(user_process->stack_frame);
 
     /* find the vsyscall table */
-    uintptr_t *sysinfo = (uintptr_t *) elf_getSectionNamed(elf_file, "__vsyscall", NULL);
+    /*uintptr_t *sysinfo = (uintptr_t *) elf_getSectionNamed(elf_file, "__vsyscall", NULL);
     if (!sysinfo || !*sysinfo) {
         ZF_LOGE("could not find syscall table for c library");
         return 0;
-    }
+    }*/
 
     /* Map in the stack frame for the user app */
     seL4_Error err = sos_map_frame(cspace, user_process->vspace, stack_bottom, REGION_RD | REGION_WR,
@@ -252,8 +252,8 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
     index = stack_write(local_stack_top, index, PAGE_SIZE_4K);
     index = stack_write(local_stack_top, index, AT_PAGESZ);
 
-    index = stack_write(local_stack_top, index, *sysinfo);
-    index = stack_write(local_stack_top, index, AT_SYSINFO);
+    //index = stack_write(local_stack_top, index, *sysinfo);
+    //index = stack_write(local_stack_top, index, AT_SYSINFO);
 
     index = stack_write(local_stack_top, index, PROCESS_IPC_BUFFER);
     index = stack_write(local_stack_top, index, AT_SEL4_IPC_BUFFER_PTR);
@@ -500,6 +500,8 @@ int start_process(char *app_name, thread_main_f *func)
     ZF_LOGI("\nStarting \"%s\"...\n", app_name);
     unsigned long elf_size;
     elf_t elf_file = {};
+    //size_t cpio_len = _cpio_archive_end - _cpio_archive;
+    //const char *elf_base = cpio_get_file(_cpio_archive, cpio_len, app_name, &elf_size);
     open_file *elf = file_create(app_name, O_RDWR, nfs_pwrite_file, nfs_pread_file);
     char *elf_base = get_elf_data(elf, &elf_size);
     if (elf_base == NULL) {
@@ -542,12 +544,12 @@ int start_process(char *app_name, thread_main_f *func)
     user_process.size++;
 
     /* load the elf image from nfs */
-    err = elf_load(&cspace, user_process.vspace, &elf_file, user_process.addrspace, &user_process.size);
+    err = elf_load(&cspace, user_process.vspace, &elf_file, user_process.addrspace, &user_process.size, elf);
     if (err) {
         ZF_LOGE("Failed to load elf image");
         free_process(user_process, false);
         return -1;
-    }
+    } // close file nfs, destroy elf
 
     init_threads(user_process.ep, user_process.ep, sched_ctrl_start, sched_ctrl_end);
 
@@ -583,12 +585,6 @@ int start_process(char *app_name, thread_main_f *func)
         free_process(user_process, false);
         return -1;
     }
-    //err = fdt_put(user_process.fdt, elf, &fd);
-    //if (err) {
-    //    ZF_LOGE("Failed to store elf file");
-    //    free_process(user_process);
-    //    return -1;
-    //}
 
     /* Start the new process */
     seL4_UserContext context = {
@@ -603,7 +599,7 @@ int start_process(char *app_name, thread_main_f *func)
         return -1;
     }
 
-    //free(elf_file.elfFile);
+    free(elf_file.elfFile);
     user_process.stime = timestamp_ms(timestamp_get_freq());
     user_process_list[user_process.pid] = user_process;
     return user_process.pid;
@@ -644,7 +640,6 @@ void syscall_proc_delete(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         seL4_SetMR(0, -1);
         return;
     }
-    ZF_LOGE("BADGE AND PID %d, %d", badge, pid);
     if (badge == (seL4_Word) pid) {
         free_process(user_process, true);
     } else {

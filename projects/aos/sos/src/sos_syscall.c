@@ -47,12 +47,12 @@ static inline bool vaddr_check(user_process_t user_process, seL4_Word vaddr) {
     return vaddr_is_mapped(user_process.addrspace, vaddr) || handle_vm_fault(vaddr, user_process.pid);
 }
 
-static inline pt_entry *get_page(user_process_t user_process, seL4_Word vaddr) {
+static inline pt_entry *get_page(addrspace_t *as, seL4_Word vaddr) {
     uint16_t l1_i = (vaddr >> 39) & MASK(9); /* Top 9 bits */
     uint16_t l2_i = (vaddr >> 30) & MASK(9); /* Next 9 bits */
     uint16_t l3_i = (vaddr >> 21) & MASK(9); /* Next 9 bits */
     uint16_t l4_i = (vaddr >> 12) & MASK(9); /* Next 9 bits */
-    return &user_process.addrspace->page_table[l1_i].l2[l2_i].l3[l3_i].l4[l4_i];
+    return &as->page_table[l1_i].l2[l2_i].l3[l3_i].l4[l4_i];
 }
 
 static inline void wakeup(UNUSED uint32_t id, UNUSED void* data)
@@ -74,7 +74,7 @@ static inline int perform_io_core(user_process_t user_process, uint16_t data_off
         return -1;
     }
 
-    pt_entry *entry = get_page(user_process, vaddr);
+    pt_entry *entry = get_page(user_process.addrspace, vaddr);
     entry->pinned = 1;
     sync_bin_sem_wait(data_sem);
     char *data = (char *)frame_data(entry->page.frame_ref);
@@ -163,7 +163,7 @@ int perform_cpy(user_process_t user_process, size_t nbyte, uintptr_t vaddr, bool
         }
 
         sync_bin_sem_wait(data_sem);
-        char *data = (char *)frame_data(get_page(user_process, vaddr)->page.frame_ref);
+        char *data = (char *)frame_data(get_page(user_process.addrspace, vaddr)->page.frame_ref);
         if (data_to_buff) {
             memcpy(buff + (nbyte - len), data + offset, len);
         } else {
@@ -424,7 +424,7 @@ void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     int res = perform_cpy(user_process, size, vaddr, false, name);
 
     seL4_Word new_vaddr = vaddr + size;
-    unsigned char *data = frame_data(get_page(user_process, vaddr)->page.frame_ref);
+    unsigned char *data = frame_data(get_page(user_process.addrspace, vaddr)->page.frame_ref);
     data[new_vaddr & (PAGE_SIZE_4K - 1)] = 0;
     nfs_close_dir(args.buff);
     
