@@ -15,6 +15,7 @@ cmake_minimum_required(VERSION 3.7.2)
 add_subdirectory(apps/console_test)
 add_subdirectory(apps/sosh)
 # add any additional apps here
+add_subdirectory(apps/console_test_2)
 
 # add sos itself, this is your OS
 # and root task

@@ -25,21 +25,21 @@
     #define NUM_FRAMES (BIT(19) - 1)
 #endif
 
-void syscall_sos_open(seL4_MessageInfo_t *reply_msg);
-void syscall_sos_close(seL4_MessageInfo_t *reply_msg);
-void syscall_sos_read(seL4_MessageInfo_t *reply_msg);
-void syscall_sos_write(seL4_MessageInfo_t *reply_msg);
-void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg);
+void syscall_sos_open(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
+void syscall_sos_close(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
+void syscall_sos_read(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
+void syscall_sos_write(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
+void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg);
-void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg);
-void syscall_sos_stat(seL4_MessageInfo_t *reply_msg);
-void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg);
+void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
+void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 
-void syscall_sys_brk(seL4_MessageInfo_t *reply_msg);
-void syscall_sys_mmap(seL4_MessageInfo_t *reply_msg);
-void syscall_sys_munmap(seL4_MessageInfo_t *reply_msg);
+void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
+void syscall_sys_mmap(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
+void syscall_sys_munmap(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 
 void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
 
 void init_semaphores(void);
 int netcon_send(open_file *file, char *data, UNUSED uint64_t offset, uint64_t len, void *callback, void *args);
+int perform_cpy(user_process_t user_process, size_t nbyte, uintptr_t vaddr, bool data_to_buff, void *buff);

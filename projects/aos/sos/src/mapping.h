@@ -13,10 +13,15 @@
 
 #include <stdbool.h>
 #include "addrspace.h"
+#include "utils.h"
+#include "threads.h"
+
+seL4_Error thread_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
+                            seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, thread_frame *curr);
 
 seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
                           seL4_CapRights_t rights, seL4_ARM_VMAttributes attr,
-                          seL4_CPtr *free_slots, seL4_Word *used, page_upper_directory *page_table);
+                          seL4_CPtr *free_slots, seL4_Word *used, page_upper_directory *page_table, thread_frame *curr);
 
 /**
  * Maps a page.
@@ -97,6 +102,8 @@ seL4_Error sos_map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr
 
 seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
                          size_t perms, frame_ref_t frame_ref, addrspace_t *as);
+
+void sos_destroy_page_table(addrspace_t *as);
 
 /*
  * Map a device and return the virtual address it is mapped to.

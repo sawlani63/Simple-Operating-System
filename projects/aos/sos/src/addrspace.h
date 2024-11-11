@@ -20,7 +20,7 @@ typedef struct _region {
 
 /* Needs to sum to 64 bits to be properly byte aligned. */
 typedef struct {
-    /* A single bit to let us know if this is entry is valid/mapped in the page table. */
+    /* A single bit to let us know if this entry is valid/mapped in the page table. */
     size_t valid : 1;
     /* A single bit to let us know whether this entry has been paged out onto disk or not. */
     size_t swapped : 1;
@@ -100,6 +100,7 @@ mem_region_t *as_define_heap(addrspace_t *as);
 mem_region_t *insert_region(addrspace_t *addrspace, size_t base, size_t size, uint64_t perms);
 mem_region_t *insert_region_at_free_slot(addrspace_t *addrspace, size_t region_size, uint64_t perms);
 void remove_region(addrspace_t *addrspace, size_t base);
+void free_region_tree(addrspace_t *addrspace);
 
 /* USED ONLY FOR DEBUGGING */
 void print_regions(addrspace_t *addrspace);

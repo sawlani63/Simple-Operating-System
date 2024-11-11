@@ -14,7 +14,7 @@ fdt *fdt_create(char *err) {
         *err = 0;
         new->size = FDT_SIZE;
         new->free_count = FDT_SIZE;
-        /* Save fd = 0 for stdout. */
+        /* Save fd = 0 for stdin. */
         for (uint32_t fd = 1; fd < FDT_SIZE; fd++) {
             new->free_list[FDT_SIZE - fd] = fd;
         }
@@ -24,11 +24,19 @@ fdt *fdt_create(char *err) {
 
 void fdt_destroy(fdt *fdt) {
     for (uint32_t i = 0; i < fdt->size; i++) {
+        if (i == 2) {
+            continue;
+        } //better way for this
         file_destroy(fdt->files[i]);
     }
     free(fdt->files);
     free(fdt->free_list);
     free(fdt);
+}
+
+void fdt_put_console(fdt *fdt, open_file *file, uint32_t *fd) {
+    *fd = 0;
+    fdt->files[0] = file;
 }
 
 int fdt_put(fdt *fdt, open_file *file, uint32_t *fd) {
@@ -47,6 +55,8 @@ int fdt_remove(fdt *fdt, uint32_t fd) {
     }
     file_destroy(fdt->files[fd]);
     fdt->files[fd] = NULL;
-    fdt->free_list[fdt->free_count++] = fd;
+    if (fd != 0) {
+        fdt->free_list[fdt->free_count++] = fd;
+    }
     return 0;
 }

@@ -109,37 +109,49 @@ int sos_stat(const char *path, sos_stat_t *buf)
 
 pid_t sos_process_create(const char *path)
 {
-    seL4_SetMR(0, 0);
-    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
+    if (path == NULL) {
+        return -1;
+    }
+
+    seL4_SetMR(0, SYSCALL_PROC_CREATE);
+    seL4_SetMR(1, (seL4_Word) path);
+    seL4_SetMR(2, strlen(path));
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 3));
     return seL4_GetMR(0);
 }
 
 int sos_process_delete(pid_t pid)
 {
-    seL4_SetMR(0, 0);
-    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
+    seL4_SetMR(0, SYSCALL_PROC_DELETE);
+    seL4_SetMR(1, (seL4_Word) pid);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 2));
     return seL4_GetMR(0);
 }
 
 pid_t sos_my_id(void)
 {
-    seL4_SetMR(0, 0);
+    seL4_SetMR(0, SYSCALL_PROC_GETID);
     seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
     return seL4_GetMR(0);
-
 }
 
 int sos_process_status(sos_process_t *processes, unsigned max)
 {
-    seL4_SetMR(0, 0);
-    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
+    if (!max) {
+        return -1;
+    }
+    seL4_SetMR(0, SYSCALL_PROC_STATUS);
+    seL4_SetMR(1, (seL4_Word) processes);
+    seL4_SetMR(2, max);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 3));
     return seL4_GetMR(0);
 }
 
 pid_t sos_process_wait(pid_t pid)
 {
-    seL4_SetMR(0, 0);
-    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
+    seL4_SetMR(0, SYSCALL_PROC_WAIT);
+    seL4_SetMR(1, (pid_t) pid);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 2));
     return seL4_GetMR(0);
 }
 

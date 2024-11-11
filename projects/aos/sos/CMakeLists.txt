@@ -74,6 +74,7 @@ add_executable(
     src/thread_pool.c
     src/console.c
     src/clock_replacement.c
+    src/process.c
 )
 target_include_directories(sos PRIVATE "include")
 target_link_libraries(

@@ -9,6 +9,9 @@
 #include <stdint.h>
 #include <elf/elf.h>
 
+#include <stdio.h>
+#include <elf.h>
+
 /* ELF header functions */
 int elf64_checkFile(elf_t *elf);
 
