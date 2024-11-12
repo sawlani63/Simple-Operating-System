@@ -288,29 +288,63 @@ void sos_destroy_page_table(addrspace_t *as)
                 }
                 for (size_t m = 0; m < PAGE_TABLE_ENTRIES; m++) {
                     pt_entry entry = l4_pt[m];
-                    if (entry.valid == 0 && entry.swapped == 0) {
+                    /*if (entry.valid == 0 && entry.swapped == 0) {
+                        continue;
+                    }*/
+                    if (entry.page.frame_cptr == seL4_CapNull) {
                         continue;
                     }
                     seL4_CPtr frame_cptr = entry.page.frame_cptr;
-                    seL4_ARM_Page_Unmap(frame_cptr);
+                    seL4_Error err = seL4_ARM_Page_Unmap(frame_cptr);
+                    if (err != seL4_NoError) {
+                        ZF_LOGE("Failed to unmap");
+                        return;
+                    }
                     free_untype(&frame_cptr, NULL);
                     free_frame(entry.page.frame_ref);
                     l4_pt[m] = (pt_entry){0};
                 }
-                if (l3_pt[k].slot != seL4_CapNull) {
-                    seL4_ARM_PageTable_Unmap(l3_pt[k].slot);
-                }
-                free_untype(&l3_pt[k].slot, l3_pt[k].ut);
                 free(l4_pt);
             }
+        }
+    }
+
+    for (size_t i = 0; i < PAGE_TABLE_ENTRIES; i++) {
+        page_directory *l2_pt = l1_pt[i].l2;
+        if (l2_pt == NULL) {
+            continue;
+        }
+        for (size_t j = 0; j < PAGE_TABLE_ENTRIES; j++) {
+            page_table *l3_pt = l2_pt[j].l3;
+            if (l3_pt == NULL) {
+                continue;
+            }
+            for (size_t k = 0; k < PAGE_TABLE_ENTRIES; k++) {
+                if (l3_pt[k].slot != seL4_CapNull) {
+                    seL4_Error err = seL4_ARM_PageTable_Unmap(l3_pt[k].slot);
+                    if (err != seL4_NoError) {
+                        ZF_LOGE("Failed to unmap");
+                        return;
+                    }
+                }
+                free_untype(&l3_pt[k].slot, l3_pt[k].ut);
+            }
             if (l2_pt[j].slot != seL4_CapNull) {
-                seL4_ARM_PageTable_Unmap(l2_pt[j].slot);
+                seL4_Error err = seL4_ARM_PageTable_Unmap(l2_pt[j].slot);
+                if (err != seL4_NoError) {
+                    ZF_LOGE("Failed to unmap");
+                    return;
+                }
             }
             free_untype(&l2_pt[j].slot, l2_pt[j].ut);
             free(l3_pt);
         }
         if (l1_pt[i].slot != seL4_CapNull) {
-            seL4_ARM_PageTable_Unmap(l1_pt[i].slot);
+            seL4_Error err = seL4_ARM_PageTable_Unmap(l1_pt[i].slot);
+            if (err != seL4_NoError) {
+                ZF_LOGE("Failed to unmap");
+                return;
+            }
         }
         free_untype(&l1_pt[i].slot, l1_pt[i].ut);
         free(l2_pt);

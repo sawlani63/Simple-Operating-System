@@ -80,11 +80,8 @@ typedef struct user_process {
     ut_t *ep_ut;
     seL4_CPtr reply;
     ut_t *reply_ut;
-    seL4_CPtr wake;
-    ut_t *wake_ut;
 
     seL4_CPtr ep_slot;
-    seL4_CPtr ntfn_slot;
     ut_t *tcb_ut;
     seL4_CPtr tcb;
     ut_t *vspace_ut;

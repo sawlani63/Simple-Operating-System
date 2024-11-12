@@ -231,13 +231,13 @@ int main(void)
     assert(!res);
 
     printf("Passed 0\n");
-    for (int i = 0; i < 16; i++) { // testing proc delete
+    for (int i = 0; i < 2000; i++) { // testing proc delete
         int pid = sos_process_create("console_test_2");
         if (pid == -1) {
             break;
         }
-        //int res = sos_process_delete(pid);
-        //assert(res == 0);
+        int res = sos_process_delete(pid);
+        assert(res == 0);
         printf("Passed %d\n", i + 1);
     }
     printf("Passed process delete test\n");
