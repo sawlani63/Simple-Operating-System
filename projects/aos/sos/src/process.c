@@ -11,19 +11,21 @@ extern char _cpio_archive_end[];
 
 #define APP_PRIORITY         (0)
 
-struct {
-    uint8_t *pid_queue;
-    size_t queue_head;
-} pid_manager = {.queue_head = 0};
-
 extern seL4_CPtr sched_ctrl_start;
 extern seL4_CPtr sched_ctrl_end;
 extern seL4_CPtr nfs_signal;
+extern bool console_open_for_read;
+extern sync_bin_sem_t *file_sem;
 thread_main_f *handler_func = NULL;
 
+seL4_CPtr proc_signal; // for waiting on pid -1
 user_process_t *user_process_list;
+pid_t *pid_queue;
+int pid_queue_head = 0;
+int pid_queue_tail = NUM_PROC - 1;
 
-seL4_CPtr proc_signal;
+sync_bin_sem_t *pid_queue_sem = NULL;
+sync_bin_sem_t *process_list_sem = NULL;
 
 int init_proc()
 {
@@ -31,41 +33,67 @@ int init_proc()
     if (user_process_list == NULL) {
         return 1;
     }
-    pid_manager.pid_queue = calloc(NUM_PROC, sizeof(uint8_t));
-    if (pid_manager.pid_queue == NULL) {
+    pid_queue = malloc(NUM_PROC * sizeof(pid_t));
+    if (pid_queue == NULL) {
         free(user_process_list);
         return 1;
     }
     /* Never freed so we don't keep track */
     ut_t *ut = alloc_retype(&proc_signal, seL4_EndpointObject, seL4_EndpointBits);
-    if (proc_signal == seL4_CapNull) {
+    if (proc_signal == seL4_CapNull || ut == NULL) {
         ZF_LOGE("No memory for notifications");
-        free(pid_manager.pid_queue);
+        free(pid_queue);
         free(user_process_list);
         return 1;
     }
     /* Put all the possible pids in the queue */
-    for (uint8_t i = 0; i < NUM_PROC; i++) {
-        pid_manager.pid_queue[i] = i + 1;
+    for (int i = 0; i < NUM_PROC; i++) {
+        pid_queue[i] = i;
     }
+
+    pid_queue_sem = malloc(sizeof(sync_bin_sem_t));
+    ZF_LOGF_IF(!pid_queue_sem, "No memory for new semaphore object");
+    seL4_CPtr pid_manager_cptr;
+    ut = alloc_retype(&pid_manager_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!ut, "No memory for notification");
+    sync_bin_sem_init(pid_queue_sem, pid_manager_cptr, 1);
+
+    process_list_sem = malloc(sizeof(sync_bin_sem_t));
+    ZF_LOGF_IF(!process_list_sem, "No memory for new semaphore object");
+    seL4_CPtr process_list_cptr;
+    ut = alloc_retype(&process_list_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!ut, "No memory for notification");
+    sync_bin_sem_init(process_list_sem, process_list_cptr, 1);
     return 0;
 }
 
-pid_t get_pid()
-{
-    size_t head_pos = pid_manager.queue_head;
-    do {
-        if (pid_manager.pid_queue[pid_manager.queue_head] == (pid_manager.queue_head + 1)) {
-            uint8_t pid = pid_manager.pid_queue[pid_manager.queue_head] - 1;
-            pid_manager.pid_queue[pid_manager.queue_head] = 0;
-            pid_manager.queue_head = (pid_manager.queue_head + 1) % NUM_PROC;
-            return ((pid_t) pid);
-        }
-        if (pid_manager.pid_queue[pid_manager.queue_head] == 0) {
-            pid_manager.queue_head = (pid_manager.queue_head + 1) % NUM_PROC;
-        }
-    } while (head_pos != pid_manager.queue_head);
-    return -1;
+static pid_t get_pid() {
+    sync_bin_sem_wait(pid_queue_sem);
+
+    if (pid_queue_head == pid_queue_tail) {
+        sync_bin_sem_post(pid_queue_sem);
+        return -1;
+    }
+
+    pid_t pid = pid_queue[pid_queue_head];
+    pid_queue_head = (pid_queue_head + 1) % NUM_PROC;
+
+    sync_bin_sem_post(pid_queue_sem);
+    return pid;
+}
+
+static void free_pid(pid_t pid) {
+    sync_bin_sem_wait(pid_queue_sem);
+
+    if ((pid_queue_tail + 1) % NUM_PROC == pid_queue_head) {
+        sync_bin_sem_post(pid_queue_sem);
+        return;
+    }
+
+    pid_queue[pid_queue_tail] = pid;
+    pid_queue_tail = (pid_queue_tail + 1) % NUM_PROC;
+
+    sync_bin_sem_post(pid_queue_sem);
 }
 
 char *get_elf_header(open_file *file, unsigned long *elf_size)
@@ -155,7 +183,9 @@ void free_process(user_process_t user_process, bool self)
     free(user_process.async_sem);
     uint8_t id = (uint8_t) user_process.pid;
     user_process_list[(pid_t) id] = (user_process_t){0};
-    pid_manager.pid_queue[id] = id + 1;
+    free_pid(id);
+    free_untype(&user_process.handler_busy_cptr, user_process.handler_busy_ut);
+    free(user_process.handler_busy_sem);
     if (self && user_process.handler_thread != NULL) {
         /* Free all allocated memory for the syscall thread */
         thread_destroy(user_process.handler_thread);
@@ -333,6 +363,20 @@ int start_process(char *app_name, thread_main_f *func)
         return -1;
     }
     sync_bin_sem_init(user_process.async_sem, user_process.async_cptr, 1);
+
+    user_process.handler_busy_sem = malloc(sizeof(sync_bin_sem_t));
+    if (user_process.handler_busy_sem == NULL) {
+        ZF_LOGE("No memory for new semaphore object");
+        free_process(user_process, false);
+        return -1;
+    }
+    user_process.handler_busy_ut = alloc_retype(&user_process.handler_busy_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    if (user_process.handler_busy_cptr == seL4_CapNull) {
+        ZF_LOGE("No memory for new notification object");
+        free_process(user_process, false);
+        return -1;
+    }
+    sync_bin_sem_init(user_process.handler_busy_sem, user_process.handler_busy_cptr, 1);
 
     user_process.ep_ut = alloc_retype(&user_process.ep, seL4_EndpointObject, seL4_EndpointBits);
     if (user_process.ep == seL4_CapNull) {
@@ -600,7 +644,9 @@ void syscall_proc_create(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d", SYSCALL_PROC_CREATE);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    sync_bin_sem_wait(process_list_sem);
     user_process_t user_process = user_process_list[badge];
+    sync_bin_sem_post(process_list_sem);
 
     seL4_Word vaddr = seL4_GetMR(1);
     int len = seL4_GetMR(2) + 1;
@@ -626,11 +672,14 @@ void syscall_proc_delete(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         seL4_SetMR(0, -1);
         return;
     }
+    sync_bin_sem_wait(process_list_sem);
     user_process_t user_process = user_process_list[pid];
+    sync_bin_sem_post(process_list_sem);
     if (user_process.stime == 0) {
         seL4_SetMR(0, -1);
         return;
     }
+    ZF_LOGE("Process %d deleting process %d", badge, pid);
     if (badge == (seL4_Word) pid) {
         free_process(user_process, true);
     } else {
@@ -643,23 +692,31 @@ void syscall_proc_getid(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d", SYSCALL_PROC_GETID);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    seL4_SetMR(0, user_process_list[badge].pid);
+    sync_bin_sem_wait(process_list_sem);
+    pid_t pid = user_process_list[badge].pid;
+    sync_bin_sem_post(process_list_sem);
+    seL4_SetMR(0, pid);
 }
 
 void syscall_proc_status(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d", SYSCALL_PROC_STATUS);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    user_process_t user_process = user_process_list[badge];
     seL4_Word vaddr = seL4_GetMR(1);
     unsigned max = seL4_GetMR(2);
+    sync_bin_sem_wait(process_list_sem);
+    user_process_t user_process = user_process_list[badge];
+    sync_bin_sem_post(process_list_sem);
 
     unsigned num_proc = 0;
     for (int i = 0; i < NUM_PROC; i++) {
+        sync_bin_sem_wait(process_list_sem);
         if (user_process_list[i].stime == 0) {
+            sync_bin_sem_post(process_list_sem);
             continue;
         }
         user_process_t process = user_process_list[i];
+        sync_bin_sem_post(process_list_sem);
         sos_process_t pinfo = {.pid = process.pid, .size = process.size, .stime = process.stime};
         for (size_t i = 0; i < strlen(process.app_name); i++) {
             pinfo.command[i] = process.app_name[i];
@@ -688,9 +745,15 @@ void syscall_proc_wait(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         seL4_SetMR(0, -1);
         return;
     }
+    
+    sync_bin_sem_wait(process_list_sem);
+    user_process_t my_process = user_process_list[badge];
+    sync_bin_sem_post(process_list_sem);
 
     if (pid >= 0) {
+        sync_bin_sem_wait(process_list_sem);
         user_process_t user_process = user_process_list[pid];
+        sync_bin_sem_post(process_list_sem);
         seL4_Wait(user_process.wake, 0);
         seL4_SetMR(0, pid);
     } else {
