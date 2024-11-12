@@ -47,7 +47,7 @@
 #include "fs.h"
 
 /* Number of concurrently running processes supported */
-#define NUM_PROC 16
+#define NUM_PROC 32
 
 #define N_NAME 32
 
@@ -68,9 +68,13 @@ typedef struct user_process {
     fdt *fdt;
     sos_thread_t *handler_thread;
 
-    sync_bin_sem_t *async_sem; // remove malloc for this
+    sync_bin_sem_t *async_sem;
     seL4_CPtr async_cptr;
     ut_t *async_ut;
+
+    sync_bin_sem_t *handler_busy_sem;
+    seL4_CPtr handler_busy_cptr;
+    ut_t *handler_busy_ut;
 
     seL4_CPtr ep;
     ut_t *ep_ut;

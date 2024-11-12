@@ -11,19 +11,21 @@ extern char _cpio_archive_end[];
 
 #define APP_PRIORITY         (0)
 
-struct {
-    uint8_t *pid_queue;
-    size_t queue_head;
-} pid_manager = {.queue_head = 0};
-
 extern seL4_CPtr sched_ctrl_start;
 extern seL4_CPtr sched_ctrl_end;
 extern seL4_CPtr nfs_signal;
+extern bool console_open_for_read;
+extern sync_bin_sem_t *file_sem;
 thread_main_f *handler_func = NULL;
 
+seL4_CPtr proc_signal; // for waiting on pid -1
 user_process_t *user_process_list;
+pid_t *pid_queue;
+int pid_queue_head = 0;
+int pid_queue_tail = NUM_PROC - 1;
 
-seL4_CPtr proc_signal;
+sync_bin_sem_t *pid_queue_sem = NULL;
+sync_bin_sem_t *process_list_sem = NULL;
 
 int init_proc()
 {
@@ -31,44 +33,70 @@ int init_proc()
     if (user_process_list == NULL) {
         return 1;
     }
-    pid_manager.pid_queue = calloc(NUM_PROC, sizeof(uint8_t));
-    if (pid_manager.pid_queue == NULL) {
+    pid_queue = malloc(NUM_PROC * sizeof(pid_t));
+    if (pid_queue == NULL) {
         free(user_process_list);
         return 1;
     }
     /* Never freed so we don't keep track */
     ut_t *ut = alloc_retype(&proc_signal, seL4_EndpointObject, seL4_EndpointBits);
-    if (proc_signal == seL4_CapNull) {
+    if (proc_signal == seL4_CapNull || ut == NULL) {
         ZF_LOGE("No memory for notifications");
-        free(pid_manager.pid_queue);
+        free(pid_queue);
         free(user_process_list);
         return 1;
     }
     /* Put all the possible pids in the queue */
-    for (uint8_t i = 0; i < NUM_PROC; i++) {
-        pid_manager.pid_queue[i] = i + 1;
+    for (int i = 0; i < NUM_PROC; i++) {
+        pid_queue[i] = i;
     }
+
+    pid_queue_sem = malloc(sizeof(sync_bin_sem_t));
+    ZF_LOGF_IF(!pid_queue_sem, "No memory for new semaphore object");
+    seL4_CPtr pid_manager_cptr;
+    ut = alloc_retype(&pid_manager_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!ut, "No memory for notification");
+    sync_bin_sem_init(pid_queue_sem, pid_manager_cptr, 1);
+
+    process_list_sem = malloc(sizeof(sync_bin_sem_t));
+    ZF_LOGF_IF(!process_list_sem, "No memory for new semaphore object");
+    seL4_CPtr process_list_cptr;
+    ut = alloc_retype(&process_list_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!ut, "No memory for notification");
+    sync_bin_sem_init(process_list_sem, process_list_cptr, 1);
     return 0;
 }
 
-pid_t get_pid()
-{
-    size_t head_pos = pid_manager.queue_head;
-    do {
-        if (pid_manager.pid_queue[pid_manager.queue_head] == (pid_manager.queue_head + 1)) {
-            uint8_t pid = pid_manager.pid_queue[pid_manager.queue_head] - 1;
-            pid_manager.pid_queue[pid_manager.queue_head] = 0;
-            pid_manager.queue_head = (pid_manager.queue_head + 1) % NUM_PROC;
-            return ((pid_t) pid);
-        }
-        if (pid_manager.pid_queue[pid_manager.queue_head] == 0) {
-            pid_manager.queue_head = (pid_manager.queue_head + 1) % NUM_PROC;
-        }
-    } while (head_pos != pid_manager.queue_head);
-    return -1;
+static pid_t get_pid() {
+    sync_bin_sem_wait(pid_queue_sem);
+
+    if (pid_queue_head == pid_queue_tail) {
+        sync_bin_sem_post(pid_queue_sem);
+        return -1;
+    }
+
+    pid_t pid = pid_queue[pid_queue_head];
+    pid_queue_head = (pid_queue_head + 1) % NUM_PROC;
+
+    sync_bin_sem_post(pid_queue_sem);
+    return pid;
 }
 
-char *get_elf_data(open_file *file, unsigned long *elf_size)
+static void free_pid(pid_t pid) {
+    sync_bin_sem_wait(pid_queue_sem);
+
+    if ((pid_queue_tail + 1) % NUM_PROC == pid_queue_head) {
+        sync_bin_sem_post(pid_queue_sem);
+        return;
+    }
+
+    pid_queue[pid_queue_tail] = pid;
+    pid_queue_tail = (pid_queue_tail + 1) % NUM_PROC;
+
+    sync_bin_sem_post(pid_queue_sem);
+}
+
+char *get_elf_header(open_file *file, unsigned long *elf_size)
 {
     io_args args = {.signal_cap = nfs_signal};
     int error = nfs_open_file(file, nfs_async_open_cb, &args);
@@ -94,77 +122,81 @@ char *get_elf_data(open_file *file, unsigned long *elf_size)
 
     Elf64_Ehdr const *header = (void *) data;
     *elf_size = header->e_shoff + (header->e_shentsize * header->e_shnum);
-    uint32_t header_size = header->e_ehsize + (header->e_phentsize * header->e_phnum) + (header->e_shentsize * header->e_shnum);
-    data = realloc(data, header_size);
-    unsigned long elf_soff = (header->e_ehsize + (header->e_phentsize * header->e_phnum));
-    args.buff = data + elf_soff;
-
-    error = nfs_pread_file(file, NULL, header->e_shoff, (header->e_shentsize * header->e_shnum), nfs_pagefile_read_cb, &args);
-    if (error < (int) (header->e_shentsize * header->e_shnum)) {
-        ZF_LOGE("NFS: Error in reading ELF");
-        free(data);
-        return NULL;
-    }
-    seL4_Wait(nfs_signal, 0);
-    if (args.err < 0) {
-        free(data);
-        return NULL;
-    }
     return data;
 }
 
+extern bool console_open_for_read;
+extern sync_bin_sem_t *file_sem;
 /* helper to conduct freeing operations in the event of an error in a function to prevent memory leaks */
-void free_process(user_process_t user_process, bool self)
+void free_process(user_process_t user_process, bool suicidal)
 {
-    /* Free the file descriptor table */
-    if (user_process.fdt != NULL) {
-        fdt_destroy(user_process.fdt);
-    }
-    /* Free all allocated memory for the syscall thread */
-    if (!self && user_process.handler_thread != NULL) {
-        sync_bin_sem_wait(user_process.async_sem); // (for now here) will optimize to delete unnecessary stuff before wait 
-        thread_destroy(user_process.handler_thread);
-    }
-    /* Free the heap region in the address space */
-    remove_region(user_process.addrspace, PROCESS_HEAP_START);
-    /* Free the stack region */
-    remove_region(user_process.addrspace, PROCESS_STACK_TOP - PAGE_SIZE_4K);
-    /* Free the scheduling context and tcb */
+    /**
+     * At this stage there can be two types of threads that call free_process.
+     * 1. A thread trying to kill a separate thread.
+     * 2. A thread trying to kill itself (a suicidal thread).
+     * We need to be particularly careful with suicidal threads as we MUST deallocate their handler last.
+     */
+
+    /* Free the scheduling context and tcb for the user process. We will do this first to halt the process. */
     free_untype(&user_process.sched_context, user_process.sched_context_ut);
     free_untype(&user_process.tcb, user_process.tcb_ut);
-    /* Delete the ep from the user process cspace if in that cspace and free the slot */
-    if (!cspace_delete(&user_process.cspace, user_process.ep_slot)) {
-        cspace_free_slot(&user_process.cspace, user_process.ep_slot);
+
+    /* Wait for outstanding I/O to finish before starting to free the rest of the process. */
+    if (user_process.async_sem != NULL) {
+        sync_bin_sem_wait(user_process.async_sem);
+        free_untype(&user_process.async_cptr, user_process.async_ut);
+        free(user_process.async_sem);
     }
-    /* Free the ipc buffer region */
-    remove_region(user_process.addrspace, PROCESS_IPC_BUFFER);
-    /* Free the user process page table and address space */
+
+    /* Free the file descriptor table. */
+    if (user_process.fdt != NULL) {
+        if (user_process.fdt->files[0] != NULL) {
+            /* Relinquish control over stdin if I ever had it in the first place. */
+            sync_bin_sem_wait(file_sem);
+            console_open_for_read = false;
+            sync_bin_sem_post(file_sem);
+        }
+        fdt_destroy(user_process.fdt);
+    }
+
+    /* Destroy EVERY region and page including the intermediate structures in the region rb-tree and shadow page table. */
     if (user_process.addrspace->page_table != NULL) {
         sos_destroy_page_table(user_process.addrspace);
         free_region_tree(user_process.addrspace);
         free(user_process.addrspace);
     }
-    /* Destroy the user process cspace */
+
+    /* Destroy the user process cspace. This destroys all the caps inside of this cspace as well. */
     if (&user_process.cspace != NULL) {
         cspace_destroy(&user_process.cspace);
     }
+
+    /* Mark the pid as free in the pid_queue, and zero out the entry in the user process list. */
+    sync_bin_sem_wait(process_list_sem);
+    user_process_list[user_process.pid] = (user_process_t){0};
+    sync_bin_sem_post(process_list_sem);
+    free_pid(user_process.pid);
+
+    /* Signal all the other processes waiting on the process that is marked as deleted. */
     for (int i = 0; i < NUM_PROC; i++) {
         seL4_Signal(user_process.wake);
         seL4_SetMR(0, (seL4_Word) user_process.pid);
         seL4_NBSend(proc_signal, seL4_MessageInfo_new(0, 0, 0, 1));
     }
+
+    /* Free the remainder of the untyped memory and caps for the process, including the VSpace and other ntfn/ep objects. */
     free_untype(&user_process.wake, user_process.wake_ut);
     free_untype(&user_process.reply, user_process.reply_ut);
-    /* Free the user process vspace and ep (vspace unassigned from ASID upon freeing) */
-    free_untype(&user_process.vspace, user_process.vspace_ut);
     free_untype(&user_process.ep, user_process.ep_ut);
-    free_untype(&user_process.async_cptr, user_process.async_ut);
-    free(user_process.async_sem);
-    uint8_t id = (uint8_t) user_process.pid;
-    user_process_list[(pid_t) id] = (user_process_t){0};
-    pid_manager.pid_queue[id] = id + 1;
-    if (self && user_process.handler_thread != NULL) {
-        /* Free all allocated memory for the syscall thread */
+    free_untype(&user_process.vspace, user_process.vspace_ut);
+
+    /* Finally, destroy the process's handling thread. Always doing this last makes it safe to call for suicidal threads. */
+    if (user_process.handler_thread != NULL) {
+        if (!suicidal) {
+            sync_bin_sem_wait(user_process.handler_busy_sem);
+        }
+        free_untype(&user_process.handler_busy_cptr, user_process.handler_busy_ut);
+        free(user_process.handler_busy_sem);
         thread_destroy(user_process.handler_thread);
     }
 }
@@ -203,11 +235,11 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
     user_process->stack = frame_page(user_process->stack_frame);
 
     /* find the vsyscall table */
-    uintptr_t *sysinfo = (uintptr_t *) elf_getSectionNamed(elf_file, "__vsyscall", NULL);
+    /*uintptr_t *sysinfo = (uintptr_t *) elf_getSectionNamed(elf_file, "__vsyscall", NULL);
     if (!sysinfo || !*sysinfo) {
         ZF_LOGE("could not find syscall table for c library");
         return 0;
-    }
+    }*/
 
     /* Map in the stack frame for the user app */
     seL4_Error err = sos_map_frame(cspace, user_process->vspace, stack_bottom, REGION_RD | REGION_WR,
@@ -252,8 +284,8 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
     index = stack_write(local_stack_top, index, PAGE_SIZE_4K);
     index = stack_write(local_stack_top, index, AT_PAGESZ);
 
-    index = stack_write(local_stack_top, index, *sysinfo);
-    index = stack_write(local_stack_top, index, AT_SYSINFO);
+    //index = stack_write(local_stack_top, index, *sysinfo);
+    //index = stack_write(local_stack_top, index, AT_SYSINFO);
 
     index = stack_write(local_stack_top, index, PROCESS_IPC_BUFFER);
     index = stack_write(local_stack_top, index, AT_SEL4_IPC_BUFFER_PTR);
@@ -315,14 +347,13 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
  */
 int start_process(char *app_name, thread_main_f *func)
 {
-    user_process_t user_process;
+    user_process_t user_process = (user_process_t) {0};
     user_process.pid = get_pid();
     if (user_process.pid == -1) {
         ZF_LOGE("Ran out of IDs for processes");
         return -1;
     }
     user_process.app_name = app_name;
-    user_process.size = 0;
 
     if (func != NULL) {
         handler_func = func;
@@ -341,6 +372,20 @@ int start_process(char *app_name, thread_main_f *func)
         return -1;
     }
     sync_bin_sem_init(user_process.async_sem, user_process.async_cptr, 1);
+
+    user_process.handler_busy_sem = malloc(sizeof(sync_bin_sem_t));
+    if (user_process.handler_busy_sem == NULL) {
+        ZF_LOGE("No memory for new semaphore object");
+        free_process(user_process, false);
+        return -1;
+    }
+    user_process.handler_busy_ut = alloc_retype(&user_process.handler_busy_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    if (user_process.handler_busy_cptr == seL4_CapNull) {
+        ZF_LOGE("No memory for new notification object");
+        free_process(user_process, false);
+        return -1;
+    }
+    sync_bin_sem_init(user_process.handler_busy_sem, user_process.handler_busy_cptr, 1);
 
     user_process.ep_ut = alloc_retype(&user_process.ep, seL4_EndpointObject, seL4_EndpointBits);
     if (user_process.ep == seL4_CapNull) {
@@ -501,7 +546,7 @@ int start_process(char *app_name, thread_main_f *func)
     unsigned long elf_size;
     elf_t elf_file = {};
     open_file *elf = file_create(app_name, O_RDWR, nfs_pwrite_file, nfs_pread_file);
-    char *elf_base = get_elf_data(elf, &elf_size);
+    char *elf_base = get_elf_header(elf, &elf_size);
     if (elf_base == NULL) {
         ZF_LOGE("Unable to open or read %s from NFS", app_name);
         free_process(user_process, false);
@@ -542,12 +587,13 @@ int start_process(char *app_name, thread_main_f *func)
     user_process.size++;
 
     /* load the elf image from nfs */
-    err = elf_load(&cspace, user_process.vspace, &elf_file, user_process.addrspace, &user_process.size);
+    err = elf_load(&cspace, user_process.vspace, &elf_file, user_process.addrspace, &user_process.size, elf);
     if (err) {
         ZF_LOGE("Failed to load elf image");
         free_process(user_process, false);
         return -1;
     }
+    file_destroy(elf);
 
     init_threads(user_process.ep, user_process.ep, sched_ctrl_start, sched_ctrl_end);
 
@@ -583,12 +629,6 @@ int start_process(char *app_name, thread_main_f *func)
         free_process(user_process, false);
         return -1;
     }
-    //err = fdt_put(user_process.fdt, elf, &fd);
-    //if (err) {
-    //    ZF_LOGE("Failed to store elf file");
-    //    free_process(user_process);
-    //    return -1;
-    //}
 
     /* Start the new process */
     seL4_UserContext context = {
@@ -603,7 +643,7 @@ int start_process(char *app_name, thread_main_f *func)
         return -1;
     }
 
-    //free(elf_file.elfFile);
+    free(elf_file.elfFile);
     user_process.stime = timestamp_ms(timestamp_get_freq());
     user_process_list[user_process.pid] = user_process;
     return user_process.pid;
@@ -613,7 +653,9 @@ void syscall_proc_create(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d", SYSCALL_PROC_CREATE);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    sync_bin_sem_wait(process_list_sem);
     user_process_t user_process = user_process_list[badge];
+    sync_bin_sem_post(process_list_sem);
 
     seL4_Word vaddr = seL4_GetMR(1);
     int len = seL4_GetMR(2) + 1;
@@ -639,12 +681,14 @@ void syscall_proc_delete(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         seL4_SetMR(0, -1);
         return;
     }
+    sync_bin_sem_wait(process_list_sem);
     user_process_t user_process = user_process_list[pid];
+    sync_bin_sem_post(process_list_sem);
     if (user_process.stime == 0) {
         seL4_SetMR(0, -1);
         return;
     }
-    ZF_LOGE("BADGE AND PID %d, %d", badge, pid);
+    ZF_LOGE("Process %d deleting process %d", badge, pid);
     if (badge == (seL4_Word) pid) {
         free_process(user_process, true);
     } else {
@@ -657,23 +701,31 @@ void syscall_proc_getid(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d", SYSCALL_PROC_GETID);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    seL4_SetMR(0, user_process_list[badge].pid);
+    sync_bin_sem_wait(process_list_sem);
+    pid_t pid = user_process_list[badge].pid;
+    sync_bin_sem_post(process_list_sem);
+    seL4_SetMR(0, pid);
 }
 
 void syscall_proc_status(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d", SYSCALL_PROC_STATUS);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    user_process_t user_process = user_process_list[badge];
     seL4_Word vaddr = seL4_GetMR(1);
     unsigned max = seL4_GetMR(2);
+    sync_bin_sem_wait(process_list_sem);
+    user_process_t user_process = user_process_list[badge];
+    sync_bin_sem_post(process_list_sem);
 
     unsigned num_proc = 0;
     for (int i = 0; i < NUM_PROC; i++) {
+        sync_bin_sem_wait(process_list_sem);
         if (user_process_list[i].stime == 0) {
+            sync_bin_sem_post(process_list_sem);
             continue;
         }
         user_process_t process = user_process_list[i];
+        sync_bin_sem_post(process_list_sem);
         sos_process_t pinfo = {.pid = process.pid, .size = process.size, .stime = process.stime};
         for (size_t i = 0; i < strlen(process.app_name); i++) {
             pinfo.command[i] = process.app_name[i];
@@ -702,10 +754,18 @@ void syscall_proc_wait(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         seL4_SetMR(0, -1);
         return;
     }
+    
+    sync_bin_sem_wait(process_list_sem);
+    user_process_t my_process = user_process_list[badge];
+    sync_bin_sem_post(process_list_sem);
 
     if (pid >= 0) {
+        sync_bin_sem_wait(process_list_sem);
         user_process_t user_process = user_process_list[pid];
+        sync_bin_sem_post(process_list_sem);
+        sync_bin_sem_post(my_process.handler_busy_sem);
         seL4_Wait(user_process.wake, 0);
+        sync_bin_sem_wait(my_process.handler_busy_sem);
         seL4_SetMR(0, pid);
     } else {
         seL4_CPtr reply;
