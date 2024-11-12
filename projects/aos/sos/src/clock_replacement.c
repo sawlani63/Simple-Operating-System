@@ -3,7 +3,7 @@
 #define GET_PAGE(pt, vaddr) pt[(vaddr >> 39) & MASK(9)].l2[(vaddr >> 30) & MASK(9)].l3[(vaddr >> 21) & MASK(9)].l4[(vaddr >> 12) & MASK(9)]
 #define SWAPMAP_SIZE (128 * 1024)                           // 128KB in bytes
 #define NUM_BLOCKS (SWAPMAP_SIZE * 8)                       // Total number of 4KB blocks in 4GB (can be stored in an int)
-#define QUEUE_SIZE (PAGE_SIZE_4K / sizeof(uint32_t) )       // 4KB queue size (1024 entries cached)
+#define QUEUE_SIZE (PAGE_SIZE_4K / sizeof(uint32_t))       // 4KB queue size (1024 entries cached)
 
 struct {
     seL4_Word circular_buffer[NUM_FRAMES];  // Data structure holding the circular buffer
@@ -21,7 +21,6 @@ struct {
     seL4_CPtr page_notif;                   // Notification object to wait on pagefile
 } swap_manager = {.clock_hand = 0, .curr_size = 0, .curr_offset = 0, .queue_head = 0, .queue_tail = 0, .queue_size = 0};
 
-extern struct user_process user_process;
 extern open_file *nfs_pagefile;
 
 // Initialize bitmap (0 means free, 1 means used)
@@ -95,8 +94,7 @@ static inline uint64_t get_page_file_offset() {
  * The corresponding frame is then unmapped from the hardware page table.
  * @return 0 on success and 1 on failure
  */
-static int clock_page_out() {
-    addrspace_t *as = user_process.addrspace;
+static int clock_page_out(addrspace_t *as) {
     seL4_Word vaddr;
     pt_entry entry;
     while (1) {
@@ -145,9 +143,9 @@ static int clock_page_out() {
     return 0;
 }
 
-int clock_add_page(seL4_Word vaddr) {
+int clock_add_page(addrspace_t *as, seL4_Word vaddr) {
     if (swap_manager.curr_size == NUM_FRAMES) {
-        if (clock_page_out()) {
+        if (clock_page_out(as)) {
             return 1;
         }
     } else {
@@ -159,7 +157,9 @@ int clock_add_page(seL4_Word vaddr) {
     return 0;
 }
 
-int clock_try_page_in(seL4_Word vaddr, addrspace_t *as) {
+int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
+    addrspace_t *as = user_process->addrspace;
+
     uint16_t l1_index = (vaddr >> 39) & MASK(9); /* Top 9 bits */
     uint16_t l2_index = (vaddr >> 30) & MASK(9); /* Next 9 bits */
     uint16_t l3_index = (vaddr >> 21) & MASK(9); /* Next 9 bits */
@@ -187,7 +187,7 @@ int clock_try_page_in(seL4_Word vaddr, addrspace_t *as) {
         frame_ref = l4_pt[l4_index].page.frame_ref;
     } else if (l4_pt[l4_index].swapped == 1) {
         /* Allocate a new frame to be mapped by the shadow page table. */
-        frame_ref = clock_alloc_frame(vaddr);
+        frame_ref = clock_alloc_frame(as, vaddr);
         if (frame_ref == NULL_FRAME) {
             ZF_LOGD("Failed to alloc frame");
             return -1;
@@ -219,9 +219,10 @@ int clock_try_page_in(seL4_Word vaddr, addrspace_t *as) {
     }
 
     assert(frame_ref != NULL_FRAME);
-    if (sos_map_frame(&cspace, user_process.vspace, vaddr, l4_pt[l4_index].perms, frame_ref, as) != 0) {
+    if (sos_map_frame(&cspace, user_process->vspace, vaddr, l4_pt[l4_index].perms, frame_ref, as) != 0) {
         ZF_LOGE("Could not map the frame into the two page tables");
         return -1;
     }
+    user_process->size++;
     return 0;
 }

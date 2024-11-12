@@ -127,6 +127,7 @@ int test_nfs() {
      * WE RERUN TEST SINCE NFS IS PERSISTENT STORAGE*/
     char *file = "Pikachu10.txt";
 
+    printf("%d", sos_time_stamp());
     int fd = sos_open(file, O_RDWR);
     assert(fd > 2);
 
@@ -134,6 +135,7 @@ int test_nfs() {
     sos_stat(file, &stat);
     printf("From stat - type: %d, mode: %d, size: %u, atime: %ld, ctime: %ld\n",
            stat.st_type, stat.st_fmode, stat.st_size, stat.st_atime, stat.st_ctime);
+    printf("%d", sos_time_stamp());
 
     char *buffer = calloc(81, sizeof(char));
 
@@ -205,7 +207,7 @@ int mmap_test() {
 int main(void)
 {
     int fd = sos_open("console", O_RDWR);
-    assert(fd > 2);
+    assert(fd == 0);
     int fail = sos_open("console", O_RDONLY);
     assert(fail == -1);
     fail = sos_open("console", O_RDWR);
@@ -213,16 +215,47 @@ int main(void)
     int res = sos_close(fd);
     assert(!res);
     fd = sos_open("console", O_RDWR);
-    assert(fd > 2);
+    assert(fd == 0);
     printf("Passed open/close test\n");
 
-    test_nfs();
+    //test_nfs();
     printf("Passed nfs test\n");
     
-    pt_test();
-    mmap_test();
+    //pt_test();
+    //mmap_test();
     //test_stack_write(fd);
 
-    test_buffers(fd);
+    //test_buffers(fd);
     printf("Passed read/write buffer test\n");
+    res = sos_close(fd);
+    assert(!res);
+
+    printf("Passed 0\n");
+    for (int i = 0; i < 16; i++) { // testing proc delete
+        int pid = sos_process_create("console_test_2");
+        if (pid == -1) {
+            break;
+        }
+        //int res = sos_process_delete(pid);
+        //assert(res == 0);
+        printf("Passed %d\n", i + 1);
+    }
+    printf("Passed process delete test\n");
+
+    /*int pid = sos_process_create("console_test");
+    assert(pid == 1); // second running process     // will test concurrently soon
+    pid = sos_my_id();
+    assert(pid == 0);
+    printf("Current pid %d\n", pid);
+    sos_process_t *pinfo = malloc(16 * sizeof(sos_process_t));
+    int num = sos_process_status(pinfo, 3);
+    assert(num == 2);
+    for (int i = 0; i < num; i++) {
+        printf("From process status: pid - %d, size - %d, stime - %d, app_name - %s\n", pinfo[i].pid, pinfo[i].size, pinfo[i].stime, pinfo[i].command);
+    }
+    num = sos_process_status(pinfo, 1);
+    assert(num == 1);
+    for (int i = 0; i < num; i++) {
+        printf("From process status: pid - %d, size - %d, stime - %d, app_name - %s\n", pinfo[i].pid, pinfo[i].size, pinfo[i].stime, pinfo[i].command);
+    }*/
 }

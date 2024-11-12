@@ -24,6 +24,8 @@
 
 #include "clock_replacement.h"
 
+extern seL4_CPtr nfs_signal;
+
 /*
  * Convert ELF permissions into seL4 permissions.
  */
@@ -74,7 +76,7 @@ static inline seL4_CapRights_t get_sel4_rights_from_elf(unsigned long permission
  *
  */
 static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const char *src, size_t segment_size,
-                                    size_t file_size, uintptr_t dst, seL4_Word flags, addrspace_t *as)
+                                    size_t file_size, uintptr_t dst, seL4_Word flags, addrspace_t *as, unsigned *size)
 {
     assert(file_size <= segment_size);
 
@@ -85,7 +87,7 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
         uintptr_t loadee_vaddr = (ROUND_DOWN(dst, PAGE_SIZE_4K));
 
         /* allocate the frame for the loadees address space */
-        frame_ref_t frame = clock_alloc_frame(loadee_vaddr);
+        frame_ref_t frame = clock_alloc_frame(as, loadee_vaddr);
         if (frame == NULL_FRAME) {
             ZF_LOGD("Failed to alloc frame");
             return -1;
@@ -93,6 +95,7 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
 
         /* map the frame into the loadee address space */
         err = sos_map_frame(cspace, loadee, loadee_vaddr, flags, frame, as);
+        (*size)++;
 
         /* A frame has already been mapped at this address. This occurs when segments overlap in
          * the same frame, which is permitted by the standard. That's fine as we
@@ -115,7 +118,7 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
 
         /* Write any zeroes at the start of the block. */
         size_t leading_zeroes = dst % PAGE_SIZE_4K;
-        memset(loader_data, 0, leading_zeroes);
+        memset(loader_data, 0, leading_zeroes); //check if works without
         loader_data += leading_zeroes;
 
         /* Copy the data from the source. */
@@ -132,16 +135,15 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
             memset(loader_data, 0, segment_bytes);
         }
 
-        pos += segment_bytes;
         dst += segment_bytes;
+        pos += segment_bytes;
         src += segment_bytes;
     }
     return 0;
 }
 
-int elf_load(cspace_t *cspace, seL4_CPtr loadee_vspace, elf_t *elf_file, addrspace_t *as)
+int elf_load(cspace_t *cspace, seL4_CPtr loadee_vspace, elf_t *elf_file, addrspace_t *as, unsigned *size, open_file *file)
 {
-
     int num_headers = elf_getNumProgramHeaders(elf_file);
     for (int i = 0; i < num_headers; i++) {
 
@@ -151,7 +153,7 @@ int elf_load(cspace_t *cspace, seL4_CPtr loadee_vspace, elf_t *elf_file, addrspa
         }
 
         /* Fetch information about this segment. */
-        const char *source_addr = elf_file->elfFile + elf_getProgramHeaderOffset(elf_file, i);
+        size_t offset = elf_getProgramHeaderOffset(elf_file, i);
         size_t file_size = elf_getProgramHeaderFileSize(elf_file, i);
         size_t segment_size = elf_getProgramHeaderMemorySize(elf_file, i);
         uintptr_t vaddr = elf_getProgramHeaderVaddr(elf_file, i);
@@ -161,15 +163,34 @@ int elf_load(cspace_t *cspace, seL4_CPtr loadee_vspace, elf_t *elf_file, addrspa
         seL4_Word reg_flags = ((flags & 1) << 2) | (flags & 2) | ((flags & 4) >> 2);
         insert_region(as, vaddr, segment_size, reg_flags);
 
+        char *src = malloc(sizeof(char) * file_size);
+        io_args args = {.signal_cap = nfs_signal, .buff = src}; //pin the elf page so that its not paged out during read
+        int err = nfs_pread_file(file, NULL, offset, file_size, nfs_pagefile_read_cb, &args);
+        if (err < (int) file_size) {
+            ZF_LOGE("NFS: Error in reading ELF segment");
+            return -1;
+        }
+        seL4_Wait(nfs_signal, 0);
+        if (args.err < 0) {
+            return -1;
+        }
+
         /* Copy it across into the vspace. */
         ZF_LOGD(" * Loading segment %p-->%p\n", (void *) vaddr, (void *)(vaddr + segment_size));
-        int err = load_segment_into_vspace(cspace, loadee_vspace, source_addr, segment_size, file_size, vaddr,
-                                           reg_flags, as);
+        err = load_segment_into_vspace(cspace, loadee_vspace, src, segment_size, file_size, vaddr,
+                                           reg_flags, as, size);
         if (err) {
             ZF_LOGE("Elf loading failed!");
             return -1;
         }
+        free(src);
     }
 
+    io_args args = {.signal_cap = nfs_signal};
+    int err = nfs_close_file(file, nfs_async_close_cb, &args);
+    if (err < 0) {
+        ZF_LOGE("NFS: Error in closing ELF file");
+        return -1;
+    } // put somewhere else
     return 0;
 }

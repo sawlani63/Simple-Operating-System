@@ -73,3 +73,5 @@ int fdt_put(fdt *fdt, open_file *file, uint32_t *fd);
  * @return 0 on success and 1 on failure.
  */
 int fdt_remove(fdt *fdt, uint32_t fd);
+
+void fdt_put_console(fdt *fdt, open_file *file, uint32_t *fd);

@@ -26,6 +26,5 @@ void nfs_async_stat_cb(int err, UNUSED struct nfs_context *nfs, void *data, void
 
 void nfs_async_opendir_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data);
 
-
 void nfs_pagefile_read_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data);
 void nfs_pagefile_write_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data);

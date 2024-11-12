@@ -16,4 +16,6 @@
 #include <elf/elf.h>
 #include <elf.h>
 
-int elf_load(cspace_t *cspace, seL4_CPtr loadee_vspace, elf_t *elf_file, addrspace_t *as);
+#include "open_file.h"
+
+int elf_load(cspace_t *cspace, seL4_CPtr loadee_vspace, elf_t *elf_file, addrspace_t *as, unsigned *size, open_file *file);
