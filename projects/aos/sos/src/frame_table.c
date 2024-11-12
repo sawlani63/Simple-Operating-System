@@ -18,7 +18,6 @@
 #include <stdbool.h>
 #include <utils/util.h>
 #include <sos/gen_config.h>
-#include "clock_replacement.h"
 
 /* Debugging macro to get the human-readable name of a particular list. */
 #define LIST_NAME(list) LIST_ID_NAME(list->list_id)
@@ -79,6 +78,8 @@ static struct {
     .allocated = { .list_id = ALLOCATED_LIST },
 };
 
+frame_ref_t clock_hand = 0;
+
 /* Management of frame nodes */
 static frame_ref_t ref_from_frame(frame_t *frame);
 
@@ -137,11 +138,21 @@ frame_ref_t alloc_frame(void)
 
 frame_ref_t clock_alloc_frame(size_t vaddr, user_process_t process, size_t pinned)
 {
+    sync_bin_sem_wait(data_sem);
     frame_ref_t ref = alloc_frame();
     if (ref == NULL_FRAME) {
-        clock_page_out(process);
+        if (!clock_hand) {
+            clock_hand = frame_table.allocated.first;
+        }
+        frame_t *victim = clock_choose_victim(clock_hand);
+        if (clock_page_out(victim) < 0) {
+            sync_bin_sem_post(data_sem);
+            ZF_LOGE("Failed to page out a frame!");
+            return NULL_FRAME;
+        }
         ref = alloc_frame();
         if (ref == NULL_FRAME) {
+            sync_bin_sem_post(data_sem);
             ZF_LOGE("Could not allocate frame!");
             return NULL_FRAME;
         }
@@ -151,6 +162,7 @@ frame_ref_t clock_alloc_frame(size_t vaddr, user_process_t process, size_t pinne
     frame->pid = process.pid;
     frame->pinned = pinned;
     frame->referenced = 1;
+    sync_bin_sem_post(data_sem);
     return ref;
 }
 

@@ -125,6 +125,10 @@ char *get_elf_header(open_file *file, unsigned long *elf_size)
     return data;
 }
 
+user_process_t get_process(pid_t pid) {
+    return user_process_list[pid];
+}
+
 extern bool console_open_for_read;
 extern sync_bin_sem_t *file_sem;
 /* helper to conduct freeing operations in the event of an error in a function to prevent memory leaks */

@@ -86,7 +86,7 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
     }
 
     /* Allocate a new frame to be mapped by the shadow page table. */
-    frame_ref_t frame_ref = clock_alloc_frame(user_process, fault_addr);
+    frame_ref_t frame_ref = clock_alloc_frame(fault_addr, user_process, 0);
     if (frame_ref == NULL_FRAME) {
         ZF_LOGD("Failed to alloc frame");
         return false;

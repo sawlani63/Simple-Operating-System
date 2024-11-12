@@ -22,7 +22,6 @@
 #include "bootstrap.h"
 #include "irq.h"
 #include "network.h"
-#include "frame_table.h"
 #include "drivers/uart.h"
 #include "ut.h"
 #include "vmem_layout.h"
@@ -56,6 +55,8 @@
 #define SYSCALL_PROC_GETID SYS_getpid
 #define SYSCALL_PROC_STATUS 173
 #define SYSCALL_PROC_WAIT SYS_waitid
+
+typedef size_t frame_ref_t;
 
 typedef struct {
     pid_t pid;
@@ -108,6 +109,7 @@ typedef struct {
 typedef int pid_t;
 
 int init_proc();
+user_process_t get_process(pid_t pid);
 int start_process(char *app_name, thread_main_f *func);
 void syscall_proc_create(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_proc_delete(seL4_MessageInfo_t *reply_msg, seL4_Word badge);

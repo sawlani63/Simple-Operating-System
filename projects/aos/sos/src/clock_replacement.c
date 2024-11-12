@@ -1,21 +1,12 @@
 #include "clock_replacement.h"
-#include "frame_table.h"
+#include "process.h"
 
 #define GET_PAGE(pt, vaddr) pt[(vaddr >> 39) & MASK(9)].l2[(vaddr >> 30) & MASK(9)].l3[(vaddr >> 21) & MASK(9)].l4[(vaddr >> 12) & MASK(9)]
 #define SWAPMAP_SIZE (128 * 1024)                           // 128KB in bytes
 #define NUM_BLOCKS (SWAPMAP_SIZE * 8)                       // Total number of 4KB blocks in 4GB (can be stored in an int)
 #define QUEUE_SIZE (PAGE_SIZE_4K / sizeof(uint32_t))        // 4KB queue size (1024 entries cached)
 
-typedef struct {
-    seL4_Word vaddr : 48;
-    pid_t pid : 16;
-} PACKED buffer_entry_t;
-
 struct {
-    buffer_entry_t circular_buffer[NUM_FRAMES]; // Data structure holding the circular buffer
-    size_t clock_hand;                          // Current position of the clock hand
-    size_t curr_size;                           // Current size of the clock circular buffer
-
     uint8_t *swap_map;                          // Bitmap of used/free blocks
     uint32_t curr_offset;                       // Current offset into the swap map
 
@@ -25,7 +16,7 @@ struct {
     size_t queue_size;
 
     seL4_CPtr page_notif;                       // Notification object to wait on pagefile
-} swap_manager = {.clock_hand = 0, .curr_size = 0, .curr_offset = 0, .queue_head = 0, .queue_tail = 0, .queue_size = 0};
+} swap_manager = {.curr_offset = 0, .queue_head = 0, .queue_tail = 0, .queue_size = 0};
 
 extern open_file *nfs_pagefile;
 
@@ -95,112 +86,81 @@ static inline uint64_t get_page_file_offset() {
     return swap_map_index * PAGE_SIZE_4K;
 }
 
-/**
- * Identifies a candidate to page out, and writes it into the paging file on the nfs.
- * The corresponding frame is then unmapped from the hardware page table.
- * @return 0 on success and 1 on failure
- */
-int clock_page_out(user_process_t process) {
-    addrspace_t *as = process.addrspace;
-    seL4_Word vaddr;
-    pt_entry entry;
-
-    while (1) {
-        frame_t curr_frame = frame
+frame_t *clock_choose_victim(frame_ref_t clock_hand) {
+    frame_t *curr_frame = frame_from_ref(clock_hand);
+    for (; curr_frame->pinned || curr_frame->referenced; curr_frame = frame_from_ref(curr_frame->next)) {
+        curr_frame->referenced = 0;
     }
+    return curr_frame;
+}
 
+int clock_page_out(frame_t *victim) {
+    /* Get the address space specific to the process this frame we are paging out belongs to. */
+    addrspace_t *as = get_process(victim->pid).addrspace;
+    seL4_Word vaddr = victim->vaddr;
 
-    while (1) {
-        vaddr = swap_manager.circular_buffer[swap_manager.clock_hand].vaddr;
-        if (!vaddr_is_mapped(as, vaddr)) {
-            printf("Early paging out vaddr: %p for pid: %d\n", vaddr, swap_manager.circular_buffer[swap_manager.clock_hand].pid);
-            return 0;
-        }
-        entry = GET_PAGE(as->page_table, vaddr);
-        if (!entry.pinned) {
-            if (entry.page.ref == 0) {
-                break;
-            }
-            GET_PAGE(as->page_table, vaddr).page.ref = 0;
-            seL4_Error err = seL4_ARM_Page_Unmap(entry.page.frame_cptr);
-            ZF_LOGF_IFERR(err != seL4_NoError, "Failed to unmap page");
-        }
-        swap_manager.clock_hand = (swap_manager.clock_hand + 1) % NUM_FRAMES;
-    }
-    printf("Paging out vaddr: %p for pid: %d\n", vaddr, swap_manager.circular_buffer[swap_manager.clock_hand].pid);
-    
+    /* Assert that the vaddr we are paging out is actually mapped. Something definitely went wrong if it isn't. */
+    assert(vaddr_is_mapped(as, vaddr));
+
+    /* Cache the page table entry, the next free page file offset, the frame data we are paging and the i/o args. */
+    pt_entry entry = GET_PAGE(as->page_table, vaddr);
     uint64_t file_offset = get_page_file_offset();
-    GET_PAGE(as->page_table, vaddr).pinned = 1;
-    sync_bin_sem_wait(data_sem);
     char *data = (char *)frame_data(entry.page.frame_ref);
-    sync_bin_sem_post(data_sem);
-    io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, &GET_PAGE(as->page_table, vaddr)};
+    io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, NULL};
+
+    /* Perform the actual write to the NFS page file. Wait for it to finish and make sure it succeeds. */
     int res = nfs_pwrite_file(nfs_pagefile, data, file_offset, PAGE_SIZE_4K, nfs_pagefile_write_cb, &args);
     if (res < 0) {
-        return 1;
+        return -1;
     }
     seL4_Wait(swap_manager.page_notif, 0);
     if (args.err < 0) {
-        return 1;
+        return -1;
     }
-    GET_PAGE(as->page_table, vaddr).pinned = 0;
 
+    /* Unmap the entry from the process's vspace and free the frame and its capability. */
     seL4_CPtr frame_cptr = entry.page.frame_cptr;
-    seL4_Error err = seL4_ARM_Page_Unmap(frame_cptr);
-    ZF_LOGF_IFERR(err != seL4_NoError, "Failed to unmap page");
+    if (seL4_ARM_Page_Unmap(frame_cptr) != seL4_NoError) {
+        return - 1;
+    }
     free_untype(&frame_cptr, NULL);
-    sync_bin_sem_wait(data_sem);
     free_frame(entry.page.frame_ref);
-    sync_bin_sem_post(data_sem);
 
-    pt_entry new_entry = {.valid = 0, .swapped = 1, .pinned = 0 , .perms = GET_PAGE(as->page_table, vaddr).perms,
-                          .swap_map_index = file_offset / PAGE_SIZE_4K};
-    GET_PAGE(as->page_table, vaddr) = new_entry;
+    /* Update our shadow page table mapping to mark it as invalid, swapped and store its index in the page file. */
+    GET_PAGE(as->page_table, vaddr) = (pt_entry){.valid = 0, .swapped = 1, .pinned = 0 ,
+                                                 .perms = GET_PAGE(as->page_table, vaddr).perms,
+                                                 .swap_map_index = file_offset / PAGE_SIZE_4K};
     return 0;
 }
 
 int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
     addrspace_t *as = user_process->addrspace;
 
-    uint16_t l1_index = (vaddr >> 39) & MASK(9); /* Top 9 bits */
-    uint16_t l2_index = (vaddr >> 30) & MASK(9); /* Next 9 bits */
-    uint16_t l3_index = (vaddr >> 21) & MASK(9); /* Next 9 bits */
-    uint16_t l4_index = (vaddr >> 12) & MASK(9); /* Next 9 bits */
-
-    page_upper_directory *l1_pt = as->page_table;
-    if (l1_pt[l1_index].l2 == NULL) {
+    /* If the vaddr is not in the shadow page table to start with, return and continue in vm fault. */
+    if (!vaddr_in_spt(as, vaddr)) {
         return 1;
     }
 
-    page_directory *l2_pt = l1_pt[l1_index].l2;
-    if (l2_pt[l2_index].l3 == NULL) {
-        return 1;
-    }
-
-    page_table *l3_pt = l2_pt[l2_index].l3;
-    if (l3_pt[l3_index].l4 == NULL) {
-        return 1;
-    }
-
-    pt_entry *l4_pt = l3_pt[l3_index].l4;
-    frame_ref_t frame_ref = NULL_FRAME;
-    if (l4_pt[l4_index].valid && !l4_pt[l4_index].page.ref) {
-        l4_pt[l4_index].page.ref = 1;
-        frame_ref = l4_pt[l4_index].page.frame_ref;
-    } else if (l4_pt[l4_index].swapped == 1) {
+    pt_entry entry = GET_PAGE(as->page_table, vaddr);
+    frame_ref_t ref = NULL_FRAME;
+    if (entry.valid) {
+        frame_t *frame = frame_from_ref(entry.page.frame_ref);
+        if (!frame->referenced) {
+            frame->referenced = 1;
+            ref = entry.page.frame_ref;
+        }
+    } else if (entry.swapped) {
         /* Allocate a new frame to be mapped by the shadow page table. */
-        frame_ref = clock_alloc_frame(*user_process, vaddr);
-        if (frame_ref == NULL_FRAME) {
+        ref = clock_alloc_frame(vaddr, *user_process, 0);
+        if (ref == NULL_FRAME) {
             ZF_LOGD("Failed to alloc frame");
             return -1;
         }
 
-        uint64_t file_offset = l4_pt[l4_index].swap_map_index * PAGE_SIZE_4K;
-        l4_pt[l4_index].pinned = 1;
-        sync_bin_sem_wait(data_sem);
-        char *data = (char *)frame_data(frame_ref);
-        sync_bin_sem_post(data_sem);
-        io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, &l4_pt[l4_index]};
+        /* Grab the offset into the swap file and load PAGE_SIZE_4K bytes into the newly alloc'd frame. */
+        uint64_t file_offset = entry.swap_map_index * PAGE_SIZE_4K;
+        char *data = (char *)frame_data(ref);
+        io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, NULL};
         int res = nfs_pread_file(nfs_pagefile, NULL, file_offset, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
         if (res < (int)PAGE_SIZE_4K) {
             return -1;
@@ -209,19 +169,21 @@ int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
         if (args.err < 0) {
             return 1;
         }
-        l4_pt[l4_index].pinned = 0;
 
+        /* Update our swap manager queue to cache the newly unused file offset. */
         if (swap_manager.queue_size < QUEUE_SIZE) {
-            swap_manager.swap_queue[swap_manager.queue_tail] = l4_pt[l4_index].swap_map_index;
+            swap_manager.swap_queue[swap_manager.queue_tail] = entry.swap_map_index;
             swap_manager.queue_tail = (swap_manager.queue_tail + 1) % QUEUE_SIZE;
             swap_manager.queue_size++;
         }
     } else {
+        ZF_LOGV("Unexpected case in clock_try_page_in! Continuing to vm fault.");
         return 1;
     }
 
-    assert(frame_ref != NULL_FRAME);
-    if (sos_map_frame(&cspace, user_process->vspace, vaddr, l4_pt[l4_index].perms, frame_ref, as) != 0) {
+    /* Assert the reference we got is not null as a sanity check, and map the new frame into the process's vspace. */
+    assert(ref != NULL_FRAME);
+    if (sos_map_frame(&cspace, user_process->vspace, vaddr, entry.perms, ref, as) != 0) {
         ZF_LOGE("Could not map the frame into the two page tables");
         return -1;
     }

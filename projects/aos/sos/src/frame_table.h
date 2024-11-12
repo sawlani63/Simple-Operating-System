@@ -13,6 +13,7 @@
 
 #include "bootstrap.h"
 #include "ut.h"
+#include "clock_replacement.h"
 
 #include <stdlib.h>
 #include <stdbool.h>
@@ -112,6 +113,8 @@ cspace_t *frame_table_cspace(void);
  * only a limited number of frames may be held by the frame table.
  */
 frame_ref_t alloc_frame(void);
+
+frame_ref_t clock_alloc_frame(size_t vaddr, user_process_t process, size_t pinned);
 
 /*
  * Free a frame allocated by the frame table.
