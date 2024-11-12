@@ -18,6 +18,7 @@
 #include <stdbool.h>
 #include <utils/util.h>
 #include <sos/gen_config.h>
+#include "clock_replacement.h"
 
 /* Debugging macro to get the human-readable name of a particular list. */
 #define LIST_NAME(list) LIST_ID_NAME(list->list_id)
@@ -132,6 +133,25 @@ frame_ref_t alloc_frame(void)
     }
 
     return ref_from_frame(frame);
+}
+
+frame_ref_t clock_alloc_frame(size_t vaddr, user_process_t process, size_t pinned)
+{
+    frame_ref_t ref = alloc_frame();
+    if (ref == NULL_FRAME) {
+        clock_page_out(process);
+        ref = alloc_frame();
+        if (ref == NULL_FRAME) {
+            ZF_LOGE("Could not allocate frame!");
+            return NULL_FRAME;
+        }
+    }
+    frame_t *frame = frame_from_ref(ref);
+    frame->vaddr = vaddr;
+    frame->pid = process.pid;
+    frame->pinned = pinned;
+    frame->referenced = 1;
+    return ref;
 }
 
 void free_frame(frame_ref_t frame_ref)

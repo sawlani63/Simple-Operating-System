@@ -141,12 +141,12 @@ void free_process(user_process_t user_process, bool suicidal)
     free_untype(&user_process.sched_context, user_process.sched_context_ut);
     free_untype(&user_process.tcb, user_process.tcb_ut);
 
-    /* Wait for outstanding I/O to finish before starting to free the rest of the process. */
-    if (user_process.async_sem != NULL) {
-        sync_bin_sem_wait(user_process.async_sem);
-        free_untype(&user_process.async_cptr, user_process.async_ut);
-        free(user_process.async_sem);
+    /* Wait for outstanding syscalls to finish before starting to free the rest of the process. */
+    if (!suicidal) {
+        sync_bin_sem_wait(user_process.handler_busy_sem);
     }
+    free_untype(&user_process.handler_busy_cptr, user_process.handler_busy_ut);
+    free(user_process.handler_busy_sem);
 
     /* Free the file descriptor table. */
     if (user_process.fdt != NULL) {
@@ -165,6 +165,9 @@ void free_process(user_process_t user_process, bool suicidal)
         free_region_tree(user_process.addrspace);
         free(user_process.addrspace);
     }
+
+    /* Invalidate the entries within the clock page replacement buffer belonging to this process. */
+    clock_invalidate_process(user_process.pid);
 
     /* Destroy the user process cspace. This destroys all the caps inside of this cspace as well. */
     if (&user_process.cspace != NULL) {
@@ -192,11 +195,6 @@ void free_process(user_process_t user_process, bool suicidal)
 
     /* Finally, destroy the process's handling thread. Always doing this last makes it safe to call for suicidal threads. */
     if (user_process.handler_thread != NULL) {
-        if (!suicidal) {
-            sync_bin_sem_wait(user_process.handler_busy_sem);
-        }
-        free_untype(&user_process.handler_busy_cptr, user_process.handler_busy_ut);
-        free(user_process.handler_busy_sem);
         thread_destroy(user_process.handler_thread);
     }
 }
@@ -227,19 +225,12 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
     uintptr_t local_stack_bottom = SOS_SCRATCH - PAGE_SIZE_4K;
 
     /* Create a stack frame */
-    user_process->stack_frame = clock_alloc_frame(as, stack_bottom);
+    user_process->stack_frame = clock_alloc_frame(*user_process, stack_bottom);
     if (user_process->stack_frame == NULL_FRAME) {
         ZF_LOGD("Failed to alloc frame");
         return -1;
     }
     user_process->stack = frame_page(user_process->stack_frame);
-
-    /* find the vsyscall table */
-    /*uintptr_t *sysinfo = (uintptr_t *) elf_getSectionNamed(elf_file, "__vsyscall", NULL);
-    if (!sysinfo || !*sysinfo) {
-        ZF_LOGE("could not find syscall table for c library");
-        return 0;
-    }*/
 
     /* Map in the stack frame for the user app */
     seL4_Error err = sos_map_frame(cspace, user_process->vspace, stack_bottom, REGION_RD | REGION_WR,
@@ -325,7 +316,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
     /* Exend the stack with extra pages */
     for (int page = 0; page < INITIAL_PROCESS_EXTRA_STACK_PAGES; page++) {
         stack_bottom -= PAGE_SIZE_4K;
-        frame_ref_t frame = clock_alloc_frame(as, stack_bottom);
+        frame_ref_t frame = clock_alloc_frame(*user_process, stack_bottom);
         if (frame == NULL_FRAME) {
             ZF_LOGE("Couldn't allocate additional stack frame");
             return 0;
@@ -358,20 +349,6 @@ int start_process(char *app_name, thread_main_f *func)
     if (func != NULL) {
         handler_func = func;
     }
-
-    user_process.async_sem = malloc(sizeof(sync_bin_sem_t));
-    if (user_process.async_sem == NULL) {
-        ZF_LOGE("No memory for new semaphore object");
-        free_process(user_process, false);
-        return -1;
-    }
-    user_process.async_ut = alloc_retype(&user_process.async_cptr, seL4_NotificationObject, seL4_NotificationBits);
-    if (user_process.async_cptr == seL4_CapNull) {
-        ZF_LOGE("No memory for new notification object");
-        free_process(user_process, false);
-        return -1;
-    }
-    sync_bin_sem_init(user_process.async_sem, user_process.async_cptr, 1);
 
     user_process.handler_busy_sem = malloc(sizeof(sync_bin_sem_t));
     if (user_process.handler_busy_sem == NULL) {
@@ -449,7 +426,7 @@ int start_process(char *app_name, thread_main_f *func)
     }
 
     /* Create an IPC buffer */
-    user_process.ipc_buffer_frame = clock_alloc_frame(user_process.addrspace, PROCESS_IPC_BUFFER);
+    user_process.ipc_buffer_frame = clock_alloc_frame(user_process, PROCESS_IPC_BUFFER);
     if (user_process.ipc_buffer_frame == NULL_FRAME) {
         ZF_LOGE("Failed to alloc ipc buffer ut");
         free_process(user_process, false);
@@ -587,7 +564,7 @@ int start_process(char *app_name, thread_main_f *func)
     user_process.size++;
 
     /* load the elf image from nfs */
-    err = elf_load(&cspace, user_process.vspace, &elf_file, user_process.addrspace, &user_process.size, elf);
+    err = elf_load(&cspace, &elf_file, elf, &user_process);
     if (err) {
         ZF_LOGE("Failed to load elf image");
         free_process(user_process, false);

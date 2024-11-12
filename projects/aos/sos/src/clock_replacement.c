@@ -1,24 +1,30 @@
 #include "clock_replacement.h"
+#include "frame_table.h"
 
 #define GET_PAGE(pt, vaddr) pt[(vaddr >> 39) & MASK(9)].l2[(vaddr >> 30) & MASK(9)].l3[(vaddr >> 21) & MASK(9)].l4[(vaddr >> 12) & MASK(9)]
 #define SWAPMAP_SIZE (128 * 1024)                           // 128KB in bytes
 #define NUM_BLOCKS (SWAPMAP_SIZE * 8)                       // Total number of 4KB blocks in 4GB (can be stored in an int)
-#define QUEUE_SIZE (PAGE_SIZE_4K / sizeof(uint32_t))       // 4KB queue size (1024 entries cached)
+#define QUEUE_SIZE (PAGE_SIZE_4K / sizeof(uint32_t))        // 4KB queue size (1024 entries cached)
+
+typedef struct {
+    seL4_Word vaddr : 48;
+    pid_t pid : 16;
+} PACKED buffer_entry_t;
 
 struct {
-    seL4_Word circular_buffer[NUM_FRAMES];  // Data structure holding the circular buffer
-    size_t clock_hand;                      // Current position of the clock hand
-    size_t curr_size;                       // Current size of the clock circular buffer
+    buffer_entry_t circular_buffer[NUM_FRAMES]; // Data structure holding the circular buffer
+    size_t clock_hand;                          // Current position of the clock hand
+    size_t curr_size;                           // Current size of the clock circular buffer
 
-    uint8_t *swap_map;                      // Bitmap of used/free blocks
-    uint32_t curr_offset;                   // Current offset into the swap map
+    uint8_t *swap_map;                          // Bitmap of used/free blocks
+    uint32_t curr_offset;                       // Current offset into the swap map
 
-    uint32_t *swap_queue;                   // Queue for managing swap map offsets
+    uint32_t *swap_queue;                       // Queue for managing swap map offsets
     size_t queue_head;
     size_t queue_tail;
     size_t queue_size;
 
-    seL4_CPtr page_notif;                   // Notification object to wait on pagefile
+    seL4_CPtr page_notif;                       // Notification object to wait on pagefile
 } swap_manager = {.clock_hand = 0, .curr_size = 0, .curr_offset = 0, .queue_head = 0, .queue_tail = 0, .queue_size = 0};
 
 extern open_file *nfs_pagefile;
@@ -94,15 +100,24 @@ static inline uint64_t get_page_file_offset() {
  * The corresponding frame is then unmapped from the hardware page table.
  * @return 0 on success and 1 on failure
  */
-static int clock_page_out(addrspace_t *as) {
+int clock_page_out(user_process_t process) {
+    addrspace_t *as = process.addrspace;
     seL4_Word vaddr;
     pt_entry entry;
+
     while (1) {
-        vaddr = swap_manager.circular_buffer[swap_manager.clock_hand];
-        entry = GET_PAGE(as->page_table, vaddr);
+        frame_t curr_frame = frame
+    }
+
+
+    while (1) {
+        vaddr = swap_manager.circular_buffer[swap_manager.clock_hand].vaddr;
         if (!vaddr_is_mapped(as, vaddr)) {
+            printf("Early paging out vaddr: %p for pid: %d\n", vaddr, swap_manager.circular_buffer[swap_manager.clock_hand].pid);
             return 0;
-        } else if (!entry.pinned) {
+        }
+        entry = GET_PAGE(as->page_table, vaddr);
+        if (!entry.pinned) {
             if (entry.page.ref == 0) {
                 break;
             }
@@ -112,6 +127,7 @@ static int clock_page_out(addrspace_t *as) {
         }
         swap_manager.clock_hand = (swap_manager.clock_hand + 1) % NUM_FRAMES;
     }
+    printf("Paging out vaddr: %p for pid: %d\n", vaddr, swap_manager.circular_buffer[swap_manager.clock_hand].pid);
     
     uint64_t file_offset = get_page_file_offset();
     GET_PAGE(as->page_table, vaddr).pinned = 1;
@@ -140,20 +156,6 @@ static int clock_page_out(addrspace_t *as) {
     pt_entry new_entry = {.valid = 0, .swapped = 1, .pinned = 0 , .perms = GET_PAGE(as->page_table, vaddr).perms,
                           .swap_map_index = file_offset / PAGE_SIZE_4K};
     GET_PAGE(as->page_table, vaddr) = new_entry;
-    return 0;
-}
-
-int clock_add_page(addrspace_t *as, seL4_Word vaddr) {
-    if (swap_manager.curr_size == NUM_FRAMES) {
-        if (clock_page_out(as)) {
-            return 1;
-        }
-    } else {
-        swap_manager.curr_size++;
-    }
-
-    swap_manager.circular_buffer[swap_manager.clock_hand] = vaddr;
-    swap_manager.clock_hand = (swap_manager.clock_hand + 1) % NUM_FRAMES;
     return 0;
 }
 
@@ -187,7 +189,7 @@ int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
         frame_ref = l4_pt[l4_index].page.frame_ref;
     } else if (l4_pt[l4_index].swapped == 1) {
         /* Allocate a new frame to be mapped by the shadow page table. */
-        frame_ref = clock_alloc_frame(as, vaddr);
+        frame_ref = clock_alloc_frame(*user_process, vaddr);
         if (frame_ref == NULL_FRAME) {
             ZF_LOGD("Failed to alloc frame");
             return -1;

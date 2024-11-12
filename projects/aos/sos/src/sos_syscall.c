@@ -82,13 +82,11 @@ static inline int perform_io_core(user_process_t user_process, uint16_t data_off
     io_args *args = malloc(sizeof(io_args));
     *args = (io_args){.err = len, .buff = data + data_offset, .signal_cap = signal_cap, .entry = entry};
     int res;
-    sync_bin_sem_wait(user_process.async_sem);
     if (read) {
         res = file->file_read(file, data + data_offset, file_offset, len, callback, args);
     } else {
         res = file->file_write(file, data + data_offset, file_offset, len, callback, args);
     }
-    sync_bin_sem_post(user_process.async_sem);
 
     return res < 0 ? -1 : res;
 }
@@ -207,14 +205,11 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     if (strcmp(file_path, "console")) {
         file = file_create(file_path, mode, nfs_pwrite_file, nfs_pread_file);
         io_args args = {.signal_cap = nfs_signal};
-        sync_bin_sem_wait(user_process.async_sem);
         if (nfs_open_file(file, nfs_async_open_cb, &args) < 0) {
             file_destroy(file);
-            sync_bin_sem_post(user_process.async_sem);
             seL4_SetMR(0, -1);
             return;
         }
-        sync_bin_sem_post(user_process.async_sem);
         file->handle = args.buff;
     } else {
         sync_bin_sem_wait(file_sem);
@@ -253,13 +248,10 @@ void syscall_sos_close(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         return;
     } else if (strcmp(found->path, "console")) {
         io_args args = {.signal_cap = nfs_signal};
-        sync_bin_sem_wait(user_process.async_sem);
         if (nfs_close_file(found, nfs_async_close_cb, &args) < 0) {
-            sync_bin_sem_post(user_process.async_sem);
             seL4_SetMR(0, -1);
             return;
         }
-        sync_bin_sem_post(user_process.async_sem);
     } else if (found->mode != O_WRONLY) {
         sync_bin_sem_wait(file_sem);
         console_open_for_read = false;
@@ -329,9 +321,7 @@ void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 
     register_timer(seL4_GetMR(1), wakeup, NULL);
 
-    sync_bin_sem_wait(user_process.async_sem);
     seL4_Wait(sleep_signal, 0);
-    sync_bin_sem_post(user_process.async_sem);
 }
 
 inline void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
@@ -390,13 +380,10 @@ void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     size_t nbyte = seL4_GetMR(3);
 
     io_args args = {.err = 0, .signal_cap = nfs_signal};
-    sync_bin_sem_wait(user_process.async_sem);
     if (nfs_open_dir(nfs_async_opendir_cb, &args)) {
-        sync_bin_sem_post(user_process.async_sem);
         seL4_SetMR(0, -1);
         return;
     }
-    sync_bin_sem_post(user_process.async_sem);
 
     struct nfsdirent *nfsdirent = nfs_read_dir(args.buff);
     int i = 0;

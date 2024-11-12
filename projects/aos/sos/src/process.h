@@ -27,7 +27,6 @@
 #include "ut.h"
 #include "vmem_layout.h"
 #include "mapping.h"
-#include "elfload.h"
 #include "syscalls.h"
 #include "tests.h"
 #include "utils.h"
@@ -58,7 +57,7 @@
 #define SYSCALL_PROC_STATUS 173
 #define SYSCALL_PROC_WAIT SYS_waitid
 
-typedef struct user_process {
+typedef struct {
     pid_t pid;
     char *app_name;
     unsigned size;
@@ -67,10 +66,6 @@ typedef struct user_process {
     addrspace_t *addrspace;
     fdt *fdt;
     sos_thread_t *handler_thread;
-
-    sync_bin_sem_t *async_sem;
-    seL4_CPtr async_cptr;
-    ut_t *async_ut;
 
     sync_bin_sem_t *handler_busy_sem;
     seL4_CPtr handler_busy_cptr;
@@ -101,6 +96,7 @@ typedef struct user_process {
     frame_ref_t stack_frame;
     seL4_CPtr stack;
 } user_process_t;
+#include "elfload.h"
 
 typedef struct {
     pid_t     pid;

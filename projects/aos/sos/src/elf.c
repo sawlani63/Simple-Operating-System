@@ -76,7 +76,7 @@ static inline seL4_CapRights_t get_sel4_rights_from_elf(unsigned long permission
  *
  */
 static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const char *src, size_t segment_size,
-                                    size_t file_size, uintptr_t dst, seL4_Word flags, addrspace_t *as, unsigned *size)
+                                    size_t file_size, uintptr_t dst, seL4_Word flags, addrspace_t *as, unsigned *size, user_process_t *user_process)
 {
     assert(file_size <= segment_size);
 
@@ -87,7 +87,7 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
         uintptr_t loadee_vaddr = (ROUND_DOWN(dst, PAGE_SIZE_4K));
 
         /* allocate the frame for the loadees address space */
-        frame_ref_t frame = clock_alloc_frame(as, loadee_vaddr);
+        frame_ref_t frame = clock_alloc_frame(*user_process, loadee_vaddr);
         if (frame == NULL_FRAME) {
             ZF_LOGD("Failed to alloc frame");
             return -1;
@@ -142,7 +142,7 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
     return 0;
 }
 
-int elf_load(cspace_t *cspace, seL4_CPtr loadee_vspace, elf_t *elf_file, addrspace_t *as, unsigned *size, open_file *file)
+int elf_load(cspace_t *cspace, elf_t *elf_file, open_file *file, user_process_t *user_process)
 {
     int num_headers = elf_getNumProgramHeaders(elf_file);
     for (int i = 0; i < num_headers; i++) {
@@ -161,7 +161,7 @@ int elf_load(cspace_t *cspace, seL4_CPtr loadee_vspace, elf_t *elf_file, addrspa
 
         /* Load the segment into the address space */
         seL4_Word reg_flags = ((flags & 1) << 2) | (flags & 2) | ((flags & 4) >> 2);
-        insert_region(as, vaddr, segment_size, reg_flags);
+        insert_region(user_process->addrspace, vaddr, segment_size, reg_flags);
 
         char *src = malloc(sizeof(char) * file_size);
         io_args args = {.signal_cap = nfs_signal, .buff = src}; //pin the elf page so that its not paged out during read
@@ -177,8 +177,8 @@ int elf_load(cspace_t *cspace, seL4_CPtr loadee_vspace, elf_t *elf_file, addrspa
 
         /* Copy it across into the vspace. */
         ZF_LOGD(" * Loading segment %p-->%p\n", (void *) vaddr, (void *)(vaddr + segment_size));
-        err = load_segment_into_vspace(cspace, loadee_vspace, src, segment_size, file_size, vaddr,
-                                           reg_flags, as, size);
+        err = load_segment_into_vspace(cspace, user_process->vspace, src, segment_size, file_size, vaddr,
+                                           reg_flags, user_process->addrspace, &user_process->size, user_process);
         if (err) {
             ZF_LOGE("Elf loading failed!");
             return -1;
