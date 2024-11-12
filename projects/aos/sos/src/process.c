@@ -128,8 +128,26 @@ char *get_elf_header(open_file *file, unsigned long *elf_size)
 extern bool console_open_for_read;
 extern sync_bin_sem_t *file_sem;
 /* helper to conduct freeing operations in the event of an error in a function to prevent memory leaks */
-void free_process(user_process_t user_process, bool self)
+void free_process(user_process_t user_process, bool suicidal)
 {
+    /**
+     * At this stage there can be two types of threads that call free_process.
+     * 1. A thread trying to kill a separate thread.
+     * 2. A thread trying to kill itself (a suicidal thread).
+     * We need to be particularly careful with suicidal threads as we MUST deallocate their handler last.
+     */
+
+    /* Free the scheduling context and tcb for the user process. We will do this first to halt the process. */
+    free_untype(&user_process.sched_context, user_process.sched_context_ut);
+    free_untype(&user_process.tcb, user_process.tcb_ut);
+
+    /* Wait for outstanding I/O to finish before starting to free the rest of the process. */
+    if (user_process.async_sem != NULL) {
+        sync_bin_sem_wait(user_process.async_sem);
+        free_untype(&user_process.async_cptr, user_process.async_ut);
+        free(user_process.async_sem);
+    }
+
     /* Free the file descriptor table. */
     if (user_process.fdt != NULL) {
         if (user_process.fdt->files[0] != NULL) {
@@ -141,53 +159,44 @@ void free_process(user_process_t user_process, bool self)
         fdt_destroy(user_process.fdt);
     }
 
-    /* Free all allocated memory for the syscall thread */
-    if (!self && user_process.handler_thread != NULL) {
-        sync_bin_sem_wait(user_process.async_sem); // (for now here) will optimize to delete unnecessary stuff before wait 
-        thread_destroy(user_process.handler_thread);
-    }
-    /* Free the heap region in the address space */
-    remove_region(user_process.addrspace, PROCESS_HEAP_START);
-    /* Free the stack region */
-    remove_region(user_process.addrspace, PROCESS_STACK_TOP - PAGE_SIZE_4K);
-    /* Free the scheduling context and tcb */
-    free_untype(&user_process.sched_context, user_process.sched_context_ut);
-    free_untype(&user_process.tcb, user_process.tcb_ut);
-    /* Delete the ep from the user process cspace if in that cspace and free the slot */
-    if (!cspace_delete(&user_process.cspace, user_process.ep_slot)) {
-        cspace_free_slot(&user_process.cspace, user_process.ep_slot);
-    }
-    /* Free the ipc buffer region */
-    remove_region(user_process.addrspace, PROCESS_IPC_BUFFER);
-    /* Free the user process page table and address space */
-    if (user_process.addrspace != NULL && user_process.addrspace->page_table != NULL) {
+    /* Destroy EVERY region and page including the intermediate structures in the region rb-tree and shadow page table. */
+    if (user_process.addrspace->page_table != NULL) {
         sos_destroy_page_table(user_process.addrspace);
         free_region_tree(user_process.addrspace);
         free(user_process.addrspace);
     }
-    /* Destroy the user process cspace */
+
+    /* Destroy the user process cspace. This destroys all the caps inside of this cspace as well. */
     if (&user_process.cspace != NULL) {
         cspace_destroy(&user_process.cspace);
     }
+
+    /* Mark the pid as free in the pid_queue, and zero out the entry in the user process list. */
+    sync_bin_sem_wait(process_list_sem);
+    user_process_list[user_process.pid] = (user_process_t){0};
+    sync_bin_sem_post(process_list_sem);
+    free_pid(user_process.pid);
+
+    /* Signal all the other processes waiting on the process that is marked as deleted. */
     for (int i = 0; i < NUM_PROC; i++) {
         seL4_Signal(user_process.wake);
         seL4_SetMR(0, (seL4_Word) user_process.pid);
         seL4_NBSend(proc_signal, seL4_MessageInfo_new(0, 0, 0, 1));
     }
+
+    /* Free the remainder of the untyped memory and caps for the process, including the VSpace and other ntfn/ep objects. */
     free_untype(&user_process.wake, user_process.wake_ut);
     free_untype(&user_process.reply, user_process.reply_ut);
-    /* Free the user process vspace and ep (vspace unassigned from ASID upon freeing) */
-    free_untype(&user_process.vspace, user_process.vspace_ut);
     free_untype(&user_process.ep, user_process.ep_ut);
-    free_untype(&user_process.async_cptr, user_process.async_ut);
-    free(user_process.async_sem);
-    uint8_t id = (uint8_t) user_process.pid;
-    user_process_list[(pid_t) id] = (user_process_t){0};
-    free_pid(id);
-    free_untype(&user_process.handler_busy_cptr, user_process.handler_busy_ut);
-    free(user_process.handler_busy_sem);
-    if (self && user_process.handler_thread != NULL) {
-        /* Free all allocated memory for the syscall thread */
+    free_untype(&user_process.vspace, user_process.vspace_ut);
+
+    /* Finally, destroy the process's handling thread. Always doing this last makes it safe to call for suicidal threads. */
+    if (user_process.handler_thread != NULL) {
+        if (!suicidal) {
+            sync_bin_sem_wait(user_process.handler_busy_sem);
+        }
+        free_untype(&user_process.handler_busy_cptr, user_process.handler_busy_ut);
+        free(user_process.handler_busy_sem);
         thread_destroy(user_process.handler_thread);
     }
 }
@@ -754,7 +763,9 @@ void syscall_proc_wait(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         sync_bin_sem_wait(process_list_sem);
         user_process_t user_process = user_process_list[pid];
         sync_bin_sem_post(process_list_sem);
+        sync_bin_sem_post(my_process.handler_busy_sem);
         seL4_Wait(user_process.wake, 0);
+        sync_bin_sem_wait(my_process.handler_busy_sem);
         seL4_SetMR(0, pid);
     } else {
         seL4_CPtr reply;

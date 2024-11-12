@@ -316,18 +316,18 @@ static bool dealloc_stack(thread_frame *head)
     thread_frame *prev;
     while (curr != NULL) {
         if (curr->frame_cap != seL4_CapNull && curr->frame_ut != NULL) {
-            seL4_Error err = seL4_ARM_Page_Unmap(curr->frame_cap);
-            if (err != seL4_NoError) {
-                ZF_LOGE("Failed to unmap stack");
-                return false;
-            }
-            free_untype(&curr->frame_cap, curr->frame_ut);
-            for (int i = 0; i < 3; i++) {
-                if (curr->slot[i] != seL4_CapNull) {
-                    seL4_ARM_PageTable_Unmap(curr->slot[i]);
-                }
-                free_untype(&curr->slot[i], curr->slot_ut[i]);
-            }
+            // seL4_Error err = seL4_ARM_Page_Unmap(curr->frame_cap);
+            // if (err != seL4_NoError) {
+            //     ZF_LOGE("Failed to unmap stack");
+            //     return false;
+            // }
+            // free_untype(&curr->frame_cap, curr->frame_ut);
+            // for (int i = 0; i < 3; i++) {
+            //     if (curr->slot[i] != seL4_CapNull) {
+            //         seL4_ARM_PageTable_Unmap(curr->slot[i]);
+            //     }
+            //     free_untype(&curr->slot[i], curr->slot_ut[i]);
+            // }
         }
         free(curr->slot_ut);
         free(curr->slot);
@@ -346,10 +346,10 @@ int thread_destroy(sos_thread_t *thread)
     /* Unmap the thread's ipc buffer from the hardware page table */
     seL4_ARM_Page_Unmap(thread->ipc_buffer);
     /* Deallocate the stack of the thread */
-    /*if (!dealloc_stack(thread->head)) {
+    if (!dealloc_stack(thread->head)) {
         ZF_LOGE("Unable to dealloc stack");
         return 1;
-    }*/
+    }
     /* Delete the user_ep capability and free the cslot from the cspace */
     free_untype(&thread->fault_ep, NULL);
     free_untype(&thread->user_ep, NULL);

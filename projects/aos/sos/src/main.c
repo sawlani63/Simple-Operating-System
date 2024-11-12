@@ -176,8 +176,9 @@ NORETURN void syscall_loop(void *arg)
 {
     //seL4_CPtr ep = (seL4_CPtr) arg;
     pid_t pid = (pid_t) arg;
-    seL4_CPtr reply = user_process_list[pid].reply;
-    seL4_CPtr ep = user_process_list[pid].ep;
+    user_process_t process = user_process_list[pid];
+    seL4_CPtr reply = process.reply;
+    seL4_CPtr ep = process.ep;
 
     bool have_reply = false;
     seL4_MessageInfo_t reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
@@ -193,6 +194,7 @@ NORETURN void syscall_loop(void *arg)
             message = seL4_Recv(ep, &sender, reply);
         }
 
+        sync_bin_sem_wait(process.handler_busy_sem);
         /* Awake! We got a message - check the label and badge to
          * see what the message is about */
         seL4_Word label = seL4_MessageInfo_get_label(message);
@@ -214,6 +216,7 @@ NORETURN void syscall_loop(void *arg)
 
             ZF_LOGF("The SOS skeleton does not know how to handle faults!");
         }
+        sync_bin_sem_post(process.handler_busy_sem);
     }
 }
 
