@@ -9,7 +9,41 @@
  *
  * @TAG(DATA61_GPL)
  */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <assert.h>
+#include <string.h>
+
+#include <cspace/cspace.h>
+#include <aos/sel4_zf_logif.h>
+#include <aos/debug.h>
+#include <sel4runtime.h>
+#include <sel4runtime/auxv.h>
+#include <aos/sel4_zf_logif.h>
+#include <aos/debug.h>
+#include <autoconf.h>
+#include <utils/util.h>
+#include <aos/vsyscall.h>
+#include <clock/clock.h>
+
+#include "vmem_layout.h"
+#include "process.h"
+#include "sos_syscall.h"
+#include "frame_table.h"
+#include "tests.h"
+#include "syscalls.h"
+#include "console.h"
+#include "bootstrap.h"
+#include "irq.h"
+#include "drivers/uart.h"
+#include "mapping.h"
 #include "clock_replacement.h"
+
+#include <sos/gen_config.h>
+#ifdef CONFIG_SOS_GDB_ENABLED
+#include "debugger.h"
+#endif /* CONFIG_SOS_GDB_ENABLED */
 
 /*
  * To differentiate between signals from notification objects and and IPC messages,

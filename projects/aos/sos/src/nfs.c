@@ -57,15 +57,14 @@ void nfs_pagefile_read_cb(int err, UNUSED struct nfs_context *nfs, void *data, v
     if (err < 0) {
         ZF_LOGE("NFS: Error in reading file, %s\n", (char*) data);
     } else {
-        sync_bin_sem_wait(data_sem);
         memcpy(args->buff, data, err);
-        sync_bin_sem_post(data_sem);
     }
     args->err = err;
     seL4_Signal(args->signal_cap);
 }
 
 void nfs_pagefile_write_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data) {
+    printf("Entering pagefile write cb\n");
     io_args *args = (io_args *) private_data;
     if (err < 0) {
         ZF_LOGE("NFS: Error in writing file, %s\n", (char*) data);

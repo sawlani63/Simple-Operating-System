@@ -1,5 +1,9 @@
 #pragma once
 
+#include <stdlib.h>
+#include <cspace/cspace.h>
+#include <aos/vsyscall.h>
+
 #include "process.h"
 
 #define O_RDONLY 0

@@ -1,48 +1,13 @@
 #pragma once
 
-#include <autoconf.h>
-#include <utils/util.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <assert.h>
-#include <string.h>
-
 #include <cspace/cspace.h>
-#include <aos/sel4_zf_logif.h>
-#include <aos/debug.h>
-
-#include <clock/clock.h>
-#include <cpio/cpio.h>
-#include <elf/elf.h>
-#include <networkconsole/networkconsole.h>
-
-#include <sel4runtime.h>
-#include <sel4runtime/auxv.h>
-
-#include "bootstrap.h"
-#include "irq.h"
-#include "network.h"
-#include "drivers/uart.h"
-#include "ut.h"
-#include "vmem_layout.h"
-#include "mapping.h"
-#include "syscalls.h"
-#include "tests.h"
-#include "utils.h"
-#include "threads.h"
-#include <sos/gen_config.h>
-#ifdef CONFIG_SOS_GDB_ENABLED
-#include "debugger.h"
-#endif /* CONFIG_SOS_GDB_ENABLED */
-
+#include <sync/bin_sem.h>
 #include <aos/vsyscall.h>
-#include "thread_pool.h"
-#include "addrspace.h"
 
-/* File System */
-#include "console.h"
-#include "nfs.h"
 #include "fs.h"
+#include "addrspace.h"
+#include "threads.h"
 
 /* Number of concurrently running processes supported */
 #define NUM_PROC 32
@@ -97,7 +62,6 @@ typedef struct {
     frame_ref_t stack_frame;
     seL4_CPtr stack;
 } user_process_t;
-#include "elfload.h"
 
 typedef struct {
     pid_t     pid;

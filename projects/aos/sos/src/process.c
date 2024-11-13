@@ -1,4 +1,15 @@
-#include "clock_replacement.h"
+#include "process.h"
+
+#include <clock/clock.h>
+#include <aos/debug.h>
+
+#include "elfload.h"
+#include "utils.h"
+#include "frame_table.h"
+#include "console.h"
+#include "sos_syscall.h"
+#include "vmem_layout.h"
+#include "mapping.h"
 
 /* The number of additional stack pages to provide to the initial
  * process */
@@ -120,7 +131,7 @@ char *get_elf_header(open_file *file, unsigned long *elf_size)
         return NULL;
     }
 
-    Elf64_Ehdr const *header = (void *) data;
+    Elf64_Ehdr *header = (void *) data;
     *elf_size = header->e_shoff + (header->e_shentsize * header->e_shnum);
     return data;
 }
@@ -170,9 +181,6 @@ void free_process(user_process_t user_process, bool suicidal)
         free(user_process.addrspace);
     }
 
-    /* Invalidate the entries within the clock page replacement buffer belonging to this process. */
-    clock_invalidate_process(user_process.pid);
-
     /* Destroy the user process cspace. This destroys all the caps inside of this cspace as well. */
     if (&user_process.cspace != NULL) {
         cspace_destroy(&user_process.cspace);
@@ -211,7 +219,7 @@ static int stack_write(seL4_Word *mapped_stack, int index, uintptr_t val)
 
 /* set up System V ABI compliant stack, so that the process can
  * start up and initialise the C library */
-static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspace, seL4_CPtr local_vspace, elf_t *elf_file)
+static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspace, seL4_CPtr local_vspace)
 {
     addrspace_t *as = user_process->addrspace;
     /* Allocating a region for the stack */
@@ -229,7 +237,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
     uintptr_t local_stack_bottom = SOS_SCRATCH - PAGE_SIZE_4K;
 
     /* Create a stack frame */
-    user_process->stack_frame = clock_alloc_frame(*user_process, stack_bottom);
+    user_process->stack_frame = clock_alloc_frame(stack_bottom, *user_process, 0);
     if (user_process->stack_frame == NULL_FRAME) {
         ZF_LOGD("Failed to alloc frame");
         return -1;
@@ -320,7 +328,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
     /* Exend the stack with extra pages */
     for (int page = 0; page < INITIAL_PROCESS_EXTRA_STACK_PAGES; page++) {
         stack_bottom -= PAGE_SIZE_4K;
-        frame_ref_t frame = clock_alloc_frame(*user_process, stack_bottom);
+        frame_ref_t frame = clock_alloc_frame(stack_bottom, *user_process, 0);
         if (frame == NULL_FRAME) {
             ZF_LOGE("Couldn't allocate additional stack frame");
             return 0;
@@ -421,6 +429,9 @@ int start_process(char *app_name, thread_main_f *func)
         free_process(user_process, false);
         return -1;
     }
+    
+    /* Prematurely map the user process into the process list so that clock_alloc_frame has access to the process's addrspace. */
+    user_process_list[user_process.pid] = user_process;
 
     mem_region_t *region = as_define_ipc_buff(user_process.addrspace);
     if (region == NULL) {
@@ -430,7 +441,7 @@ int start_process(char *app_name, thread_main_f *func)
     }
 
     /* Create an IPC buffer */
-    user_process.ipc_buffer_frame = clock_alloc_frame(user_process, PROCESS_IPC_BUFFER);
+    user_process.ipc_buffer_frame = clock_alloc_frame(PROCESS_IPC_BUFFER, user_process, 1);
     if (user_process.ipc_buffer_frame == NULL_FRAME) {
         ZF_LOGE("Failed to alloc ipc buffer ut");
         free_process(user_process, false);
@@ -542,7 +553,7 @@ int start_process(char *app_name, thread_main_f *func)
     }
 
     /* set up the stack */
-    seL4_Word sp = init_process_stack(&user_process, &cspace, seL4_CapInitThreadVSpace, &elf_file);
+    seL4_Word sp = init_process_stack(&user_process, &cspace, seL4_CapInitThreadVSpace);
     if ((int) sp == -1) {
         ZF_LOGE("Failed to set up the stack");
         free_process(user_process, false);

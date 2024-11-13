@@ -13,7 +13,7 @@
 
 #include "bootstrap.h"
 #include "ut.h"
-#include "clock_replacement.h"
+#include "process.h"
 
 #include <stdlib.h>
 #include <stdbool.h>

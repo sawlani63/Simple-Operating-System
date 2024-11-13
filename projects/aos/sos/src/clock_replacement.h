@@ -1,7 +1,7 @@
 #pragma once
 
-#include "sos_syscall.h"
 #include "frame_table.h"
+#include "process.h"
 
 /**
  * Initialises the bitmap / swap map.
@@ -16,7 +16,7 @@ void mark_block_free(uint32_t block_num);
 
 int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr);
 
-frame_t *clock_choose_victim(frame_ref_t clock_hand);
+frame_t *clock_choose_victim(frame_ref_t clock_hand, frame_ref_t first);
 
 int clock_page_out(frame_t *victim);
 

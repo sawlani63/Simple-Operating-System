@@ -1,5 +1,14 @@
 #include "sos_syscall.h"
 
+#include <clock/clock.h>
+
+#include "utils.h"
+#include "frame_table.h"
+#include "vmem_layout.h"
+#include "network.h"
+#include "console.h"
+#include "thread_pool.h"
+
 extern user_process_t *user_process_list;
 bool console_open_for_read = false;
 
@@ -317,7 +326,6 @@ void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_USLEEP);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
-    user_process_t user_process = user_process_list[badge];
 
     register_timer(seL4_GetMR(1), wakeup, NULL);
 

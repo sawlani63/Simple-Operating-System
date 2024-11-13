@@ -12,6 +12,7 @@
 #include "frame_table.h"
 #include "mapping.h"
 #include "vmem_layout.h"
+#include "clock_replacement.h"
 
 #include <assert.h>
 #include <string.h>
@@ -78,7 +79,7 @@ static struct {
     .allocated = { .list_id = ALLOCATED_LIST },
 };
 
-frame_ref_t clock_hand = 0;
+frame_ref_t clock_hand = NULL_FRAME;
 
 /* Management of frame nodes */
 static frame_ref_t ref_from_frame(frame_t *frame);
@@ -138,13 +139,15 @@ frame_ref_t alloc_frame(void)
 
 frame_ref_t clock_alloc_frame(size_t vaddr, user_process_t process, size_t pinned)
 {
+    printf("Trying to enter critical region for alloc frame\n");
     sync_bin_sem_wait(data_sem);
+    printf("Entered critical region for alloc frame\n");
     frame_ref_t ref = alloc_frame();
     if (ref == NULL_FRAME) {
         if (!clock_hand) {
             clock_hand = frame_table.allocated.first;
         }
-        frame_t *victim = clock_choose_victim(clock_hand);
+        frame_t *victim = clock_choose_victim(clock_hand, frame_table.allocated.first);
         if (clock_page_out(victim) < 0) {
             sync_bin_sem_post(data_sem);
             ZF_LOGE("Failed to page out a frame!");
@@ -162,6 +165,7 @@ frame_ref_t clock_alloc_frame(size_t vaddr, user_process_t process, size_t pinne
     frame->pid = process.pid;
     frame->pinned = pinned;
     frame->referenced = 1;
+    printf("Exited critical region for alloc frame\n");
     sync_bin_sem_post(data_sem);
     return ref;
 }

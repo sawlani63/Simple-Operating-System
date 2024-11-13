@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cspace/cspace.h>
-#include "frame_table.h"
+#include "ut.h"
 
 #define PAGE_TABLE_ENTRIES 0b1 << seL4_VSpaceIndexBits
 
@@ -17,6 +17,8 @@ typedef struct _region {
     struct _region *right;
     char colour;
 } mem_region_t;
+
+typedef size_t frame_ref_t;
 
 /* Needs to sum to 64 bits to be properly byte aligned. */
 typedef struct {
