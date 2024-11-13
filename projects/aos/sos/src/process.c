@@ -192,8 +192,7 @@ void free_process(user_process_t user_process, bool suicidal)
         }
         free_untype(&user_process.handler_busy_cptr, user_process.handler_busy_ut);
         free(user_process.handler_busy_sem);
-        //thread_destroy(user_process.handler_thread);
-        destroy_req(user_process.handler_thread);
+        request_destroy(user_process.handler_thread);
     }
 }
 

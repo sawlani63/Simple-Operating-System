@@ -17,15 +17,16 @@
 #include "ut.h"
 
 extern cspace_t cspace;
+typedef int pid_t;
 
+/* Linked list to keep track of frame_caps and uts allocated for the stack */
 typedef struct thread_frame {
     seL4_CPtr frame_cap;
     ut_t *frame_ut;
-    seL4_CPtr *slot;
-    ut_t **slot_ut;
     struct thread_frame *next;
 } thread_frame;
 
+/* TCB */
 typedef struct {
     ut_t *tcb_ut;
     seL4_CPtr tcb;
@@ -57,8 +58,9 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
 int thread_suspend(sos_thread_t *thread);
 int thread_resume(sos_thread_t *thread);
 
-void thread_destroy(void *arg);
-
-typedef int pid_t;
-
-void destroy_req(sos_thread_t *thread);
+/** Sends a request to the killer thread to kill the thread
+ *  passed into the function.
+ *
+ *  @param thread the thread whose allocated objects need to be freed
+ */
+void request_destroy(sos_thread_t *thread);
