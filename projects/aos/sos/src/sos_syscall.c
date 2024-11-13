@@ -1,5 +1,21 @@
 #include "sos_syscall.h"
 
+#include <clock/clock.h>
+#include <sos/gen_config.h>
+
+#include "utils.h"
+#include "frame_table.h"
+#include "vmem_layout.h"
+#include "network.h"
+#include "console.h"
+#include "thread_pool.h"
+
+#ifdef CONFIG_SOS_FRAME_LIMIT
+    #define MAX_BATCH_SIZE (CONFIG_SOS_FRAME_LIMIT != 0ul ? 1 : 3)
+#else
+    #define MAX_BATCH_SIZE 3
+#endif
+
 extern user_process_t *user_process_list;
 bool console_open_for_read = false;
 
@@ -75,20 +91,18 @@ static inline int perform_io_core(user_process_t user_process, uint16_t data_off
     }
 
     pt_entry *entry = get_page(user_process.addrspace, vaddr);
-    entry->pinned = 1;
+    pin_frame(entry->page.frame_ref);
     sync_bin_sem_wait(data_sem);
     char *data = (char *)frame_data(entry->page.frame_ref);
     sync_bin_sem_post(data_sem);
     io_args *args = malloc(sizeof(io_args));
     *args = (io_args){.err = len, .buff = data + data_offset, .signal_cap = signal_cap, .entry = entry};
     int res;
-    sync_bin_sem_wait(user_process.async_sem);
     if (read) {
         res = file->file_read(file, data + data_offset, file_offset, len, callback, args);
     } else {
         res = file->file_write(file, data + data_offset, file_offset, len, callback, args);
     }
-    sync_bin_sem_post(user_process.async_sem);
 
     return res < 0 ? -1 : res;
 }
@@ -102,7 +116,6 @@ static inline int cleanup_pending_requests(int outstanding_requests) {
 }
 
 static int perform_io(user_process_t user_process, size_t nbyte, uintptr_t vaddr, open_file *file, void *callback, bool read) {
-    #define MAX_BATCH_SIZE (NUM_FRAMES < BIT(19) - 1 ? 1 : 3)
     size_t bytes_received = 0;
     size_t bytes_left = nbyte;
     uint16_t outstanding_requests = 0;
@@ -207,14 +220,11 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     if (strcmp(file_path, "console")) {
         file = file_create(file_path, mode, nfs_pwrite_file, nfs_pread_file);
         io_args args = {.signal_cap = nfs_signal};
-        sync_bin_sem_wait(user_process.async_sem);
         if (nfs_open_file(file, nfs_async_open_cb, &args) < 0) {
             file_destroy(file);
-            sync_bin_sem_post(user_process.async_sem);
             seL4_SetMR(0, -1);
             return;
         }
-        sync_bin_sem_post(user_process.async_sem);
         file->handle = args.buff;
     } else {
         sync_bin_sem_wait(file_sem);
@@ -253,13 +263,10 @@ void syscall_sos_close(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         return;
     } else if (strcmp(found->path, "console")) {
         io_args args = {.signal_cap = nfs_signal};
-        sync_bin_sem_wait(user_process.async_sem);
         if (nfs_close_file(found, nfs_async_close_cb, &args) < 0) {
-            sync_bin_sem_post(user_process.async_sem);
             seL4_SetMR(0, -1);
             return;
         }
-        sync_bin_sem_post(user_process.async_sem);
     } else if (found->mode != O_WRONLY) {
         sync_bin_sem_wait(file_sem);
         console_open_for_read = false;
@@ -325,13 +332,10 @@ void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_USLEEP);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
-    user_process_t user_process = user_process_list[badge];
 
     register_timer(seL4_GetMR(1), wakeup, NULL);
 
-    sync_bin_sem_wait(user_process.async_sem);
     seL4_Wait(sleep_signal, 0);
-    sync_bin_sem_post(user_process.async_sem);
 }
 
 inline void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
@@ -390,13 +394,10 @@ void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     size_t nbyte = seL4_GetMR(3);
 
     io_args args = {.err = 0, .signal_cap = nfs_signal};
-    sync_bin_sem_wait(user_process.async_sem);
     if (nfs_open_dir(nfs_async_opendir_cb, &args)) {
-        sync_bin_sem_post(user_process.async_sem);
         seL4_SetMR(0, -1);
         return;
     }
-    sync_bin_sem_post(user_process.async_sem);
 
     struct nfsdirent *nfsdirent = nfs_read_dir(args.buff);
     int i = 0;

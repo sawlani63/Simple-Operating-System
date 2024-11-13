@@ -11,6 +11,7 @@
  */
 #pragma once
 
+#include "process.h"
 #include <sel4/sel4.h>
 #include <cspace/cspace.h>
 #include <elf/elf.h>
@@ -18,4 +19,4 @@
 
 #include "open_file.h"
 
-int elf_load(cspace_t *cspace, seL4_CPtr loadee_vspace, elf_t *elf_file, addrspace_t *as, unsigned *size, open_file *file);
+int elf_load(cspace_t *cspace, elf_t *elf_file, open_file *file, user_process_t *user_process);

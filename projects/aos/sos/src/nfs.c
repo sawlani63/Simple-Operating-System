@@ -1,7 +1,9 @@
-#include "nfs.h"
 #include <stdlib.h>
 #include <sync/bin_sem.h>
+
+#include "nfs.h"
 #include "sos_syscall.h"
+#include "frame_table.h"
 
 void nfs_async_open_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data) {
     io_args *args = (io_args *) private_data;
@@ -36,7 +38,7 @@ void nfs_async_read_cb(int err, UNUSED struct nfs_context *nfs, void *data, void
     seL4_SetMR(0, args->err);
     seL4_SetMR(1, err);
     seL4_Send(args->signal_cap, seL4_MessageInfo_new(0, 0, 0, 2));
-    args->entry->pinned = 0;
+    unpin_frame(args->entry->page.frame_ref);
     free(args);
 }
 
@@ -48,7 +50,7 @@ void nfs_async_write_cb(int err, UNUSED struct nfs_context *nfs, void *data, voi
     seL4_SetMR(0, args->err);
     seL4_SetMR(1, err);
     seL4_Send(args->signal_cap, seL4_MessageInfo_new(0, 0, 0, 2));
-    args->entry->pinned = 0;
+    unpin_frame(args->entry->page.frame_ref);
     free(args);
 }
 
@@ -57,9 +59,7 @@ void nfs_pagefile_read_cb(int err, UNUSED struct nfs_context *nfs, void *data, v
     if (err < 0) {
         ZF_LOGE("NFS: Error in reading file, %s\n", (char*) data);
     } else {
-        sync_bin_sem_wait(data_sem);
         memcpy(args->buff, data, err);
-        sync_bin_sem_post(data_sem);
     }
     args->err = err;
     seL4_Signal(args->signal_cap);

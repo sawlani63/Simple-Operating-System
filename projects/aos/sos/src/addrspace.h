@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cspace/cspace.h>
-#include "frame_table.h"
+#include "ut.h"
 
 #define PAGE_TABLE_ENTRIES 0b1 << seL4_VSpaceIndexBits
 
@@ -18,25 +18,23 @@ typedef struct _region {
     char colour;
 } mem_region_t;
 
+typedef size_t frame_ref_t;
+
 /* Needs to sum to 64 bits to be properly byte aligned. */
 typedef struct {
     /* A single bit to let us know if this entry is valid/mapped in the page table. */
     size_t valid : 1;
     /* A single bit to let us know whether this entry has been paged out onto disk or not. */
     size_t swapped : 1;
-    /* A single bit to indicate whether this entry is pinned in memory and cannot be paged out */
-    size_t pinned : 1;
     /* Three bits to indicate the permissions associated with this page entry. */
     size_t perms : 3;
     /* These two structs share the same memory and the one we use depends on the present bit. */
     union {
         struct {
-            /* Reference bit to indicate whether this page was recently referenced */
-            size_t ref : 1;
             /* Reference into the frame table. */
             frame_ref_t frame_ref : 19;
             /* Capability to the frame in the Hardware Page Table. */
-            seL4_CPtr frame_cptr : 38;
+            seL4_CPtr frame_cptr : 40;
         } page;
         /* Index into the swap map. Large enough to support the entire address space. */
         size_t swap_map_index : 20;
@@ -104,6 +102,33 @@ void free_region_tree(addrspace_t *addrspace);
 
 /* USED ONLY FOR DEBUGGING */
 void print_regions(addrspace_t *addrspace);
+
+static inline bool vaddr_in_spt(addrspace_t *addrspace, seL4_Word vaddr) {
+    /* We assume the top level is mapped. */
+    page_upper_directory *l1_pt = addrspace->page_table;
+
+    uint16_t l1_index = (vaddr >> 39) & MASK(9); /* Top 9 bits */
+    uint16_t l2_index = (vaddr >> 30) & MASK(9); /* Next 9 bits */
+    uint16_t l3_index = (vaddr >> 21) & MASK(9); /* Next 9 bits */
+    uint16_t l4_index = (vaddr >> 12) & MASK(9); /* Next 9 bits */
+
+    page_directory *l2_pt = l1_pt[l1_index].l2;
+    if (l2_pt == NULL) {
+        return false;
+    }
+
+    page_table *l3_pt = l2_pt[l2_index].l3;
+    if (l3_pt == NULL) {
+        return false;
+    }
+
+    pt_entry *l4_pt = l3_pt[l3_index].l4;
+    if (l4_pt == NULL) {
+        return false;
+    }
+
+    return l4_pt[l4_index].valid || l4_pt[l4_index].swapped;
+}
 
 static inline bool vaddr_is_mapped(addrspace_t *addrspace, seL4_Word vaddr) {
     /* We assume the top level is mapped. */

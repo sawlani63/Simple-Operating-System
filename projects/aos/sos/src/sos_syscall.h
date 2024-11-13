@@ -1,5 +1,9 @@
 #pragma once
 
+#include <stdlib.h>
+#include <cspace/cspace.h>
+#include <aos/vsyscall.h>
+
 #include "process.h"
 
 #define O_RDONLY 0
@@ -18,12 +22,6 @@
 #define SYSCALL_SYS_BRK SYS_brk
 #define SYSCALL_SYS_MMAP SYS_mmap
 #define SYSCALL_SYS_MUNMAP SYS_munmap
-
-#ifdef CONFIG_SOS_FRAME_LIMIT
-    #define NUM_FRAMES ((CONFIG_SOS_FRAME_LIMIT != 0ul ? CONFIG_SOS_FRAME_LIMIT : BIT(19)) - 1)
-#else
-    #define NUM_FRAMES (BIT(19) - 1)
-#endif
 
 void syscall_sos_open(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_sos_close(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
