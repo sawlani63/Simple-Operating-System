@@ -91,7 +91,7 @@ static inline int perform_io_core(user_process_t user_process, uint16_t data_off
     }
 
     pt_entry *entry = get_page(user_process.addrspace, vaddr);
-    entry->pinned = 1;
+    pin_frame(entry->page.frame_ref);
     sync_bin_sem_wait(data_sem);
     char *data = (char *)frame_data(entry->page.frame_ref);
     sync_bin_sem_post(data_sem);

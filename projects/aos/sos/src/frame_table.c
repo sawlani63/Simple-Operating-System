@@ -167,6 +167,16 @@ frame_ref_t clock_alloc_frame(size_t vaddr, user_process_t process, size_t pinne
     return ref;
 }
 
+void pin_frame(frame_ref_t frame_ref) {
+    frame_t *frame = frame_from_ref(frame_ref);
+    frame->pinned = 1;
+}
+
+void unpin_frame(frame_ref_t frame_ref) {
+    frame_t *frame = frame_from_ref(frame_ref);
+    frame->pinned = 0;
+}
+
 void free_frame(frame_ref_t frame_ref)
 {
     if (frame_ref != NULL_FRAME) {

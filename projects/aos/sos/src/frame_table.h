@@ -116,6 +116,10 @@ frame_ref_t alloc_frame(void);
 
 frame_ref_t clock_alloc_frame(size_t vaddr, user_process_t process, size_t pinned);
 
+void pin_frame(frame_ref_t frame_ref);
+
+void unpin_frame(frame_ref_t frame_ref);
+
 /*
  * Free a frame allocated by the frame table.
  *

@@ -47,6 +47,12 @@ void mark_block_free(uint32_t block_num) {
     uint32_t index = block_num / 8;
     uint8_t bit_index = block_num % 8;
     swap_manager.swap_map[index] &= ~(1 << bit_index);
+
+    if (swap_manager.queue_size < QUEUE_SIZE) {
+        swap_manager.swap_queue[swap_manager.queue_tail] = block_num;
+        swap_manager.queue_tail = (swap_manager.queue_tail + 1) % QUEUE_SIZE;
+        swap_manager.queue_size++;
+    }
 }
 
 /* Find first free block (returns block number, or -1 if none found) */
@@ -137,8 +143,7 @@ int clock_page_out(frame_t *victim) {
     free_frame(entry.page.frame_ref);
 
     /* Update our shadow page table mapping to mark it as invalid, swapped and store its index in the page file. */
-    GET_PAGE(as->page_table, vaddr) = (pt_entry){.valid = 0, .swapped = 1, .pinned = 0 ,
-                                                 .perms = GET_PAGE(as->page_table, vaddr).perms,
+    GET_PAGE(as->page_table, vaddr) = (pt_entry){.valid = 0, .swapped = 1, .perms = GET_PAGE(as->page_table, vaddr).perms,
                                                  .swap_map_index = file_offset / PAGE_SIZE_4K};
     return 0;
 }
@@ -186,12 +191,8 @@ int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
         }
         sync_bin_sem_post(data_sem);
 
-        /* Update our swap manager queue to cache the newly unused file offset. */
-        if (swap_manager.queue_size < QUEUE_SIZE) {
-            swap_manager.swap_queue[swap_manager.queue_tail] = entry.swap_map_index;
-            swap_manager.queue_tail = (swap_manager.queue_tail + 1) % QUEUE_SIZE;
-            swap_manager.queue_size++;
-        }
+        /* Update our swap manager bitmap and queue to cache the newly unused file offset. */
+        mark_block_free(entry.swap_map_index);
     } else {
         ZF_LOGV("Unexpected case in clock_try_page_in! Continuing to vm fault.");
         return 1;
