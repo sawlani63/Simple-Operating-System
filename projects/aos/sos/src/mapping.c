@@ -15,6 +15,8 @@
 #include "mapping.h"
 #include "ut.h"
 #include "vmem_layout.h"
+#include "frame_table.h"
+#include "clock_replacement.h"
 
 /**
  * Retypes and maps a page table into the root servers page global directory
@@ -228,10 +230,7 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
         return err;
     }
 
-    pt_entry entry = {.valid = 1, .swapped = 0, .pinned = 0, .perms = perms, .page = {1, frame_ref, frame_cap}};
-    if (vaddr == PROCESS_IPC_BUFFER) {
-        entry.pinned = 1;
-    }
+    pt_entry entry = {.valid = 1, .swapped = 0, .perms = perms, .page = {frame_ref, frame_cap}};
     l4_pt[l4_index] = entry;
 
     /* Assign the appropriate rights and attributes for the frame we are about to map. */
@@ -253,6 +252,7 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
     return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, l1_pt);
 }
 
+extern sync_bin_sem_t *data_sem;
 void sos_destroy_page_table(addrspace_t *as)
 {
     page_upper_directory *l1_pt = as->page_table;
@@ -273,7 +273,10 @@ void sos_destroy_page_table(addrspace_t *as)
                 }
                 for (size_t m = 0; m < PAGE_TABLE_ENTRIES; m++) {
                     pt_entry entry = l4_pt[m];
-                    if (entry.valid == 0 && entry.swapped == 0) {
+                    if (!entry.valid) {
+                        if (entry.swapped) {
+                            mark_block_free(entry.swap_map_index);
+                        }
                         continue;
                     }
                     seL4_CPtr frame_cptr = entry.page.frame_cptr;
@@ -283,7 +286,9 @@ void sos_destroy_page_table(addrspace_t *as)
                         return;
                     }
                     free_untype(&frame_cptr, NULL);
+                    sync_bin_sem_wait(data_sem);
                     free_frame(entry.page.frame_ref);
+                    sync_bin_sem_post(data_sem);
                     l4_pt[m] = (pt_entry){0};
                 }
                 free(l4_pt);

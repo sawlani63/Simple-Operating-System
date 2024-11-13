@@ -12,6 +12,7 @@
 #include "frame_table.h"
 #include "mapping.h"
 #include "vmem_layout.h"
+#include "clock_replacement.h"
 
 #include <assert.h>
 #include <string.h>
@@ -78,6 +79,8 @@ static struct {
     .allocated = { .list_id = ALLOCATED_LIST },
 };
 
+frame_ref_t clock_hand = NULL_FRAME;
+
 /* Management of frame nodes */
 static frame_ref_t ref_from_frame(frame_t *frame);
 
@@ -132,6 +135,46 @@ frame_ref_t alloc_frame(void)
     }
 
     return ref_from_frame(frame);
+}
+
+frame_ref_t clock_alloc_frame(size_t vaddr, user_process_t process, size_t pinned)
+{
+    sync_bin_sem_wait(data_sem);
+    frame_ref_t ref = alloc_frame();
+    if (ref == NULL_FRAME) {
+        if (!clock_hand) {
+            clock_hand = frame_table.allocated.first;
+        }
+        frame_t *victim = clock_choose_victim(clock_hand, frame_table.allocated.first);
+        if (clock_page_out(victim) < 0) {
+            sync_bin_sem_post(data_sem);
+            ZF_LOGE("Failed to page out a frame!");
+            return NULL_FRAME;
+        }
+        ref = alloc_frame();
+        if (ref == NULL_FRAME) {
+            sync_bin_sem_post(data_sem);
+            ZF_LOGE("Could not allocate frame!");
+            return NULL_FRAME;
+        }
+    }
+    frame_t *frame = frame_from_ref(ref);
+    frame->vaddr = vaddr;
+    frame->pid = process.pid;
+    frame->pinned = pinned;
+    frame->referenced = 1;
+    sync_bin_sem_post(data_sem);
+    return ref;
+}
+
+void pin_frame(frame_ref_t frame_ref) {
+    frame_t *frame = frame_from_ref(frame_ref);
+    frame->pinned = 1;
+}
+
+void unpin_frame(frame_ref_t frame_ref) {
+    frame_t *frame = frame_from_ref(frame_ref);
+    frame->pinned = 0;
 }
 
 void free_frame(frame_ref_t frame_ref)
