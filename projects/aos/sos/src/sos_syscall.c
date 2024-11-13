@@ -1,6 +1,7 @@
 #include "sos_syscall.h"
 
 #include <clock/clock.h>
+#include <sos/gen_config.h>
 
 #include "utils.h"
 #include "frame_table.h"
@@ -8,6 +9,12 @@
 #include "network.h"
 #include "console.h"
 #include "thread_pool.h"
+
+#ifdef CONFIG_SOS_FRAME_LIMIT
+    #define MAX_BATCH_SIZE (CONFIG_SOS_FRAME_LIMIT != 0ul ? 1 : 3)
+#else
+    #define MAX_BATCH_SIZE 3
+#endif
 
 extern user_process_t *user_process_list;
 bool console_open_for_read = false;
@@ -109,7 +116,6 @@ static inline int cleanup_pending_requests(int outstanding_requests) {
 }
 
 static int perform_io(user_process_t user_process, size_t nbyte, uintptr_t vaddr, open_file *file, void *callback, bool read) {
-    #define MAX_BATCH_SIZE (NUM_FRAMES < BIT(19) - 1 ? 1 : 3)
     size_t bytes_received = 0;
     size_t bytes_left = nbyte;
     uint16_t outstanding_requests = 0;

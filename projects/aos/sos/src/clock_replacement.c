@@ -123,9 +123,7 @@ int clock_page_out(frame_t *victim) {
     if (res < 0) {
         return -1;
     }
-    printf("Paging out\n");
     seL4_Wait(swap_manager.page_notif, 0);
-    printf("Paged out\n");
     if (args.err < 0) {
         return -1;
     }
@@ -165,7 +163,6 @@ int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
         sync_bin_sem_post(data_sem);
     } else if (entry.swapped) {
         /* Allocate a new frame to be mapped by the shadow page table. */
-        printf("Starting clock alloc frame for try page in. \n");
         ref = clock_alloc_frame(vaddr, *user_process, 0);
         if (ref == NULL_FRAME) {
             ZF_LOGD("Failed to alloc frame");
@@ -179,10 +176,12 @@ int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
         io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, NULL};
         int res = nfs_pread_file(nfs_pagefile, NULL, file_offset, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
         if (res < (int)PAGE_SIZE_4K) {
+            sync_bin_sem_post(data_sem);
             return -1;
         }
         seL4_Wait(swap_manager.page_notif, 0);
         if (args.err < 0) {
+            sync_bin_sem_post(data_sem);
             return 1;
         }
         sync_bin_sem_post(data_sem);

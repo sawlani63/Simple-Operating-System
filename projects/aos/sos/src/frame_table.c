@@ -139,9 +139,7 @@ frame_ref_t alloc_frame(void)
 
 frame_ref_t clock_alloc_frame(size_t vaddr, user_process_t process, size_t pinned)
 {
-    printf("Trying to enter critical region for alloc frame\n");
     sync_bin_sem_wait(data_sem);
-    printf("Entered critical region for alloc frame\n");
     frame_ref_t ref = alloc_frame();
     if (ref == NULL_FRAME) {
         if (!clock_hand) {
@@ -165,7 +163,6 @@ frame_ref_t clock_alloc_frame(size_t vaddr, user_process_t process, size_t pinne
     frame->pid = process.pid;
     frame->pinned = pinned;
     frame->referenced = 1;
-    printf("Exited critical region for alloc frame\n");
     sync_bin_sem_post(data_sem);
     return ref;
 }
