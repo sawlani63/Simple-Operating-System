@@ -202,11 +202,6 @@ void free_process(user_process_t user_process, bool suicidal)
 
     /* Finally, destroy the process's handling thread. Always doing this last makes it safe to call for suicidal threads. */
     if (user_process.handler_thread != NULL) {
-        if (!suicidal) {
-            sync_bin_sem_wait(user_process.handler_busy_sem);
-        }
-        free_untype(&user_process.handler_busy_cptr, user_process.handler_busy_ut);
-        free(user_process.handler_busy_sem);
         request_destroy(user_process.handler_thread);
     }
 }
