@@ -288,10 +288,7 @@ void sos_destroy_page_table(addrspace_t *as)
                 }
                 for (size_t m = 0; m < PAGE_TABLE_ENTRIES; m++) {
                     pt_entry entry = l4_pt[m];
-                    /*if (entry.valid == 0 && entry.swapped == 0) {
-                        continue;
-                    }*/
-                    if (entry.page.frame_cptr == seL4_CapNull) {
+                    if (entry.valid == 0 && entry.swapped == 0) {
                         continue;
                     }
                     seL4_CPtr frame_cptr = entry.page.frame_cptr;

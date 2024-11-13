@@ -166,19 +166,21 @@ void free_process(user_process_t user_process, bool suicidal)
         cspace_destroy(&user_process.cspace);
     }
 
+    /* Signal all the other processes waiting on the process that is marked as deleted. */
+    for (int i = 0; i < NUM_PROC; i++) {
+        seL4_Signal(user_process.wake);
+        seL4_SetMR(0, (seL4_Word) user_process.pid);
+        seL4_NBSend(proc_signal, seL4_MessageInfo_new(0, 0, 0, 1));
+    }
+
     /* Mark the pid as free in the pid_queue, and zero out the entry in the user process list. */
     sync_bin_sem_wait(process_list_sem);
     user_process_list[user_process.pid] = (user_process_t){0};
     sync_bin_sem_post(process_list_sem);
     free_pid(user_process.pid);
 
-    /* Signal all the other processes waiting on the process that is marked as deleted. */
-    for (int i = 0; i < NUM_PROC; i++) {
-        seL4_SetMR(0, (seL4_Word) user_process.pid);
-        seL4_NBSend(proc_signal, seL4_MessageInfo_new(0, 0, 0, 1));
-    }
-
     /* Free the remainder of the untyped memory and caps for the process, including the VSpace and other ntfn/ep objects. */
+    free_untype(&user_process.wake, user_process.wake_ut);
     free_untype(&user_process.reply, user_process.reply_ut);
     free_untype(&user_process.ep, user_process.ep_ut);
     free_untype(&user_process.vspace, user_process.vspace_ut);
@@ -190,7 +192,8 @@ void free_process(user_process_t user_process, bool suicidal)
         }
         free_untype(&user_process.handler_busy_cptr, user_process.handler_busy_ut);
         free(user_process.handler_busy_sem);
-        thread_destroy(user_process.handler_thread);
+        //thread_destroy(user_process.handler_thread);
+        destroy_req(user_process.handler_thread);
     }
 }
 
@@ -407,6 +410,13 @@ int start_process(char *app_name, thread_main_f *func)
     user_process.reply_ut = alloc_retype(&user_process.reply, seL4_ReplyObject, seL4_ReplyBits);
     if (user_process.reply_ut == NULL) {
         ZF_LOGE("Failed to create reply object");
+        free_process(user_process, false);
+        return -1;
+    }
+
+    user_process.wake_ut = alloc_retype(&user_process.wake, seL4_NotificationObject, seL4_NotificationBits);
+    if (user_process.wake_ut == NULL) {
+        ZF_LOGE("Failed to create notification object");
         free_process(user_process, false);
         return -1;
     }
@@ -724,30 +734,33 @@ void syscall_proc_wait(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         seL4_SetMR(0, -1);
         return;
     }
-    
+
     sync_bin_sem_wait(process_list_sem);
-    user_process_t user_process = user_process_list[pid];
+    user_process_t my_process = user_process_list[badge];
     sync_bin_sem_post(process_list_sem);
 
-    seL4_CPtr reply;
-    ut_t *ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
-    if (ut == NULL) {
-        seL4_SetMR(0, -1);
-        return;
-    }
-
-    seL4_Word sender = -2;
-    while ((pid_t) sender != pid) {
-        if (user_process.stime == 0) {
-            sender = pid;
-            break;
+    if (pid >= 0) {
+        sync_bin_sem_wait(process_list_sem);
+        user_process_t user_process = user_process_list[pid];
+        sync_bin_sem_post(process_list_sem);
+        sync_bin_sem_post(my_process.handler_busy_sem);
+        seL4_Wait(user_process.wake, 0);
+        sync_bin_sem_wait(my_process.handler_busy_sem);
+        seL4_SetMR(0, pid);
+    } else {
+        seL4_CPtr reply;
+        ut_t *ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
+        if (ut == NULL) {
+            seL4_SetMR(0, -1);
+            return;
         }
         seL4_Recv(proc_signal, 0, reply);
-        sender = seL4_GetMR(0);
-        if (pid == -1) {
-            break;
-        }
+        free_untype(&reply, ut);
+        seL4_SetMR(0, seL4_GetMR(0));
     }
-    free_untype(&reply, ut);
-    seL4_SetMR(0, sender);
+}
+
+sos_thread_t *get_thread(pid_t id) {
+    user_process_t user_process = user_process_list[id];
+    return user_process.handler_thread;
 }

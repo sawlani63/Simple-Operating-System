@@ -57,4 +57,8 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
 int thread_suspend(sos_thread_t *thread);
 int thread_resume(sos_thread_t *thread);
 
-int thread_destroy(sos_thread_t *thread);
+void thread_destroy(void *arg);
+
+typedef int pid_t;
+
+void destroy_req(sos_thread_t *thread);

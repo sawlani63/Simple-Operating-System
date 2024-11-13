@@ -319,7 +319,6 @@ int main(void)
 
     while (!done) {
         if (new) {
-            fflush(stdout);
             printf("$ ");
         }
         new = 0;

@@ -61,6 +61,7 @@
         "addrspace.h": "c",
         "vmem_layout.h": "c",
         "clock.h": "c",
-        "vsyscall.h": "c"
+        "vsyscall.h": "c",
+        "thread": "c"
     }
 }

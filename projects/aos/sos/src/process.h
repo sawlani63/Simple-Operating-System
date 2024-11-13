@@ -80,6 +80,8 @@ typedef struct user_process {
     ut_t *ep_ut;
     seL4_CPtr reply;
     ut_t *reply_ut;
+    seL4_CPtr wake;
+    ut_t *wake_ut;
 
     seL4_CPtr ep_slot;
     ut_t *tcb_ut;
@@ -115,3 +117,5 @@ void syscall_proc_delete(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_proc_getid(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_proc_status(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_proc_wait(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
+
+sos_thread_t *get_thread(pid_t id);
