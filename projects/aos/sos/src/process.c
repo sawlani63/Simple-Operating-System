@@ -758,8 +758,3 @@ void syscall_proc_wait(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         seL4_SetMR(0, seL4_GetMR(0));
     }
 }
-
-sos_thread_t *get_thread(pid_t id) {
-    user_process_t user_process = user_process_list[id];
-    return user_process.handler_thread;
-}

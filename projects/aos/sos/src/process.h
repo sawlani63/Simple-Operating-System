@@ -117,5 +117,3 @@ void syscall_proc_delete(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_proc_getid(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_proc_status(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_proc_wait(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
-
-sos_thread_t *get_thread(pid_t id);

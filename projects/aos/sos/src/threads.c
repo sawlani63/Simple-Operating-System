@@ -81,11 +81,14 @@ static bool alloc_stack(thread_frame *head, seL4_Word *sp)
     // Skip guard page
     curr_stack += PAGE_SIZE_4K;
     thread_frame *curr = head;
+    thread_frame *prev;
     for (int i = 0; i < SOS_STACK_PAGES; i++) {
         seL4_CPtr frame_cap;
         ut_t *frame = alloc_retype(&frame_cap, seL4_ARM_SmallPageObject, seL4_PageBits);
         if (frame == NULL) {
             ZF_LOGE("Failed to allocate stack page");
+            prev->next = NULL;
+            free(curr);
             return false;
         }
         seL4_Error err = map_frame(&cspace, frame_cap, seL4_CapInitThreadVSpace,
@@ -93,6 +96,8 @@ static bool alloc_stack(thread_frame *head, seL4_Word *sp)
         if (err != seL4_NoError) {
             ZF_LOGE("Failed to map stack");
             free_untype(&frame_cap, frame);
+            prev->next = NULL;
+            free(curr);
             return false;
         }
         curr_stack += PAGE_SIZE_4K;
@@ -100,8 +105,11 @@ static bool alloc_stack(thread_frame *head, seL4_Word *sp)
         curr->frame_cap = frame_cap;
         curr->frame_ut = frame;
         curr->next = calloc(1, sizeof(thread_frame));
+        prev = curr;
         curr = curr->next;
     }
+    prev->next = NULL;
+    free(curr);
     *sp = curr_stack;
     return true;
 }
@@ -377,14 +385,12 @@ static bool dealloc_stack(thread_frame *head)
     thread_frame *curr = head;
     thread_frame *prev;
     while (curr != NULL) {
-        if (curr->frame_cap != seL4_CapNull && curr->frame_ut != NULL) {
-            seL4_Error err = seL4_ARM_Page_Unmap(curr->frame_cap);
-            if (err != seL4_NoError) {
-                ZF_LOGE("Failed to unmap stack");
-                return false;
-            }
-            free_untype(&curr->frame_cap, curr->frame_ut);
+        seL4_Error err = seL4_ARM_Page_Unmap(curr->frame_cap);
+        if (err != seL4_NoError) {
+            ZF_LOGE("Failed to unmap stack");
+            return false;
         }
+        free_untype(&curr->frame_cap, curr->frame_ut);
         prev = curr;
         curr = curr->next;
         free(prev);

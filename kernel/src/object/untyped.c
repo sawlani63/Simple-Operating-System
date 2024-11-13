@@ -118,7 +118,6 @@ exception_t decodeUntypedInvocation(word_t invLabel, word_t length, cte_t *slot,
         lu_ret = lookupTargetSlot(rootCap, nodeIndex, nodeDepth);
         if (lu_ret.status != EXCEPTION_NONE) {
             userError("Untyped Retype: Invalid destination address.");
-            printf("CHIRAG\n");
             return lu_ret.status;
         }
         nodeCap = lu_ret.slot->cap;
