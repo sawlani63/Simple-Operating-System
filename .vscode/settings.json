@@ -62,6 +62,7 @@
         "vmem_layout.h": "c",
         "clock.h": "c",
         "vsyscall.h": "c",
+        "thread": "c",
         "assert.h": "c"
     }
 }

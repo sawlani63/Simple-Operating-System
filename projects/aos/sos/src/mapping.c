@@ -77,7 +77,7 @@ static seL4_Error retype_map_pud(cspace_t *cspace, seL4_CPtr vspace, seL4_Word v
 
 seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
                           seL4_CapRights_t rights, seL4_ARM_VMAttributes attr,
-                          seL4_CPtr *free_slots, seL4_Word *used, page_upper_directory *page_table, thread_frame *curr)
+                          seL4_CPtr *free_slots, seL4_Word *used, page_upper_directory *page_table)
 {
     /* We use our shadow page table which follows the same structure as the hardware one.
     * Check the seL4 Manual section 7.1.1 for hardware virtual memory objects. Importantly
@@ -122,9 +122,6 @@ seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspac
             if (page_table != NULL) {
                 page_table[l1_index].l2[l2_index].l3[l3_index].ut = ut;
                 page_table[l1_index].l2[l2_index].l3[l3_index].slot = slot;
-            } else if (curr != NULL) {
-                curr->slot[i] = slot;
-                curr->slot_ut[i] = ut;
             }
             break;
         case SEL4_MAPPING_LOOKUP_NO_PD:
@@ -132,9 +129,6 @@ seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspac
             if (page_table != NULL) {
                 page_table[l1_index].l2[l2_index].ut = ut;
                 page_table[l1_index].l2[l2_index].slot = slot;
-            } else if (curr != NULL) {
-                curr->slot[i] = slot;
-                curr->slot_ut[i] = ut;
             }
             break;
         case SEL4_MAPPING_LOOKUP_NO_PUD:
@@ -142,9 +136,6 @@ seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspac
             if (page_table != NULL) {
                 page_table[l1_index].ut = ut;
                 page_table[l1_index].slot = slot;
-            } else if (curr != NULL) {
-                curr->slot[i] = slot;
-                curr->slot_ut[i] = ut;
             }
             break;
         }
@@ -166,26 +157,20 @@ seL4_Error map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vsp
         ZF_LOGE("Invalid arguments");
         return -1;
     }
-    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, NULL, NULL);
-}
-
-seL4_Error thread_map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
-                            seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, thread_frame *curr)
-{
-    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, NULL, curr);
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, NULL);
 }
 
 seL4_Error map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
                      seL4_CapRights_t rights, seL4_ARM_VMAttributes attr)
 {
-    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, NULL, NULL);
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, NULL);
 }
 
 seL4_Error sos_map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
                                 seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, seL4_CPtr *free_slots,
                                 seL4_Word *used, page_upper_directory *page_table)
 {
-    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, page_table, NULL);
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, page_table);
 }
 
 seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
@@ -264,7 +249,7 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
         attr |= seL4_ARM_ExecuteNever;
     }
 
-    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, l1_pt, NULL);
+    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, l1_pt);
 }
 
 extern sync_bin_sem_t *data_sem;
@@ -295,27 +280,58 @@ void sos_destroy_page_table(addrspace_t *as)
                         continue;
                     }
                     seL4_CPtr frame_cptr = entry.page.frame_cptr;
-                    seL4_ARM_Page_Unmap(frame_cptr);
+                    seL4_Error err = seL4_ARM_Page_Unmap(frame_cptr);
+                    if (err != seL4_NoError) {
+                        ZF_LOGE("Failed to unmap");
+                        return;
+                    }
                     free_untype(&frame_cptr, NULL);
                     sync_bin_sem_wait(data_sem);
                     free_frame(entry.page.frame_ref);
                     sync_bin_sem_post(data_sem);
                     l4_pt[m] = (pt_entry){0};
                 }
-                if (l3_pt[k].slot != seL4_CapNull) {
-                    seL4_ARM_PageTable_Unmap(l3_pt[k].slot);
-                }
-                free_untype(&l3_pt[k].slot, l3_pt[k].ut);
                 free(l4_pt);
             }
+        }
+    }
+
+    for (size_t i = 0; i < PAGE_TABLE_ENTRIES; i++) {
+        page_directory *l2_pt = l1_pt[i].l2;
+        if (l2_pt == NULL) {
+            continue;
+        }
+        for (size_t j = 0; j < PAGE_TABLE_ENTRIES; j++) {
+            page_table *l3_pt = l2_pt[j].l3;
+            if (l3_pt == NULL) {
+                continue;
+            }
+            for (size_t k = 0; k < PAGE_TABLE_ENTRIES; k++) {
+                if (l3_pt[k].slot != seL4_CapNull) {
+                    seL4_Error err = seL4_ARM_PageTable_Unmap(l3_pt[k].slot);
+                    if (err != seL4_NoError) {
+                        ZF_LOGE("Failed to unmap");
+                        return;
+                    }
+                }
+                free_untype(&l3_pt[k].slot, l3_pt[k].ut);
+            }
             if (l2_pt[j].slot != seL4_CapNull) {
-                seL4_ARM_PageTable_Unmap(l2_pt[j].slot);
+                seL4_Error err = seL4_ARM_PageTable_Unmap(l2_pt[j].slot);
+                if (err != seL4_NoError) {
+                    ZF_LOGE("Failed to unmap");
+                    return;
+                }
             }
             free_untype(&l2_pt[j].slot, l2_pt[j].ut);
             free(l3_pt);
         }
         if (l1_pt[i].slot != seL4_CapNull) {
-            seL4_ARM_PageTable_Unmap(l1_pt[i].slot);
+            seL4_Error err = seL4_ARM_PageTable_Unmap(l1_pt[i].slot);
+            if (err != seL4_NoError) {
+                ZF_LOGE("Failed to unmap");
+                return;
+            }
         }
         free_untype(&l1_pt[i].slot, l1_pt[i].ut);
         free(l2_pt);

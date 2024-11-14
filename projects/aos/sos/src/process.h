@@ -45,7 +45,6 @@ typedef struct {
     ut_t *wake_ut;
 
     seL4_CPtr ep_slot;
-    seL4_CPtr ntfn_slot;
     ut_t *tcb_ut;
     seL4_CPtr tcb;
     ut_t *vspace_ut;

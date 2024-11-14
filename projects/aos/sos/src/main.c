@@ -59,10 +59,6 @@
 
 #define APP_NAME             "sosh"
 
-/* The linker will link this symbol to the start address  *
- * of an archive of attached applications.                */
-extern char _cpio_archive[];
-extern char _cpio_archive_end[];
 extern char __eh_frame_start[];
 /* provided by gcc */
 extern void (__register_frame)(void *);
@@ -208,7 +204,6 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
 
 NORETURN void syscall_loop(void *arg)
 {
-    //seL4_CPtr ep = (seL4_CPtr) arg;
     pid_t pid = (pid_t) arg;
     user_process_t process = user_process_list[pid];
     seL4_CPtr reply = process.reply;
@@ -436,11 +431,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     ZF_LOGF_IF(success == -1, "Failed to start process");
 
     /* We swap the task of irq handling from the temp thread to our main thread, and destroy our temp thread */
-    //error = thread_destroy(irq_temp_thread);
-    //ZF_LOGF_IFERR(error, "Failed to destroy the temp irq thread");
-    /* Unbind its binded notification too */
-    seL4_TCB_UnbindNotification(irq_temp_thread->tcb);
-    //free_untype(&irq_temp_thread->tcb, irq_temp_thread->tcb_ut);
+    request_destroy(irq_temp_thread);
     seL4_Error bind_err = seL4_TCB_BindNotification(seL4_CapInitThreadTCB, ntfn);
     ZF_LOGF_IFERR(bind_err, "Failed to bind notification object to TCB");
 

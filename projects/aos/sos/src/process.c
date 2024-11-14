@@ -15,11 +15,6 @@
  * process */
 #define INITIAL_PROCESS_EXTRA_STACK_PAGES 4
 
-/* The linker will link this symbol to the start address  *
- * of an archive of attached applications.                */
-extern char _cpio_archive[];
-extern char _cpio_archive_end[];
-
 #define APP_PRIORITY         (0)
 
 extern seL4_CPtr sched_ctrl_start;
@@ -186,18 +181,18 @@ void free_process(user_process_t user_process, bool suicidal)
         cspace_destroy(&user_process.cspace);
     }
 
-    /* Mark the pid as free in the pid_queue, and zero out the entry in the user process list. */
-    sync_bin_sem_wait(process_list_sem);
-    user_process_list[user_process.pid] = (user_process_t){0};
-    sync_bin_sem_post(process_list_sem);
-    free_pid(user_process.pid);
-
     /* Signal all the other processes waiting on the process that is marked as deleted. */
     for (int i = 0; i < NUM_PROC; i++) {
         seL4_Signal(user_process.wake);
         seL4_SetMR(0, (seL4_Word) user_process.pid);
         seL4_NBSend(proc_signal, seL4_MessageInfo_new(0, 0, 0, 1));
     }
+
+    /* Mark the pid as free in the pid_queue, and zero out the entry in the user process list. */
+    sync_bin_sem_wait(process_list_sem);
+    user_process_list[user_process.pid] = (user_process_t){0};
+    sync_bin_sem_post(process_list_sem);
+    free_pid(user_process.pid);
 
     /* Free the remainder of the untyped memory and caps for the process, including the VSpace and other ntfn/ep objects. */
     free_untype(&user_process.wake, user_process.wake_ut);
@@ -207,7 +202,7 @@ void free_process(user_process_t user_process, bool suicidal)
 
     /* Finally, destroy the process's handling thread. Always doing this last makes it safe to call for suicidal threads. */
     if (user_process.handler_thread != NULL) {
-        thread_destroy(user_process.handler_thread);
+        request_destroy(user_process.handler_thread);
     }
 }
 
@@ -249,7 +244,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
                                    user_process->stack_frame, as);
     if (err != 0) {
         ZF_LOGE("Unable to map stack for user app");
-        return 0;
+        return -1;
     }
     user_process->size++;
 
@@ -257,7 +252,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
     seL4_CPtr local_stack_cptr = cspace_alloc_slot(cspace);
     if (local_stack_cptr == seL4_CapNull) {
         ZF_LOGE("Failed to alloc slot for stack");
-        return 0;
+        return -1;
     }
 
     /* copy the stack frame cap into the slot */
@@ -265,7 +260,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
     if (err != seL4_NoError) {
         cspace_free_slot(cspace, local_stack_cptr);
         ZF_LOGE("Failed to copy cap");
-        return 0;
+        return -1;
     }
 
     /* map it into the sos address space */
@@ -274,7 +269,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
     if (err != seL4_NoError) {
         cspace_delete(cspace, local_stack_cptr);
         cspace_free_slot(cspace, local_stack_cptr);
-        return 0;
+        return -1;
     }
 
     int index = -2;
@@ -331,7 +326,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
         frame_ref_t frame = clock_alloc_frame(stack_bottom, *user_process, 0);
         if (frame == NULL_FRAME) {
             ZF_LOGE("Couldn't allocate additional stack frame");
-            return 0;
+            return -1;
         }
 
         err = sos_map_frame(cspace, user_process->vspace, stack_bottom,
@@ -463,21 +458,6 @@ int start_process(char *app_name, thread_main_f *func)
     err = cspace_mint(&user_process.cspace, user_process.ep_slot, &cspace, user_process.ep, seL4_AllRights, (seL4_Word) user_process.pid);
     if (err) {
         ZF_LOGE("Failed to mint user ep");
-        free_process(user_process, false);
-        return -1;
-    }
-
-    user_process.ntfn_slot = cspace_alloc_slot(&user_process.cspace);
-    if (user_process.ntfn_slot == seL4_CapNull) {
-        ZF_LOGE("Failed to alloc ntfn slot");
-        free_process(user_process, false);
-        return -1;
-    }
-
-    /* now mutate the cap, thereby setting the badge */
-    err = cspace_mint(&user_process.cspace, user_process.ntfn_slot, &cspace, proc_signal, seL4_AllRights, (seL4_Word) user_process.pid);
-    if (err) {
-        ZF_LOGE("Failed to mint ntfn");
         free_process(user_process, false);
         return -1;
     }
@@ -745,7 +725,7 @@ void syscall_proc_wait(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         seL4_SetMR(0, -1);
         return;
     }
-    
+
     sync_bin_sem_wait(process_list_sem);
     user_process_t my_process = user_process_list[badge];
     sync_bin_sem_post(process_list_sem);
