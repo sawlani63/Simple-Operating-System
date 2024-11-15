@@ -17,9 +17,6 @@ set(PLATFORM odroidc2 CACHE STRING "" FORCE)
 # build all libs as static
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
-# was told we can do this by a demo
-#add_compile_options(-O3)
-
 set(project_dir "${CMAKE_CURRENT_LIST_DIR}")
 get_filename_component(resolved_path ${CMAKE_CURRENT_LIST_FILE} REALPATH)
 # repo_dir is distinct from project_dir as this file is symlinked.
