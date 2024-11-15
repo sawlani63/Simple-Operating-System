@@ -22,13 +22,13 @@ extern seL4_CPtr sched_ctrl_end;
 extern seL4_CPtr nfs_signal;
 extern bool console_open_for_read;
 extern sync_bin_sem_t *file_sem;
-thread_main_f *handler_func = NULL;
+extern thread_main_f *handler_function;
 
 seL4_CPtr proc_signal; // for waiting on pid -1
 user_process_t *user_process_list;
 pid_t *pid_queue;
 int pid_queue_head = 0;
-int pid_queue_tail = NUM_PROC - 1;
+int pid_queue_tail = NUM_PROC;
 
 sync_bin_sem_t *pid_queue_sem = NULL;
 sync_bin_sem_t *process_list_sem = NULL;
@@ -39,7 +39,7 @@ int init_proc()
     if (user_process_list == NULL) {
         return 1;
     }
-    pid_queue = malloc(NUM_PROC * sizeof(pid_t));
+    pid_queue = malloc((NUM_PROC + 1) * sizeof(pid_t));
     if (pid_queue == NULL) {
         free(user_process_list);
         return 1;
@@ -53,7 +53,7 @@ int init_proc()
         return 1;
     }
     /* Put all the possible pids in the queue */
-    for (int i = 0; i < NUM_PROC; i++) {
+    for (int i = 0; i < (NUM_PROC + 1); i++) {
         pid_queue[i] = i;
     }
 
@@ -82,7 +82,7 @@ static pid_t get_pid() {
     }
 
     pid_t pid = pid_queue[pid_queue_head];
-    pid_queue_head = (pid_queue_head + 1) % NUM_PROC;
+    pid_queue_head = ((pid_queue_head + 1) % (NUM_PROC + 1));
 
     sync_bin_sem_post(pid_queue_sem);
     return pid;
@@ -91,44 +91,15 @@ static pid_t get_pid() {
 static void free_pid(pid_t pid) {
     sync_bin_sem_wait(pid_queue_sem);
 
-    if ((pid_queue_tail + 1) % NUM_PROC == pid_queue_head) {
+    if (((pid_queue_tail + 1) % (NUM_PROC + 1)) == pid_queue_head) {
         sync_bin_sem_post(pid_queue_sem);
         return;
     }
 
     pid_queue[pid_queue_tail] = pid;
-    pid_queue_tail = (pid_queue_tail + 1) % NUM_PROC;
+    pid_queue_tail = ((pid_queue_tail + 1) % (NUM_PROC + 1));
 
     sync_bin_sem_post(pid_queue_sem);
-}
-
-char *get_elf_header(open_file *file, unsigned long *elf_size)
-{
-    io_args args = {.signal_cap = nfs_signal};
-    int error = nfs_open_file(file, nfs_async_open_cb, &args);
-    if (error) {
-        ZF_LOGE("NFS: Error in opening app");
-        return NULL;
-    }
-    file->handle = args.buff;
-
-    char *data = malloc(sizeof(char) * PAGE_SIZE_4K);
-    args.buff = data;
-    error = nfs_pread_file(file, NULL, 0, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
-    if (error < (int) PAGE_SIZE_4K) {
-        ZF_LOGE("NFS: Error in reading ELF and program headers");
-        free(data);
-        return NULL;
-    }
-    seL4_Wait(nfs_signal, 0);
-    if (args.err < 0) {
-        free(data);
-        return NULL;
-    }
-
-    Elf64_Ehdr *header = (void *) data;
-    *elf_size = header->e_shoff + (header->e_shentsize * header->e_shnum);
-    return data;
 }
 
 user_process_t get_process(pid_t pid) {
@@ -152,11 +123,13 @@ void free_process(user_process_t user_process, bool suicidal)
     free_untype(&user_process.tcb, user_process.tcb_ut);
 
     /* Wait for outstanding syscalls to finish before starting to free the rest of the process. */
-    if (!suicidal) {
-        sync_bin_sem_wait(user_process.handler_busy_sem);
+    if (user_process.handler_busy_sem != NULL) {
+        if (!suicidal) {
+            sync_bin_sem_wait(user_process.handler_busy_sem);
+        }
+        free_untype(&user_process.handler_busy_cptr, user_process.handler_busy_ut);
+        free(user_process.handler_busy_sem);
     }
-    free_untype(&user_process.handler_busy_cptr, user_process.handler_busy_ut);
-    free(user_process.handler_busy_sem);
 
     /* Free the file descriptor table. */
     if (user_process.fdt != NULL) {
@@ -282,9 +255,6 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
     index = stack_write(local_stack_top, index, PAGE_SIZE_4K);
     index = stack_write(local_stack_top, index, AT_PAGESZ);
 
-    //index = stack_write(local_stack_top, index, *sysinfo);
-    //index = stack_write(local_stack_top, index, AT_SYSINFO);
-
     index = stack_write(local_stack_top, index, PROCESS_IPC_BUFFER);
     index = stack_write(local_stack_top, index, AT_SEL4_IPC_BUFFER_PTR);
 
@@ -331,19 +301,20 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
 
         err = sos_map_frame(cspace, user_process->vspace, stack_bottom,
                             REGION_RD | REGION_WR, frame, as);
+        if (err != 0) {
+            ZF_LOGE("Unable to map stack for user app");
+            return -1;
+        }
         user_process->size++;
     }
 
     return stack_top;
 }
 
-/* Start the first process, and return true if successful
- *
- * This function will leak memory if the process does not start successfully.
- * TODO: avoid leaking memory once you implement real processes, otherwise a user
- *       can force your OS to run out of memory by creating lots of failed processes.
+/* Start the first process, and return the process ID if successful,
+ * -1 otherwise.
  */
-int start_process(char *app_name, thread_main_f *func)
+int start_process(char *app_name, bool initial)
 {
     user_process_t user_process = (user_process_t) {0};
     user_process.pid = get_pid();
@@ -353,10 +324,7 @@ int start_process(char *app_name, thread_main_f *func)
     }
     user_process.app_name = app_name;
 
-    if (func != NULL) {
-        handler_func = func;
-    }
-
+    /* Create our per-process semaphore to ensure the process isn't killed in the middle of a system call */
     user_process.handler_busy_sem = malloc(sizeof(sync_bin_sem_t));
     if (user_process.handler_busy_sem == NULL) {
         ZF_LOGE("No memory for new semaphore object");
@@ -371,6 +339,7 @@ int start_process(char *app_name, thread_main_f *func)
     }
     sync_bin_sem_init(user_process.handler_busy_sem, user_process.handler_busy_cptr, 1);
 
+    /* Create our per-process endpoint */
     user_process.ep_ut = alloc_retype(&user_process.ep, seL4_EndpointObject, seL4_EndpointBits);
     if (user_process.ep == seL4_CapNull) {
         ZF_LOGE("No memory for endpoints");
@@ -395,6 +364,7 @@ int start_process(char *app_name, thread_main_f *func)
         return -1;
     }
 
+    /* Create our per-process reply object */
     user_process.reply_ut = alloc_retype(&user_process.reply, seL4_ReplyObject, seL4_ReplyBits);
     if (user_process.reply_ut == NULL) {
         ZF_LOGE("Failed to create reply object");
@@ -402,6 +372,7 @@ int start_process(char *app_name, thread_main_f *func)
         return -1;
     }
 
+    /* Create our per-process notification for wait system calls */
     user_process.wake_ut = alloc_retype(&user_process.wake, seL4_NotificationObject, seL4_NotificationBits);
     if (user_process.wake_ut == NULL) {
         ZF_LOGE("Failed to create notification object");
@@ -518,7 +489,7 @@ int start_process(char *app_name, thread_main_f *func)
     unsigned long elf_size;
     elf_t elf_file = {};
     open_file *elf = file_create(app_name, O_RDWR, nfs_pwrite_file, nfs_pread_file);
-    char *elf_base = get_elf_header(elf, &elf_size);
+    char *elf_base = elf_load_header(elf, &elf_size);
     if (elf_base == NULL) {
         ZF_LOGE("Unable to open or read %s from NFS", app_name);
         free_process(user_process, false);
@@ -565,12 +536,21 @@ int start_process(char *app_name, thread_main_f *func)
         free_process(user_process, false);
         return -1;
     }
+
+    /* close the elf file on nfs */
+    io_args args = {.signal_cap = nfs_signal};
+    int nfs_err = nfs_close_file(elf, nfs_async_close_cb, &args);
+    if (nfs_err < 0) {
+        ZF_LOGE("NFS: Error in closing ELF file");
+        return -1;
+    }
     file_destroy(elf);
 
     init_threads(user_process.ep, user_process.ep, sched_ctrl_start, sched_ctrl_end);
 
-    if (func == NULL) { // find better way
-        user_process.handler_thread = thread_create(handler_func, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true);
+    if (!initial) {
+        /* Create our per-process system call handler thread */
+        user_process.handler_thread = thread_create(handler_function, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true);
         if (user_process.handler_thread == NULL) {
             ZF_LOGE("Could not create system call handler thread for %s\n", app_name);
             free_process(user_process, false);
@@ -615,7 +595,7 @@ int start_process(char *app_name, thread_main_f *func)
         return -1;
     }
 
-    free(elf_file.elfFile);
+    free(elf_base);
     user_process.stime = timestamp_ms(timestamp_get_freq());
     user_process_list[user_process.pid] = user_process;
     return user_process.pid;
@@ -640,7 +620,7 @@ void syscall_proc_create(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     }
     path[len - 1] = '\0';
 
-    pid_t pid = start_process(path, NULL);
+    pid_t pid = start_process(path, false);
     seL4_SetMR(0, pid);
 }
 
@@ -734,7 +714,13 @@ void syscall_proc_wait(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         sync_bin_sem_wait(process_list_sem);
         user_process_t user_process = user_process_list[pid];
         sync_bin_sem_post(process_list_sem);
+        /* Check if process ID corresponds to an active process */
+        if (user_process.stime == 0) {
+            seL4_SetMR(0, pid);
+            return;
+        }
         sync_bin_sem_post(my_process.handler_busy_sem);
+        /* Wait on per-process notification if pid is not -1 */
         seL4_Wait(user_process.wake, 0);
         sync_bin_sem_wait(my_process.handler_busy_sem);
         seL4_SetMR(0, pid);
@@ -745,6 +731,9 @@ void syscall_proc_wait(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
             seL4_SetMR(0, -1);
             return;
         }
+        /* Wait on the next process to exit if pid passed in is -1.
+           We use an endpoint here instead of a notification so we can
+           easily find out the pid of the process that woke us up. */
         seL4_Recv(proc_signal, 0, reply);
         free_untype(&reply, ut);
         seL4_SetMR(0, seL4_GetMR(0));

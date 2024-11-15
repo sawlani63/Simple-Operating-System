@@ -23,15 +23,17 @@
 #define SYSCALL_SYS_MMAP SYS_mmap
 #define SYSCALL_SYS_MUNMAP SYS_munmap
 
+/* SOS system calls */
 void syscall_sos_open(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_sos_close(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_sos_read(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_sos_write(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
-void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
+void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg, UNUSED seL4_Word badge);
 void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg);
 void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 
+/* SYS system calls */
 void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_sys_mmap(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_sys_munmap(seL4_MessageInfo_t *reply_msg, seL4_Word badge);

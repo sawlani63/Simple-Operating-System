@@ -228,6 +228,7 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         file->handle = args.buff;
     } else {
         sync_bin_sem_wait(file_sem);
+        /* Check if stdin is already open by another process */
         if (console_open_for_read && mode != O_WRONLY) {
             sync_bin_sem_post(file_sem);
             seL4_SetMR(0, -1);
@@ -328,7 +329,7 @@ void syscall_sos_write(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     seL4_SetMR(0, res);
 }
 
-void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
+void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg, UNUSED seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_USLEEP);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);

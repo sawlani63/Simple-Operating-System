@@ -57,7 +57,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "sosh"
+#define APP_NAME             "console_test"
 
 extern char __eh_frame_start[];
 /* provided by gcc */
@@ -82,13 +82,18 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
 
     if (as == NULL || as->page_table == NULL || fault_addr == 0) {
         ZF_LOGE("Encountered a weird error where one of the given addresses was null");
+        free_process(user_process, true);
         return false;
     }
 
+    /* Try paging in: continue in vm fault if 1 is returned*/
     int try_page_in_res = clock_try_page_in(&user_process, fault_addr);
     if (try_page_in_res < 0) {
+        /* Major error */
+        free_process(user_process, true);
         return false;
     } else if (!try_page_in_res) {
+        /* Success in paging in */
         return true;
     }
 
@@ -107,10 +112,12 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
             // Check permissions for write faults
             if (!debug_is_read_fault() && (reg->perms & REGION_WR) == 0) {
                 ZF_LOGE("Trying to write to a read only page");
+                free_process(user_process, true);
                 return false;
             }
         } else {
             ZF_LOGE("Could not find a valid region for this address: %p", (void*) fault_addr);
+            free_process(user_process, true);
             return false;
         }
     }
@@ -119,17 +126,18 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
     frame_ref_t frame_ref = clock_alloc_frame(fault_addr, user_process, 0);
     if (frame_ref == NULL_FRAME) {
         ZF_LOGD("Failed to alloc frame");
+        free_process(user_process, true);
         return false;
     }
 
     /* Map the frame into the relevant page tables. */
     if (sos_map_frame(&cspace, user_process.vspace, fault_addr, reg->perms, frame_ref, as) != 0) {
         ZF_LOGE("Could not map the frame into the two page tables");
+        free_process(user_process, true);
         return false;
     }
     user_process.size++;
     user_process_list[badge] = user_process;
-
     return true;
 }
 
@@ -249,6 +257,8 @@ NORETURN void syscall_loop(void *arg)
     }
 }
 
+thread_main_f *handler_function = syscall_loop;
+
 NORETURN void irq_loop(void* arg)
 {
     seL4_CPtr ep = (seL4_CPtr) arg;
@@ -270,8 +280,6 @@ NORETURN void irq_loop(void* arg)
         } else {
             /* some kind of fault */
             debug_print_fault(message, APP_NAME);
-            /* dump registers too */
-            //debug_dump_registers(user_process_list[].tcb);
 
             ZF_LOGF("The SOS skeleton does not know how to handle faults!");
         }
@@ -385,6 +393,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     network_console_register_handler(console, enqueue);
     init_console_sem();
 
+    /* Initialise our swap map and queue for demand paging */
     init_bitmap();
 
 #ifdef CONFIG_SOS_GDB_ENABLED
@@ -393,7 +402,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     ZF_LOGF_IF(err, "Failed to initialize debugger %d", err);
 #endif /* CONFIG_SOS_GDB_ENABLED */
 
-    /* Initialize a temporary irq handling thread that binds the notification object to its TCB and handles irqs until the main thread is done with its tasks */
+    /* Initialise a temporary irq handling thread that binds the notification object to its TCB and handles irqs until the main thread is done with its tasks */
     sos_thread_t *irq_temp_thread = thread_create(irq_loop, (void *)ipc_ep, 0, true, seL4_MaxPrio, ntfn, false);
     if (irq_temp_thread == NULL) {
         ZF_LOGE("Could not create irq handler thread\n");
@@ -401,7 +410,8 @@ NORETURN void *main_continued(UNUSED void *arg)
 
     /* Initialises the timer */
     printf("Timer init\n");
-    start_timer(timer_vaddr);
+    int error = start_timer(timer_vaddr);
+    ZF_LOGF_IF(error, "Error, unable to initialise the timer");
     /* Sets up the timer irq */
     seL4_IRQHandler irq_handler;
     int init_irq_err = sos_register_irq_handler(meson_timeout_irq(MESON_TIMER_A), true, timer_irq, NULL, &irq_handler);
@@ -417,7 +427,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     io_args args = {.signal_cap = nfs_signal};
     /* Wait for NFS to finish mounting */
     seL4_Wait(nfs_signal, 0);
-    int error = nfs_open_file(nfs_pagefile, nfs_async_open_cb, &args);
+    error = nfs_open_file(nfs_pagefile, nfs_async_open_cb, &args);
     ZF_LOGF_IF(error, "NFS: Error in opening pagefile");
     nfs_pagefile->handle = args.buff;
 
@@ -425,9 +435,9 @@ NORETURN void *main_continued(UNUSED void *arg)
     error = init_proc();
     ZF_LOGF_IF(error, "Failed to initialise process list / bitmap");
 
-    /* Start the user application */
+    /* Start the first user application */
     printf("Start process\n");
-    int success = start_process(APP_NAME, syscall_loop);
+    int success = start_process(APP_NAME, true);
     ZF_LOGF_IF(success == -1, "Failed to start process");
 
     /* We swap the task of irq handling from the temp thread to our main thread, and destroy our temp thread */
@@ -435,10 +445,11 @@ NORETURN void *main_continued(UNUSED void *arg)
     seL4_Error bind_err = seL4_TCB_BindNotification(seL4_CapInitThreadTCB, ntfn);
     ZF_LOGF_IFERR(bind_err, "Failed to bind notification object to TCB");
 
+    /* We create the initial process's handler thread after killing our irq_temp_thread to ensure no irqs are sent by our thread before we can kill the temp thread */
     user_process_t user_process = user_process_list[success];
-    user_process.handler_thread = thread_create(syscall_loop, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true);
-    user_process_list[success] = user_process;
+    user_process.handler_thread = thread_create(handler_function, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true);
     ZF_LOGF_IF(user_process.handler_thread == NULL, "Failed to create syscall thread");
+    user_process_list[success] = user_process;
 
     printf("\nSOS entering irq loop\n");
     irq_loop((void *) ipc_ep);

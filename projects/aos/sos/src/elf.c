@@ -43,15 +43,6 @@ static inline seL4_CapRights_t get_sel4_rights_from_elf(unsigned long permission
 /*
  * Load an elf segment into the given vspace.
  *
- * TODO: The current implementation maps the frames into the loader vspace AND the target vspace
- *       and leaves them there. Additionally, if the current implementation fails, it does not
- *       clean up after itself.
- *
- *       This is insufficient, as you will run out of resources quickly, and will be completely fixed
- *       throughout the duration of the project, as different milestones are completed.
- *
- *       Be *very* careful when editing this code. Most students will experience at least one elf-loading
- *       bug.
  *
  * The content to load is either zeros or the content of the ELF
  * file itself, or both.
@@ -86,7 +77,7 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
         uintptr_t loadee_vaddr = (ROUND_DOWN(dst, PAGE_SIZE_4K));
 
         /* allocate the frame for the loadees address space */
-        frame_ref_t frame = clock_alloc_frame(loadee_vaddr, *user_process, 0);
+        frame_ref_t frame = clock_alloc_frame(loadee_vaddr, *user_process, 1);
         if (frame == NULL_FRAME) {
             ZF_LOGD("Failed to alloc frame");
             return -1;
@@ -109,6 +100,7 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
             free_frame(frame);
         } else if (err != seL4_NoError) {
             ZF_LOGE("Failed to map into loadee at %p, error %u", (void *) loadee_vaddr, err);
+            free_frame(frame);
             return -1;
         }
 
@@ -117,7 +109,7 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
 
         /* Write any zeroes at the start of the block. */
         size_t leading_zeroes = dst % PAGE_SIZE_4K;
-        memset(loader_data, 0, leading_zeroes); //check if works without
+        memset(loader_data, 0, leading_zeroes);
         loader_data += leading_zeroes;
 
         /* Copy the data from the source. */
@@ -133,6 +125,9 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
         } else {
             memset(loader_data, 0, segment_bytes);
         }
+
+        /* Unpin the frame */
+        unpin_frame(frame);
 
         dst += segment_bytes;
         pos += segment_bytes;
@@ -163,33 +158,65 @@ int elf_load(cspace_t *cspace, elf_t *elf_file, open_file *file, user_process_t 
         insert_region(user_process->addrspace, vaddr, segment_size, reg_flags);
 
         char *src = malloc(sizeof(char) * file_size);
-        io_args args = {.signal_cap = nfs_signal, .buff = src}; //pin the elf page so that its not paged out during read
+        io_args args = {.signal_cap = nfs_signal, .buff = src};
         int err = nfs_pread_file(file, NULL, offset, file_size, nfs_pagefile_read_cb, &args);
         if (err < (int) file_size) {
+            free(src);
             ZF_LOGE("NFS: Error in reading ELF segment");
-            return -1;
+            return 1;
         }
+        /* Wait for the callback to finish */
         seL4_Wait(nfs_signal, 0);
         if (args.err < 0) {
-            return -1;
+            free(src);
+            return 1;
         }
 
         /* Copy it across into the vspace. */
         ZF_LOGD(" * Loading segment %p-->%p\n", (void *) vaddr, (void *)(vaddr + segment_size));
         err = load_segment_into_vspace(cspace, user_process->vspace, src, segment_size, file_size, vaddr,
                                            reg_flags, user_process->addrspace, &user_process->size, user_process);
-        if (err) {
+        if (err < 0) {
             ZF_LOGE("Elf loading failed!");
-            return -1;
+            return 1;
         }
         free(src);
     }
-
-    io_args args = {.signal_cap = nfs_signal};
-    int err = nfs_close_file(file, nfs_async_close_cb, &args);
-    if (err < 0) {
-        ZF_LOGE("NFS: Error in closing ELF file");
-        return -1;
-    } // put somewhere else
     return 0;
+}
+
+char *elf_load_header(open_file *file, unsigned long *elf_size)
+{
+    /**
+     * Open the elf file on nfs and read the first 4096 bytes which includes the ELF and program headers.
+     * Don't close the file here on nfs since we will need it opened to load segments into our vspace.
+     */
+    io_args args = {.signal_cap = nfs_signal};
+    int error = nfs_open_file(file, nfs_async_open_cb, &args);
+    if (error) {
+        ZF_LOGE("NFS: Error in opening app");
+        file_destroy(file);
+        return NULL;
+    }
+    file->handle = args.buff;
+
+    char *data = malloc(sizeof(char) * PAGE_SIZE_4K);
+    args.buff = data;
+    error = nfs_pread_file(file, NULL, 0, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
+    if (error < (int) PAGE_SIZE_4K) {
+        ZF_LOGE("NFS: Error in reading ELF and program headers");
+        free(data);
+        file_destroy(file);
+        return NULL;
+    }
+    seL4_Wait(nfs_signal, 0);
+    if (args.err < 0) {
+        free(data);
+        file_destroy(file);
+        return NULL;
+    }
+
+    Elf64_Ehdr *header = (void *) data;
+    *elf_size = header->e_shoff + (header->e_shentsize * header->e_shnum);
+    return data;
 }

@@ -423,9 +423,9 @@ void kill_thread(sos_thread_t *thread)
     free_untype(&thread->fault_ep, NULL);
     free_untype(&thread->user_ep, NULL);
     /* Free the tls_base, ipc buffer and the thread */
-    /*if (thread->tls_base != NULL) {
+    if (thread->tls_base != NULL) {
         free(thread->tls_base);
-    } ?getting warnings when freeing */
+    }
     free_untype(&thread->ipc_buffer, thread->ipc_buffer_ut);
     free(thread);
     /* If suicidal (called process_delete on itself), clears the

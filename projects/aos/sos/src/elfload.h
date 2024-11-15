@@ -11,12 +11,11 @@
  */
 #pragma once
 
-#include "process.h"
 #include <sel4/sel4.h>
 #include <cspace/cspace.h>
 #include <elf/elf.h>
 #include <elf.h>
-
-#include "open_file.h"
+#include "sos_syscall.h"
 
 int elf_load(cspace_t *cspace, elf_t *elf_file, open_file *file, user_process_t *user_process);
+char *elf_load_header(open_file *file, unsigned long *elf_size);

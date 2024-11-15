@@ -37,7 +37,7 @@ typedef struct {
             seL4_CPtr frame_cptr : 40;
         } page;
         /* Index into the swap map. Large enough to support the entire address space. */
-        size_t swap_map_index : 20;
+        size_t swap_map_index : 59;
     };
 } PACKED pt_entry;
 
@@ -72,27 +72,32 @@ typedef struct addrspace {
 
 SGLIB_DEFINE_RBTREE_PROTOTYPES(mem_region_t, left, right, colour, compare_regions)
 
-/*
- * Functions in addrspace.c:
- *
- *    as_create - create a new empty address space. You need to make
- *                sure this gets called in all the right places. You
- *                may find you want to change the argument list. May
- *                return NULL on out-of-memory error.
- *
- *    as_define_region - set up a region of memory within the address
- *                space.
- *
- *    as_define_stack - set up the stack region in the address space.
- *                Hands back the initial stack pointer for the new process.
- *
- * Note that when using dumbvm, addrspace.c is not used and these
- * functions are found in dumbvm.c.
+/**
+ * Initialises a per-process address space and the first level of our page tables
+ * 
+ * @return pointer to the address space struct on success
  */
-
 addrspace_t *as_create();
+/**
+ * Inserts a region defining the ipc buffer into our address space region_tree
+ * @param as the address space to insert the region into
+ * 
+ * @return pointer to the region on success
+ */
 mem_region_t *as_define_ipc_buff(addrspace_t *as);
+/**
+ * Inserts a region defining the stack into our address space region_tree
+ * @param as the address space to insert the region into
+ * 
+ * @return pointer to the region on success
+ */
 mem_region_t *as_define_stack(addrspace_t *as);
+/**
+ * Inserts a region defining the heap into our address space region_tree
+ * @param as the address space to insert the region into
+ * 
+ * @return pointer to the region on success
+ */
 mem_region_t *as_define_heap(addrspace_t *as);
 
 mem_region_t *insert_region(addrspace_t *addrspace, size_t base, size_t size, uint64_t perms);

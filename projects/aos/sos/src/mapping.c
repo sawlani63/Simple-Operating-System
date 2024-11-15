@@ -204,6 +204,7 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
     page_table *l3_pt = l2_pt[l2_index].l3;
     if (l3_pt == NULL) {
         ZF_LOGE("Failed to allocate level 3 page table");
+        free(l2_pt);
         return seL4_NotEnoughMemory;
     }
 
@@ -213,6 +214,8 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
     pt_entry *l4_pt = l3_pt[l3_index].l4;
     if (l4_pt == NULL) {
         ZF_LOGE("Failed to allocate level 4 page table");
+        free(l3_pt);
+        free(l2_pt);
         return seL4_NotEnoughMemory;
     }
 
@@ -220,6 +223,9 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
     seL4_CPtr frame_cap = cspace_alloc_slot(cspace);
     if (frame_cap == seL4_CapNull) {
         ZF_LOGD("Failed to alloc slot");
+        free(l4_pt);
+        free(l3_pt);
+        free(l2_pt);
         return 1;
     }
 
@@ -227,6 +233,10 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
     seL4_Error err = cspace_copy(cspace, frame_cap, cspace, frame_page(frame_ref), seL4_AllRights);
     if (err != seL4_NoError) {
         ZF_LOGD("Failed to untyped reypte");
+        cspace_free_slot(cspace, frame_cap);
+        free(l4_pt);
+        free(l3_pt);
+        free(l2_pt);
         return err;
     }
 

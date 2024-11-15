@@ -10,12 +10,11 @@
 #include "threads.h"
 
 /* Number of concurrently running processes supported */
-#define NUM_PROC 32
+#define NUM_PROC 16
 
 #define N_NAME 32
 
-// Could not find constants for the others so just set to numbers around sys_getpid
-#define SYSCALL_PROC_CREATE 170 // maybe use fork number
+#define SYSCALL_PROC_CREATE 170
 #define SYSCALL_PROC_DELETE SYS_kill
 #define SYSCALL_PROC_GETID SYS_getpid
 #define SYSCALL_PROC_STATUS 173
@@ -73,7 +72,10 @@ typedef int pid_t;
 
 int init_proc();
 user_process_t get_process(pid_t pid);
-int start_process(char *app_name, thread_main_f *func);
+void free_process(user_process_t user_process, bool suicidal);
+int start_process(char *app_name, bool initial);
+
+/* Process system calls */
 void syscall_proc_create(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_proc_delete(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_proc_getid(seL4_MessageInfo_t *reply_msg, seL4_Word badge);

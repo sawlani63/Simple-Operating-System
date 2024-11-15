@@ -31,10 +31,6 @@ seL4_Error map_frame_impl(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspac
  * which we know are free. Without this, allocating a slot could cause recursion into the map_frame
  * function, which could then recurse back to allocating slots... etc.
  *
- * TODO: any allocated intermediate paging structures are thrown away by this function.
- * This is fine for basic SOS, but once you have a structure for tracking process virtual memory,
- * you'll need to modify this function, or write a new one, that stores the intermediate structures, such that
- * they can be deleted later.
  *
  * @param cspace          CSpace which can be used to retype slots.
  * @param frame_cap       A capbility to the frame to be mapped (seL4_ARM_SmallPageObject).
@@ -56,11 +52,6 @@ seL4_Error map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vsp
  *
  * If you *know* you can map the vaddr without allocating any other paging structures, or that it is
  * safe to allocate cslots, you can provide NULL as the cspace.
-
- * TODO: any allocated intermediate paging structures and slots are thrown away by this function.
- * This is fine for basic SOS, but once you have a structure for tracking process virtual memory,
- * you'll need to modify this function, or write a new one, that stores the intermediate structures, such that
- * they can be deleted later.
  *
  * @param cspace          CSpace which can be used to allocate slots for intermediate paging structures.
  * @param frame_cap       A capbility to the frame to be mapped (seL4_ARM_SmallPageObject).
@@ -74,7 +65,11 @@ seL4_Error map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vsp
 seL4_Error map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr, seL4_CapRights_t rights,
                      seL4_ARM_VMAttributes attr);
 
-/* Maps a page, allocating intermediate structures and cslots with the cspace provided.
+seL4_Error sos_map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
+                                seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, seL4_CPtr *free_slots,
+                                seL4_Word *used, page_upper_directory *page_table);
+
+/** Maps a page, allocating intermediate structures and cslots with the cspace provided.
  *
  * If you *know* you can map the vaddr without allocating any other paging structures, or that it is
  * safe to allocate cslots, you can provide NULL as the cspace.
@@ -85,21 +80,24 @@ seL4_Error map_frame(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, se
  * capabilities to physical frames so that we can later free them and approve/deny requests to perform
  * actions on memory based off user permisions (recorded in regions within the address space).
  *
- * @param frame_cap       A capbility to the frame to be mapped (seL4_ARM_SmallPageObject).
+ * @param cspace          cspace used to retype slots
  * @param vspace          A capability to the vspace (seL4_ARM_PageGlobalDirectoryObject).
  * @param vaddr           The virtual address to map the frame.
- * @param rights          The access rights for the mapping
+ * @param perms           The access rights for the mapping
+ * @param frame_ref       The frame reference to map
+ * @param as              The address space of the process
  *
  * @return 0 on success
  */
-
-seL4_Error sos_map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr vspace, seL4_Word vaddr,
-                                seL4_CapRights_t rights, seL4_ARM_VMAttributes attr, seL4_CPtr *free_slots,
-                                seL4_Word *used, page_upper_directory *page_table);
-
 seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
                          size_t perms, frame_ref_t frame_ref, addrspace_t *as);
 
+/**
+ * Cleans up the memory allocated for our shadow page table and unmaps 
+ * all the pages and page tables mapped in our vspace.
+ * 
+ * @param as The address space of the process being deleted
+ */
 void sos_destroy_page_table(addrspace_t *as);
 
 /*

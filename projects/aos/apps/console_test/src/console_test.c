@@ -218,20 +218,20 @@ int main(void)
     assert(fd == 0);
     printf("Passed open/close test\n");
 
-    //test_nfs();
+    test_nfs();
     printf("Passed nfs test\n");
     
-    //pt_test();
-    //mmap_test();
+    pt_test();
+    mmap_test();
     //test_stack_write(fd);
 
-    //test_buffers(fd);
+    test_buffers(fd);
     printf("Passed read/write buffer test\n");
     res = sos_close(fd);
     assert(!res);
 
     printf("Passed 0\n");
-    for (int i = 0; i < 2000; i++) { // testing proc delete
+    for (int i = 0; i < 500; i++) { // testing proc delete
         int pid = sos_process_create("console_test_2");
         if (pid == -1) {
             break;
@@ -242,11 +242,10 @@ int main(void)
     }
     printf("Passed process delete test\n");
 
-    /*int pid = sos_process_create("console_test");
-    assert(pid == 1); // second running process     // will test concurrently soon
-    pid = sos_my_id();
-    assert(pid == 0);
-    printf("Current pid %d\n", pid);
+    int pid = sos_process_create("console_test_2");
+    int pid2 = sos_my_id();
+    assert(pid2 == 0);
+    printf("Current pid %d\n", pid2);
     sos_process_t *pinfo = malloc(16 * sizeof(sos_process_t));
     int num = sos_process_status(pinfo, 3);
     assert(num == 2);
@@ -257,5 +256,6 @@ int main(void)
     assert(num == 1);
     for (int i = 0; i < num; i++) {
         printf("From process status: pid - %d, size - %d, stime - %d, app_name - %s\n", pinfo[i].pid, pinfo[i].size, pinfo[i].stime, pinfo[i].command);
-    }*/
+    }
+    num = sos_process_delete(pid);
 }

@@ -11,7 +11,7 @@ typedef const char * string;
 typedef int (*execute_io)(struct file *file, char *data, uint64_t offset, uint64_t len, void *cb, void *args);
 
 typedef struct file {
-    void *handle; // i dont like this
+    void *handle;
     string path;
     int mode;
     execute_io file_write;

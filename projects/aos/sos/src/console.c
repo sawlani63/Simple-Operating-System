@@ -6,7 +6,7 @@
 #include <sync/condition_var.h>
 #include "thread_pool.h"
 
-#define QUEUE_SIZE 4096 // TODO: MAKE DYNAMIC?
+#define QUEUE_SIZE 4096
 
 struct {
     char chars[QUEUE_SIZE];
