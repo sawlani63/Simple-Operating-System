@@ -59,7 +59,7 @@ void init_hitman()
     }
 
     ipc_ep = dark_web;
-    hitman = thread_create(thread_destroy, NULL, 0, true, seL4_MaxPrio, seL4_CapNull, true);
+    hitman = thread_create(thread_destroy, NULL, 0, true, seL4_MaxPrio, seL4_CapNull, true, "hitman");
 }
 
 void init_threads(seL4_CPtr _ipc_ep, seL4_CPtr _fault_ep, seL4_CPtr sched_ctrl_start_, seL4_CPtr sched_ctrl_end_)
@@ -143,7 +143,7 @@ static void thread_trampoline(sos_thread_t *thread, thread_main_f *function, voi
  *
  */
 sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, bool resume,
-                            seL4_Word prio, seL4_CPtr bound_ntfn, bool debugger_add)
+                            seL4_Word prio, seL4_CPtr bound_ntfn, bool debugger_add, char *name)
 {
     /* we allocate stack for additional sos threads
      * on top of the stack for sos */
@@ -295,7 +295,7 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
     }
 
     /* Provide a name for the thread -- Helpful for debugging */
-    NAME_THREAD(new_thread->tcb, "second sos thread");
+    NAME_THREAD(new_thread->tcb, name);
 
     /* set up the stack */
     new_thread->head = calloc(1, sizeof(thread_frame));
@@ -347,9 +347,9 @@ sos_thread_t *thread_create(thread_main_f function, void *arg, seL4_Word badge, 
 /*
  * Spawn the debugger thread. Should only be called once in debugger_init()
  */
-sos_thread_t *debugger_spawn(thread_main_f function, void *arg, seL4_Word badge, seL4_CPtr bound_ntfn)
+sos_thread_t *debugger_spawn(thread_main_f function, void *arg, seL4_Word badge, seL4_CPtr bound_ntfn, char *name)
 {
-    return thread_create(function, arg, badge, true, seL4_MaxPrio, bound_ntfn, false);
+    return thread_create(function, arg, badge, true, seL4_MaxPrio, bound_ntfn, false, name);
 }
 
 
@@ -362,9 +362,9 @@ sos_thread_t *debugger_spawn(thread_main_f function, void *arg, seL4_Word badge,
  * Ensure that the badge you provide is unique (in that no other active thread has it). If you
  * do not ensure this, you will probably see some weird behaviour in GDB.
  */
-sos_thread_t *spawn(thread_main_f function, void *arg, seL4_Word badge, bool debugger_add)
+sos_thread_t *spawn(thread_main_f function, void *arg, seL4_Word badge, bool debugger_add, char *name)
 {
-    return thread_create(function, arg, badge, true, SOS_THREAD_PRIORITY, 0, debugger_add);
+    return thread_create(function, arg, badge, true, SOS_THREAD_PRIORITY, 0, debugger_add, name);
 }
 
 void request_destroy(sos_thread_t *thread) {

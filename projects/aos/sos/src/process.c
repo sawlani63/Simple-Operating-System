@@ -550,7 +550,7 @@ int start_process(char *app_name, bool initial)
 
     if (!initial) {
         /* Create our per-process system call handler thread */
-        user_process.handler_thread = thread_create(handler_function, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true);
+        user_process.handler_thread = thread_create(handler_function, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true, app_name);
         if (user_process.handler_thread == NULL) {
             ZF_LOGE("Could not create system call handler thread for %s\n", app_name);
             free_process(user_process, false);

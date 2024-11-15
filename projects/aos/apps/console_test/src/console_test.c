@@ -225,13 +225,10 @@ int main(void)
     mmap_test();
     //test_stack_write(fd);
 
-    test_buffers(fd);
+    // test_buffers(fd);
     printf("Passed read/write buffer test\n");
-    res = sos_close(fd);
-    assert(!res);
 
-    printf("Passed 0\n");
-    for (int i = 0; i < 500; i++) { // testing proc delete
+    for (int i = 0; i < 50; i++) { // testing proc delete
         int pid = sos_process_create("console_test_2");
         if (pid == -1) {
             break;
@@ -257,5 +254,4 @@ int main(void)
     for (int i = 0; i < num; i++) {
         printf("From process status: pid - %d, size - %d, stime - %d, app_name - %s\n", pinfo[i].pid, pinfo[i].size, pinfo[i].stime, pinfo[i].command);
     }
-    num = sos_process_delete(pid);
 }

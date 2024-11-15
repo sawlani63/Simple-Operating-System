@@ -67,6 +67,6 @@ void initialise_thread_pool(void (*input_func)(void *arg)) {
     sync_cv_init(signal_cv, signal_cv_cptr);
 
     for (int i = 0; i < NUM_THREADS; i++) {
-        spawn(start_sos_worker_thread, input_func, 0, true);
+        spawn(start_sos_worker_thread, input_func, 0, true, "thread pool");
     }
 }

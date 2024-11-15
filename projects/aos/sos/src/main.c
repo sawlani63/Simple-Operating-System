@@ -403,7 +403,7 @@ NORETURN void *main_continued(UNUSED void *arg)
 #endif /* CONFIG_SOS_GDB_ENABLED */
 
     /* Initialise a temporary irq handling thread that binds the notification object to its TCB and handles irqs until the main thread is done with its tasks */
-    sos_thread_t *irq_temp_thread = thread_create(irq_loop, (void *)ipc_ep, 0, true, seL4_MaxPrio, ntfn, false);
+    sos_thread_t *irq_temp_thread = thread_create(irq_loop, (void *)ipc_ep, 0, true, seL4_MaxPrio, ntfn, false, "temp_irq");
     if (irq_temp_thread == NULL) {
         ZF_LOGE("Could not create irq handler thread\n");
     }
@@ -447,7 +447,7 @@ NORETURN void *main_continued(UNUSED void *arg)
 
     /* We create the initial process's handler thread after killing our irq_temp_thread to ensure no irqs are sent by our thread before we can kill the temp thread */
     user_process_t user_process = user_process_list[success];
-    user_process.handler_thread = thread_create(handler_function, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true);
+    user_process.handler_thread = thread_create(handler_function, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true, APP_NAME);
     ZF_LOGF_IF(user_process.handler_thread == NULL, "Failed to create syscall thread");
     user_process_list[success] = user_process;
 
