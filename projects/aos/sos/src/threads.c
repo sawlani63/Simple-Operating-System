@@ -38,12 +38,11 @@ static seL4_CPtr fault_ep;
 
 sos_thread_t *hitman = NULL;
 seL4_CPtr dark_web;
-seL4_CPtr confirmation;
 
-void thread_destroy(void *arg);
+void thread_destroy();
 
 /* Initialize our hitman to kill other threads appropriately */
-void init_hitman()
+void become_hitman()
 {
     /* Don't keep track of the following uts since they are never freed */
     ut_t *ut = alloc_retype(&dark_web, seL4_EndpointObject, seL4_EndpointBits);
@@ -51,15 +50,9 @@ void init_hitman()
         ZF_LOGE("Failed to create endpoint for the hitman");
         return;
     }
-    
-    ut = alloc_retype(&confirmation, seL4_NotificationObject, seL4_NotificationBits);
-    if (ut == NULL) {
-        ZF_LOGE("Failed to create notification object for the hitman");
-        return;
-    }
 
-    ipc_ep = dark_web;
-    hitman = thread_create(thread_destroy, NULL, 0, true, seL4_MaxPrio, seL4_CapNull, true, "hitman");
+    /* Don the mask and be reborn as new. */
+    thread_destroy();
 }
 
 void init_threads(seL4_CPtr _ipc_ep, seL4_CPtr _fault_ep, seL4_CPtr sched_ctrl_start_, seL4_CPtr sched_ctrl_end_)
@@ -67,10 +60,6 @@ void init_threads(seL4_CPtr _ipc_ep, seL4_CPtr _fault_ep, seL4_CPtr sched_ctrl_s
     fault_ep = _fault_ep;
     sched_ctrl_start = sched_ctrl_start_;
     sched_ctrl_end = sched_ctrl_end_;
-
-    if (hitman == NULL) {
-        init_hitman();
-    }
 
     ipc_ep = _ipc_ep;
 }
@@ -370,9 +359,8 @@ sos_thread_t *spawn(thread_main_f function, void *arg, seL4_Word badge, bool deb
 void request_destroy(sos_thread_t *thread) {
     /* Send the request for the killing of this thread */
     seL4_SetMR(0, (seL4_Word) thread);
-    seL4_Send(dark_web, seL4_MessageInfo_new(0, 0, 0, 1));
     /* Wait until the thread is killed */
-    seL4_Wait(confirmation, 0);
+    seL4_Call(dark_web, seL4_MessageInfo_new(0, 0, 0, 1));
 }
 
 static bool dealloc_stack(thread_frame *head)
@@ -405,7 +393,6 @@ static bool dealloc_stack(thread_frame *head)
 void kill_thread(sos_thread_t *thread) 
 {
     if (thread == NULL) {
-        seL4_Signal(confirmation);
         return;
     }
     /* Unmap the thread's ipc buffer from the hardware page table */
@@ -428,17 +415,12 @@ void kill_thread(sos_thread_t *thread)
     }
     free_untype(&thread->ipc_buffer, thread->ipc_buffer_ut);
     free(thread);
-    /* If suicidal (called process_delete on itself), clears the
-    *  notification queue of the dead thread's wait.
-    *  If not suicidal, wakes up the caller thread.
-    */
-    seL4_Signal(confirmation);
 }
 
 /* 
 * Function run by the hitman thread
 */
-void thread_destroy(void *arg)
+void thread_destroy()
 {
     seL4_CPtr hitman_reply;
     ut_t *ut = alloc_retype(&hitman_reply, seL4_ReplyObject, seL4_ReplyBits);
@@ -447,8 +429,7 @@ void thread_destroy(void *arg)
     }
 
     while (1) {
-        seL4_Word badge;
-        seL4_Recv(dark_web, &badge, hitman_reply);
+        seL4_ReplyRecv(dark_web, seL4_MessageInfo_new(0, 0, 0, 0), 0, hitman_reply);
         kill_thread((sos_thread_t *) seL4_GetMR(0));
     }
 }

@@ -57,7 +57,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "sosh"
+#define APP_NAME             "console_test"
 
 extern char __eh_frame_start[];
 /* provided by gcc */
@@ -68,8 +68,10 @@ cspace_t cspace;
 
 seL4_CPtr sched_ctrl_start;
 seL4_CPtr sched_ctrl_end;
+sync_bin_sem_t *cspace_sem = NULL;
 
 extern user_process_t *user_process_list;
+extern sync_bin_sem_t *process_list_sem;
 struct network_console *console;
 
 extern seL4_CPtr nfs_signal;
@@ -77,7 +79,9 @@ extern seL4_CPtr nfs_signal;
 open_file *nfs_pagefile;
 
 bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
+    sync_bin_sem_wait(process_list_sem);
     user_process_t user_process = user_process_list[badge];
+    sync_bin_sem_post(process_list_sem);
     addrspace_t *as = user_process.addrspace;
 
     if (as == NULL || as->page_table == NULL || fault_addr == 0) {
@@ -137,7 +141,9 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
         return false;
     }
     user_process.size++;
+    sync_bin_sem_wait(process_list_sem);
     user_process_list[badge] = user_process;
+    sync_bin_sem_post(process_list_sem);
     return true;
 }
 
@@ -213,17 +219,18 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
 NORETURN void syscall_loop(void *arg)
 {
     pid_t pid = (pid_t) arg;
+    sync_bin_sem_wait(process_list_sem);
     user_process_t process = user_process_list[pid];
+    sync_bin_sem_post(process_list_sem);
     seL4_CPtr reply = process.reply;
     seL4_CPtr ep = process.ep;
+    seL4_MessageInfo_t message;
+    seL4_Word sender;
 
     bool have_reply = false;
     seL4_MessageInfo_t reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
 
     while (1) {
-        seL4_MessageInfo_t message;
-        seL4_Word sender;
-
         /* Reply (if there is a reply) and block on ep, waiting for an IPC sent over ep */
         if (have_reply) {
             message = seL4_ReplyRecv(ep, reply_msg, &sender, reply);
@@ -257,22 +264,13 @@ NORETURN void syscall_loop(void *arg)
     }
 }
 
-thread_main_f *handler_function = syscall_loop;
-
 NORETURN void irq_loop(void* arg)
 {
-    seL4_CPtr ep = (seL4_CPtr) arg;
-    seL4_CPtr reply;
-
-    /* Create reply object */
-    ut_t *reply_ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
-    if (reply_ut == NULL) {
-        ZF_LOGF("Failed to alloc reply object ut");
-    }
+    seL4_CPtr ntfn = (seL4_CPtr) arg;
+    seL4_Word badge = 0;
 
     while (1) {
-        seL4_Word badge = 0;
-        seL4_MessageInfo_t message = seL4_Recv(ep, &badge, reply);
+        seL4_MessageInfo_t message = seL4_Wait(ntfn, &badge);
 
         if (badge & IRQ_EP_BADGE) {
             /* It's a notification from our bound notification object! */
@@ -403,8 +401,8 @@ NORETURN void *main_continued(UNUSED void *arg)
 #endif /* CONFIG_SOS_GDB_ENABLED */
 
     /* Initialise a temporary irq handling thread that binds the notification object to its TCB and handles irqs until the main thread is done with its tasks */
-    sos_thread_t *irq_temp_thread = thread_create(irq_loop, (void *)ipc_ep, 0, true, seL4_MaxPrio, ntfn, false, "temp_irq");
-    if (irq_temp_thread == NULL) {
+    printf("\nSOS entering irq loop\n");
+    if (!thread_create(irq_loop, (void *)ntfn, 0, true, seL4_MaxPrio, 0, false, "irq")) {
         ZF_LOGE("Could not create irq handler thread\n");
     }
 
@@ -440,19 +438,15 @@ NORETURN void *main_continued(UNUSED void *arg)
     int success = start_process(APP_NAME, true);
     ZF_LOGF_IF(success == -1, "Failed to start process");
 
-    /* We swap the task of irq handling from the temp thread to our main thread, and destroy our temp thread */
-    request_destroy(irq_temp_thread);
-    seL4_Error bind_err = seL4_TCB_BindNotification(seL4_CapInitThreadTCB, ntfn);
-    ZF_LOGF_IFERR(bind_err, "Failed to bind notification object to TCB");
-
     /* We create the initial process's handler thread after killing our irq_temp_thread to ensure no irqs are sent by our thread before we can kill the temp thread */
     user_process_t user_process = user_process_list[success];
-    user_process.handler_thread = thread_create(handler_function, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true, APP_NAME);
+    user_process.handler_thread = thread_create(syscall_loop, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true, APP_NAME);
     ZF_LOGF_IF(user_process.handler_thread == NULL, "Failed to create syscall thread");
+    sync_bin_sem_wait(process_list_sem);
     user_process_list[success] = user_process;
+    sync_bin_sem_post(process_list_sem);
 
-    printf("\nSOS entering irq loop\n");
-    irq_loop((void *) ipc_ep);
+    become_hitman();
 }
 /*
  * Main entry point - called by crt.
@@ -477,6 +471,31 @@ int main(void)
 
     /* Initialise the cspace manager, ut manager and dma */
     sos_bootstrap(&cspace, boot_info);
+
+    /* Initialise a semaphore for synchronising accesses to the root cspace. */
+    cspace_sem = malloc(sizeof(sync_bin_sem_t));
+    ZF_LOGF_IF(!cspace_sem, "No memory for semaphore object");
+
+    ut_t *ut = ut_alloc(seL4_NotificationBits, &cspace);
+    if (ut == NULL) {
+        ZF_LOGE("No memory for object of size %zu", seL4_NotificationBits);
+        return -1;
+    }
+    seL4_CPtr cspace_sem_cptr = cspace_alloc_slot(&cspace);
+    if (cspace_sem_cptr == seL4_CapNull) {
+        ut_free(ut);
+        ZF_LOGE("Failed to allocate slot");
+        return -1;
+    }
+
+    /* now do the retype */
+    seL4_Error err = cspace_untyped_retype(&cspace, ut->cap, cspace_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGE_IFERR(err, "Failed retype untyped");
+    if (err != seL4_NoError) {
+        ut_free(ut);
+        return -1;
+    }
+    sync_bin_sem_init(cspace_sem, cspace_sem_cptr, 1);
 
     /* switch to the real uart to output (rather than seL4_DebugPutChar, which only works if the
      * kernel is built with support for printing, and is much slower, as each character print

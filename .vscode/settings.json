@@ -63,6 +63,8 @@
         "clock.h": "c",
         "vsyscall.h": "c",
         "thread": "c",
-        "assert.h": "c"
+        "assert.h": "c",
+        "executor": "c",
+        "gen_config.h": "c"
     }
 }

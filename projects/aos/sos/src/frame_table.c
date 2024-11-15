@@ -399,9 +399,11 @@ static seL4_ARM_Page alloc_frame_at(uintptr_t vaddr)
     }
 
     /* Allocate a slot for the page capability. */
+    sync_bin_sem_wait(cspace_sem);
     seL4_ARM_Page cptr = cspace_alloc_slot(frame_table.cspace);
     if (cptr == seL4_CapNull) {
         ut_free(ut);
+        sync_bin_sem_post(cspace_sem);
         return seL4_CapNull;
     }
 
@@ -410,16 +412,20 @@ static seL4_ARM_Page alloc_frame_at(uintptr_t vaddr)
     if (err != 0) {
         cspace_free_slot(frame_table.cspace, cptr);
         ut_free(ut);
+        sync_bin_sem_post(cspace_sem);
         return seL4_CapNull;
     }
+    sync_bin_sem_post(cspace_sem);
 
     /* Map the frame into SOS. */
     seL4_ARM_VMAttributes attrs = seL4_ARM_Default_VMAttributes | seL4_ARM_ExecuteNever;
     err = map_frame(frame_table.cspace, cptr, frame_table.vspace, vaddr, seL4_ReadWrite, attrs);
     if (err != 0) {
+        sync_bin_sem_wait(cspace_sem);
         cspace_delete(frame_table.cspace, cptr);
         cspace_free_slot(frame_table.cspace, cptr);
         ut_free(ut);
+        sync_bin_sem_post(cspace_sem);
         return seL4_CapNull;
     }
 
