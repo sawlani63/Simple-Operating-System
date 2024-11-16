@@ -10,11 +10,7 @@
 #include "console.h"
 #include "thread_pool.h"
 
-#ifdef CONFIG_SOS_FRAME_LIMIT
-    #define MAX_BATCH_SIZE (CONFIG_SOS_FRAME_LIMIT != 0ul ? 1 : 3)
-#else
-    #define MAX_BATCH_SIZE 3
-#endif
+#define MAX_BATCH_SIZE 3
 
 extern user_process_t *user_process_list;
 extern sync_bin_sem_t *process_list_sem;
@@ -86,13 +82,9 @@ int netcon_send(open_file *file, char *data, UNUSED uint64_t offset, uint64_t le
 
 static inline int perform_io_core(user_process_t user_process, uint16_t data_offset, uint64_t file_offset, uintptr_t vaddr,
                                   open_file *file, void *callback, bool read, uint16_t len) {
-    if (!vaddr_check(user_process, vaddr)) {
-        return -1;
-    }
-
     pt_entry *entry = get_page(user_process.addrspace, vaddr);
-    pin_frame(entry->page.frame_ref);
     sync_bin_sem_wait(data_sem);
+    pin_frame(entry->page.frame_ref);
     char *data = (char *)frame_data(entry->page.frame_ref);
     sync_bin_sem_post(data_sem);
     io_args *args = malloc(sizeof(io_args));
@@ -125,6 +117,12 @@ static int perform_io(user_process_t user_process, size_t nbyte, uintptr_t vaddr
         /* Start the new batch of I/O requests. */
         while (outstanding_requests < MAX_BATCH_SIZE && bytes_left > 0) {
             uint16_t len = MIN(bytes_left, PAGE_SIZE_4K - offset);
+            if (!vaddr_is_mapped(user_process.addrspace, vaddr)) {
+                if (outstanding_requests > 0) {
+                    break;
+                }
+                handle_vm_fault(vaddr, user_process.pid);
+            }
             int res = perform_io_core(user_process, offset, file->offset + (nbyte - bytes_left), vaddr, file, callback, read, len);
             
             if (res < 0) {

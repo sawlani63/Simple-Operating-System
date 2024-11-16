@@ -81,9 +81,6 @@ static struct {
 
 frame_ref_t clock_hand = NULL_FRAME;
 
-/* Management of frame nodes */
-static frame_ref_t ref_from_frame(frame_t *frame);
-
 /* Management of frame list */
 static void push_front(frame_list_t *list, frame_t *frame);
 static void push_back(frame_list_t *list, frame_t *frame);
@@ -145,7 +142,7 @@ frame_ref_t clock_alloc_frame(size_t vaddr, user_process_t process, size_t pinne
         if (!clock_hand) {
             clock_hand = frame_table.allocated.first;
         }
-        frame_t *victim = clock_choose_victim(clock_hand, frame_table.allocated.first);
+        frame_t *victim = clock_choose_victim(&clock_hand, frame_table.allocated.first);
         if (clock_page_out(victim) < 0) {
             sync_bin_sem_post(data_sem);
             ZF_LOGE("Failed to page out a frame!");
@@ -207,7 +204,7 @@ frame_t *frame_from_ref(frame_ref_t frame_ref)
     return &frame_table.frames[frame_ref];
 }
 
-static frame_ref_t ref_from_frame(frame_t *frame)
+frame_ref_t ref_from_frame(frame_t *frame)
 {
     assert(frame >= frame_table.frames);
     assert(frame < frame_table.frames + frame_table.used);
