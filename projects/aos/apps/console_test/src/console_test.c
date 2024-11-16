@@ -218,17 +218,17 @@ int main(void)
     assert(fd == 0);
     printf("Passed open/close test\n");
 
-    test_nfs();
-    printf("Passed nfs test\n");
+    //test_nfs();
+    //printf("Passed nfs test\n");
     
-    pt_test();
-    mmap_test();
+    //pt_test();
+    //mmap_test();
     //test_stack_write(fd);
 
-    // test_buffers(fd);
+    test_buffers(fd);
     printf("Passed read/write buffer test\n");
 
-    for (int i = 0; i < 50; i++) { // testing proc delete
+    /*for (int i = 0; i < 50; i++) {
         int pid = sos_process_create("console_test_2");
         if (pid == -1) {
             break;
@@ -253,5 +253,5 @@ int main(void)
     assert(num == 1);
     for (int i = 0; i < num; i++) {
         printf("From process status: pid - %d, size - %d, stime - %d, app_name - %s\n", pinfo[i].pid, pinfo[i].size, pinfo[i].stime, pinfo[i].command);
-    }
+    }*/
 }

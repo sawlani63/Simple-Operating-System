@@ -65,3 +65,5 @@ int thread_resume(sos_thread_t *thread);
  *  @param thread the thread whose allocated objects need to be freed
  */
 void request_destroy(sos_thread_t *thread);
+
+void become_hitman();

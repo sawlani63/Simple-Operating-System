@@ -75,6 +75,7 @@ add_executable(
     src/console.c
     src/clock_replacement.c
     src/process.c
+    src/boot_driver.c
 )
 target_include_directories(sos PRIVATE "include")
 target_link_libraries(

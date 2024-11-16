@@ -61,7 +61,6 @@ typedef struct {
     seL4_CPtr stack;
 
     seL4_CPtr timer_slot;
-    seL4_CPtr reply_slot;
 } user_process_t;
 
 typedef struct {

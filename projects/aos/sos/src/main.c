@@ -40,6 +40,8 @@
 #include "mapping.h"
 #include "clock_replacement.h"
 
+#include "boot_driver.h"
+
 #include <sos/gen_config.h>
 #ifdef CONFIG_SOS_GDB_ENABLED
 #include "debugger.h"
@@ -127,7 +129,7 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
     }
 
     /* Allocate a new frame to be mapped by the shadow page table. */
-    frame_ref_t frame_ref = clock_alloc_frame(fault_addr, user_process, 0);
+    frame_ref_t frame_ref = clock_alloc_frame(fault_addr, user_process.pid, 0);
     if (frame_ref == NULL_FRAME) {
         ZF_LOGD("Failed to alloc frame");
         free_process(user_process, true);
@@ -158,7 +160,6 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
     /* get the first word of the message, which in the SOS protocol is the number
      * of the SOS "syscall". */
     seL4_Word syscall_number = seL4_GetMR(0);
-    ZF_LOGE("SYSTEM CALL NUM %d", syscall_number);
 
     /* Process system call */
     switch (syscall_number) {
@@ -243,7 +244,6 @@ NORETURN void syscall_loop(void *arg)
         /* Awake! We got a message - check the label and badge to
          * see what the message is about */
         seL4_Word label = seL4_MessageInfo_get_label(message);
-        ZF_LOGE("LABEL AND PID %d %d", label, pid);
         if (label == seL4_Fault_NullFault) {
             /* It's not a fault or an interrupt, it must be an IPC
              * message from console_test! */
@@ -377,14 +377,16 @@ NORETURN void *main_continued(UNUSED void *arg)
     /* run sos initialisation tests */
     run_tests(&cspace);
 
+    /* Initialise semaphores for synchronisation */
+    init_nfs_sem();
+    init_semaphores();
+    /* Initialise our swap map and queue for demand paging */
+    init_bitmap();
+
     /* Map the timer device (NOTE: this is the same mapping you will use for your timer driver -
      * sos uses the watchdog timers on this page to implement reset infrastructure & network ticks,
      * so touching the watchdog timers here is not recommended!) */
     void *timer_vaddr = sos_map_device(&cspace, PAGE_ALIGN_4K(TIMER_MAP_BASE), PAGE_SIZE_4K);
-
-    /* Initialise semaphores for synchronisation */
-    init_nfs_sem();
-    init_semaphores();
 
     /* Initialise the network hardware. */
     printf("Network init\n");
@@ -392,9 +394,6 @@ NORETURN void *main_continued(UNUSED void *arg)
     console = network_console_init();
     network_console_register_handler(console, enqueue);
     init_console_sem();
-
-    /* Initialise our swap map and queue for demand paging */
-    init_bitmap();
 
 #ifdef CONFIG_SOS_GDB_ENABLED
     /* Initialize the debugger */
@@ -408,35 +407,31 @@ NORETURN void *main_continued(UNUSED void *arg)
         ZF_LOGE("Could not create irq handler thread\n");
     }
 
-    /* Initialises the timer */
-    printf("Timer init\n");
-    int error = start_timer(timer_vaddr);
-    ZF_LOGF_IF(error, "Error, unable to initialise the timer");
-    /* Sets up the timer irq */
-    seL4_IRQHandler irq_handler;
-    int init_irq_err = sos_register_irq_handler(meson_timeout_irq(MESON_TIMER_A), true, timer_irq, NULL, &irq_handler);
-    ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");
-    seL4_IRQHandler_Ack(irq_handler);
-
-    init_irq_err = sos_register_irq_handler(meson_timeout_irq(MESON_TIMER_B), true, timer_irq, NULL, &irq_handler);
-    ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");
-    seL4_IRQHandler_Ack(irq_handler);
-
     /* Initialise the pagefile to write frame data into for demand paging */
     nfs_pagefile = file_create("pagefile", O_RDWR, nfs_pwrite_file, nfs_pread_file);
     io_args args = {.signal_cap = nfs_signal};
     /* Wait for NFS to finish mounting */
     seL4_Wait(nfs_signal, 0);
-    error = nfs_open_file(nfs_pagefile, nfs_async_open_cb, &args);
+    int error = nfs_open_file(nfs_pagefile, nfs_async_open_cb, &args);
     ZF_LOGF_IF(error, "NFS: Error in opening pagefile");
     nfs_pagefile->handle = args.buff;
+
+    /* Initialises the timer */
+    printf("Timer init\n");
+    error = start_timer(timer_vaddr);
+    ZF_LOGF_IF(error, "Error, unable to initialise the timer");
+    /* Start the clock driver */
+    error = start_clock_process();
+    ZF_LOGF_IF(error == -1, "Failed to start clock driver");
+    /* Sets up the timer irq */
+    int init_irq_err = init_driver_irq_handling(seL4_CapIRQControl, meson_timeout_irq(MESON_TIMER_A), true, IRQ_EP_BADGE);
+    ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");
+    init_irq_err = init_driver_irq_handling(seL4_CapIRQControl, meson_timeout_irq(MESON_TIMER_B), true, IRQ_EP_BADGE);
+    ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");
 
     /* Initialise the list of processes and process id bitmap */
     error = init_proc();
     ZF_LOGF_IF(error, "Failed to initialise process list / bitmap");
-
-    error = start_process("clock_driver", false);
-    ZF_LOGF_IF(error == -1, "Failed to start process");
 
     /* Start the first user application */
     printf("Start process\n");
