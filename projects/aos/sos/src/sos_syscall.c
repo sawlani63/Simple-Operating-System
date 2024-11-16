@@ -81,14 +81,15 @@ int netcon_send(UNUSED pid_t pid, open_file *file, char *data, UNUSED uint64_t o
 }
 
 static inline int perform_io_core(user_process_t user_process, uint16_t data_offset, uint64_t file_offset, uintptr_t vaddr,
-                                  open_file *file, void *callback, bool read, uint16_t len) {
+                                  open_file *file, void *callback, bool read, uint16_t len, bool *cached) {
     pt_entry *entry = get_page(user_process.addrspace, vaddr);
     sync_bin_sem_wait(data_sem);
     pin_frame(entry->page.frame_ref);
     char *data = (char *)frame_data(entry->page.frame_ref);
     sync_bin_sem_post(data_sem);
     io_args *args = malloc(sizeof(io_args));
-    *args = (io_args){.err = len, .buff = data + data_offset, .signal_cap = signal_cap, .entry = entry};
+    *args = (io_args){.err = len, .buff = data + data_offset, .signal_cap = signal_cap,
+                      .entry = entry, .cache_frame = NULL_FRAME, .cached = false};
     int res;
     if (read) {
         res = file->file_read(user_process.pid, file, data + data_offset, file_offset, len, callback, args);
@@ -96,15 +97,28 @@ static inline int perform_io_core(user_process_t user_process, uint16_t data_off
         res = file->file_write(user_process.pid, file, data + data_offset, file_offset, len, callback, args);
     }
 
+    *cached = args->cached;
+    if (*cached) {
+        unpin_frame(entry->page.frame_ref);
+        free(args);
+    }
     return res < 0 ? -1 : res;
 }
 
-static inline int cleanup_pending_requests(int outstanding_requests) {
+static inline int cleanup_pending_requests(int outstanding_requests, size_t bytes_received) {
+    bool failed = false;
     while (outstanding_requests > 0) {
         seL4_Recv(signal_cap, 0, reply);
+        int result = seL4_GetMR(1);
+
         outstanding_requests--;
+        bytes_received += result;
+
+        if (result < 0) {
+            failed = true;
+        }
     }
-    return -1;
+    return failed ? -1 : (int)bytes_received;
 }
 
 static int perform_io(user_process_t user_process, size_t nbyte, uintptr_t vaddr, open_file *file, void *callback, bool read) {
@@ -112,6 +126,7 @@ static int perform_io(user_process_t user_process, size_t nbyte, uintptr_t vaddr
     size_t bytes_left = nbyte;
     uint16_t outstanding_requests = 0;
     uint16_t offset = vaddr & (PAGE_SIZE_4K - 1);
+    bool cached;
 
     do {
         /* Start the new batch of I/O requests. */
@@ -123,19 +138,27 @@ static int perform_io(user_process_t user_process, size_t nbyte, uintptr_t vaddr
                 }
                 handle_vm_fault(vaddr, user_process.pid);
             }
-            int res = perform_io_core(user_process, offset, file->offset + (nbyte - bytes_left), vaddr, file, callback, read, len);
+            int res = perform_io_core(user_process, offset, file->offset + (nbyte - bytes_left), vaddr, file, callback, read, len, &cached);
             
-            if (res < 0) {
-                return cleanup_pending_requests(outstanding_requests);
+            if (res == -1) {
+                cleanup_pending_requests(outstanding_requests, bytes_received);
+                return -1;
+            } else if (res == -2) {
+                return cleanup_pending_requests(outstanding_requests, bytes_received);
             }
             
-            outstanding_requests++;
             bytes_left -= res;
             vaddr += res;
             offset = 0;
             
-            /* If we got partial or non-existent data then exit early (we probably hit the EOF). */
-            if (res != len) {
+            if (cached) {
+                bytes_received += res;
+            } else {
+                outstanding_requests++;
+            }
+
+            if (res < len) {
+                /* If we got partial or non-existent data then exit early (we probably hit the EOF). */
                 break;
             }
         }
@@ -147,15 +170,15 @@ static int perform_io(user_process_t user_process, size_t nbyte, uintptr_t vaddr
             int result = seL4_GetMR(1);
             
             if (result < 0) {
-                return cleanup_pending_requests(outstanding_requests);
+                cleanup_pending_requests(outstanding_requests, bytes_received);
+                return -1;
             }
             
             bytes_received += result;
             outstanding_requests--;
             
             if (target != result) {
-                cleanup_pending_requests(outstanding_requests);
-                return bytes_received;
+                return cleanup_pending_requests(outstanding_requests, bytes_received);
             }
         }
     } while (bytes_left > 0);
