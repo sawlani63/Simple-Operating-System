@@ -65,6 +65,7 @@
         "thread": "c",
         "assert.h": "c",
         "executor": "c",
-        "gen_config.h": "c"
+        "gen_config.h": "c",
+        "random": "cpp"
     }
 }

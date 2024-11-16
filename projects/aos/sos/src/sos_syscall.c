@@ -9,6 +9,7 @@
 #include "network.h"
 #include "console.h"
 #include "thread_pool.h"
+#include "clock_replacement.h"
 
 #define MAX_BATCH_SIZE 3
 
@@ -494,7 +495,6 @@ void syscall_sys_mmap(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         if (mmap_region == NULL) {
             seL4_SetMR(0, -1);
         } else {
-            assert(mmap_region->base != 0);
             seL4_SetMR(0, mmap_region->base);
         }
     } else {
@@ -510,12 +510,16 @@ static inline void free_page(user_process_t user_process, seL4_Word vaddr) {
     uint16_t l4_i = (vaddr >> 12) & MASK(9); /* Next 9 bits */
     pt_entry *l4_table = user_process.addrspace->page_table[l1_i].l2[l2_i].l3[l3_i].l4;
 
-    sync_bin_sem_wait(data_sem);
-    free_frame(l4_table[l4_i].page.frame_ref);
-    sync_bin_sem_post(data_sem);
-    seL4_CPtr frame_cptr = l4_table[l4_i].page.frame_cptr;
-    seL4_ARM_Page_Unmap(frame_cptr);
-    free_untype(&frame_cptr, NULL);
+    if (l4_table[l4_i].valid) {
+        sync_bin_sem_wait(data_sem);
+        free_frame(l4_table[l4_i].page.frame_ref);
+        sync_bin_sem_post(data_sem);
+        seL4_CPtr frame_cptr = l4_table[l4_i].page.frame_cptr;
+        seL4_ARM_Page_Unmap(frame_cptr);
+        free_untype(&frame_cptr, NULL);
+    } else if (l4_table[l4_i].swapped) {
+        mark_block_free(l4_table[l4_i].swap_map_index);
+    }
     l4_table[l4_i] = (pt_entry){0};
 }
 
@@ -535,9 +539,20 @@ void syscall_sys_munmap(seL4_MessageInfo_t *reply_msg, seL4_Word badge) {
      * been called before, undefined behavior occurs. If ptr is NULL, no operation is performed. */
     mem_region_t tmp = { .base = addr };
     mem_region_t *reg = sglib_mem_region_t_find_member(user_process.addrspace->region_tree, &tmp);
-    if (reg != NULL) {
+    if (reg == NULL) {
         seL4_SetMR(0, -1);
         return;
+    }
+
+    /* Remove the frames belonging to the mmap region. */
+    for (size_t bytes_left = length; bytes_left > 0; bytes_left -= PAGE_SIZE_4K) {
+        if (!vaddr_check(user_process, addr)) {
+            seL4_SetMR(0, -1);
+            return;
+        }
+
+        free_page(user_process, addr);
+        addr += PAGE_SIZE_4K;
     }
 
     /* Remove the mmapped memory region. */
@@ -545,18 +560,6 @@ void syscall_sys_munmap(seL4_MessageInfo_t *reply_msg, seL4_Word badge) {
         remove_region(user_process.addrspace, reg->base);
     } else {
         reg->base += length;
-    }
-
-    /* Remove the page and its contents. */
-    size_t vaddr = addr;
-    for (size_t bytes_left = length; bytes_left > 0; bytes_left -= PAGE_SIZE_4K) {
-        if (!vaddr_check(user_process, vaddr)) {
-            seL4_SetMR(0, -1);
-            return;
-        }
-
-        free_page(user_process, vaddr);
-        vaddr += PAGE_SIZE_4K;
     }
 
     seL4_SetMR(0, 0);
