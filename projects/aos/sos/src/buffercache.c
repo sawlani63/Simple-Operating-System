@@ -135,7 +135,6 @@ int buffercache_read(int pid, struct file *file, char *data, uint64_t offset, ui
     }
 
     uint64_t bytes_left = len = MIN(len, file->size - offset);
-    ((io_args *) args)->cached = true;
     sync_bin_sem_wait(cache_sem);
     while (bytes_left > 0) {
         cache_key_t key = {.handle = file->handle, .block_num = offset / NFS_BLKSIZE};
@@ -158,6 +157,7 @@ int buffercache_read(int pid, struct file *file, char *data, uint64_t offset, ui
         offset += read_amount;
         data += read_amount;
     }
+    ((io_args *) args)->cached = true;
     sync_bin_sem_post(cache_sem);
     return len;
 }

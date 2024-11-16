@@ -105,7 +105,7 @@ static inline int perform_io_core(user_process_t user_process, uint16_t data_off
         unpin_frame(entry->page.frame_ref);
         free(args);
     }
-    return res < 0 ? -1 : res;
+    return res;
 }
 
 static inline int cleanup_pending_requests(int outstanding_requests, size_t bytes_received) {
@@ -144,9 +144,11 @@ static int perform_io(user_process_t user_process, size_t nbyte, uintptr_t vaddr
             int res = perform_io_core(user_process, offset, file->offset + (nbyte - bytes_left), vaddr, file, callback, read, len, &cached);
             
             if (res == -1) {
+                /* Error occurred */
                 cleanup_pending_requests(outstanding_requests, bytes_received);
                 return -1;
             } else if (res == -2) {
+                /* Early exit. */
                 return cleanup_pending_requests(outstanding_requests, bytes_received);
             }
             

@@ -2,6 +2,7 @@
 #include "network.h"
 #include "mapping.h"
 #include "nfs.h"
+#include "buffercache.h"
 
 #include <sync/condition_var.h>
 
@@ -132,7 +133,8 @@ int clock_page_out(frame_t *victim) {
     if (victim->cache) {
         /* Assert that the vaddr is not mapped. Something definitely went wrong if it is. */
         assert(!vaddr_is_mapped(as, vaddr));
-        return 0;
+        cache_key_t *key = (cache_key_t *) victim->buffer_cache_key;
+        return buffercache_clean_frame(*key, ref_from_frame(victim));
     }
 
     /* Assert that the vaddr we are paging out is actually mapped. Something definitely went wrong if it isn't. */

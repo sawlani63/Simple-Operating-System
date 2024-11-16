@@ -36,6 +36,7 @@ void nfs_buffercache_read_rdcb(int err, UNUSED struct nfs_context *nfs, void *da
         memcpy(args->buff, data, err);
         if (args->cache_frame != NULL_FRAME) {
             memcpy(frame_data(args->cache_frame), data, err);
+            err = args->err;
         }
         unpin_frame(args->entry->page.frame_ref);
         sync_bin_sem_post(data_sem);
@@ -54,12 +55,13 @@ void nfs_buffercache_read_wrcb(int err, UNUSED struct nfs_context *nfs, void *da
         sync_bin_sem_wait(data_sem);
         if (args->cache_frame != NULL_FRAME) {
             memcpy(frame_data(args->cache_frame), args->buff, args->err);
+            err = args->err;
         }
         unpin_frame(args->entry->page.frame_ref);
         sync_bin_sem_post(data_sem);
     }
     seL4_SetMR(0, args->err);
-    seL4_SetMR(1, args->err);
+    seL4_SetMR(1, err);
     seL4_Send(args->signal_cap, seL4_MessageInfo_new(0, 0, 0, 2));
     free(args);
 }
