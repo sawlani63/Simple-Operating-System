@@ -379,7 +379,7 @@ void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 
     sos_stat_t stat = {ST_SPECIAL, 0, 0, 0, 0};
     if (strcmp(file_path, "console")) {
-        io_args args = {0, &stat, nfs_signal, NULL};
+        io_args args = {0, &stat, nfs_signal, NULL, NULL_FRAME, 0};
         if (nfs_stat_file(file_path, nfs_async_stat_cb, &args)) {
             seL4_SetMR(0, -1);
             return;
