@@ -9,12 +9,15 @@
 #include "network.h"
 #include "console.h"
 #include "thread_pool.h"
+#include "buffercache.h"
+#include "dentry.h"
 
 #define MAX_BATCH_SIZE 3
 
 extern user_process_t *user_process_list;
 extern sync_bin_sem_t *process_list_sem;
 bool console_open_for_read = false;
+bool buffercache_enable = false;
 
 sync_bin_sem_t *data_sem = NULL;
 sync_bin_sem_t *file_sem = NULL;
