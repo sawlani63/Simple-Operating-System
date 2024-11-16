@@ -68,7 +68,7 @@ static int buffercache_readahead(int pid, struct file *file, char *data, uint64_
         printf("Error adding to buffer cache map\n");
         return -1;
     }
-    frame_ref_t ref = clock_alloc_frame(0, pid, 0, (uintptr_t)&kh_key(cache_map, iter));
+    frame_ref_t ref = clock_alloc_frame(0, pid, 1, (uintptr_t)&kh_key(cache_map, iter));
     if (ref == NULL_FRAME) {
         return -1;
     }
@@ -92,7 +92,9 @@ int buffercache_write(int pid, struct file *file, char *data, uint64_t offset, u
 
         khiter_t iter = kh_get(cache, cache_map, key);
         frame_ref_t cache;
+        sync_bin_sem_wait(data_sem);
         if (iter == kh_end(cache_map)) {
+            sync_bin_sem_post(data_sem);
             if (bytes_left < NFS_BLKSIZE && offset < ALIGN_UP(file->size, NFS_BLKSIZE)) {
                 int res = buffercache_readahead(pid, file, data, offset, cb, args, key);
                 sync_bin_sem_post(cache_sem);
@@ -104,15 +106,16 @@ int buffercache_write(int pid, struct file *file, char *data, uint64_t offset, u
                 printf("Error adding to buffer cache map\n");
                 return -1;
             }
-            cache = clock_alloc_frame(0, pid, 0, (uintptr_t) &kh_key(cache_map, iter));
+            cache = clock_alloc_frame(0, pid, 1, (uintptr_t) &kh_key(cache_map, iter));
             kh_value(cache_map, iter) = cache;
         } else {
             cache = kh_value(cache_map, iter);
+            pin_frame(cache);
         }
 
         uint16_t write_ammount = MIN(bytes_left, NFS_BLKSIZE - blk_offset);
-        sync_bin_sem_wait(data_sem);
         memcpy(frame_data(cache) + blk_offset, data, write_ammount);
+        unpin_frame(cache);
         sync_bin_sem_post(data_sem);
         
         mark_block_dirty(file, iter);
@@ -140,8 +143,10 @@ int buffercache_read(int pid, struct file *file, char *data, uint64_t offset, ui
         cache_key_t key = {.handle = file->handle, .block_num = offset / NFS_BLKSIZE};
         uint16_t blk_offset = offset - key.block_num * NFS_BLKSIZE;
 
+        sync_bin_sem_wait(data_sem);
         khiter_t iter = kh_get(cache, cache_map, key);
         if (iter == kh_end(cache_map)) {
+            sync_bin_sem_post(data_sem);
             int res = buffercache_readahead(pid, file, data, offset, cb, args, key);
             sync_bin_sem_post(cache_sem);
             return res < (int)NFS_BLKSIZE ? -1 : (int)len;
@@ -149,8 +154,9 @@ int buffercache_read(int pid, struct file *file, char *data, uint64_t offset, ui
         frame_ref_t cache = kh_value(cache_map, iter);
 
         uint16_t read_amount = MIN(bytes_left, NFS_BLKSIZE - blk_offset);
-        sync_bin_sem_wait(data_sem);
+        pin_frame(cache);
         memcpy(data, frame_data(cache) + blk_offset, read_amount);
+        unpin_frame(cache);
         sync_bin_sem_post(data_sem);
         
         bytes_left -= read_amount;
