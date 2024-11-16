@@ -16,7 +16,6 @@
 #include <cspace/cspace.h>
 #include "ut.h"
 
-extern cspace_t cspace;
 typedef int pid_t;
 
 /* Linked list to keep track of frame_caps and uts allocated for the stack */
@@ -44,6 +43,8 @@ typedef struct {
     seL4_Word badge;
 
     uintptr_t tls_base;
+
+    cspace_t cspace;
 } sos_thread_t;
 
 typedef void thread_main_f(void *);

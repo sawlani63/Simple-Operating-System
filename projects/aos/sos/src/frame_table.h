@@ -120,6 +120,8 @@ void pin_frame(frame_ref_t frame_ref);
 
 void unpin_frame(frame_ref_t frame_ref);
 
+frame_ref_t ref_from_frame(frame_t *frame);
+
 /*
  * Free a frame allocated by the frame table.
  *

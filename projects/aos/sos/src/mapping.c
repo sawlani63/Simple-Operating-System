@@ -220,9 +220,11 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
     }
 
     /* create slot for the frame to load the data into */
+    sync_bin_sem_wait(cspace_sem);
     seL4_CPtr frame_cap = cspace_alloc_slot(cspace);
     if (frame_cap == seL4_CapNull) {
         ZF_LOGD("Failed to alloc slot");
+        sync_bin_sem_post(cspace_sem);
         free(l4_pt);
         free(l3_pt);
         free(l2_pt);
@@ -234,11 +236,13 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
     if (err != seL4_NoError) {
         ZF_LOGD("Failed to untyped reypte");
         cspace_free_slot(cspace, frame_cap);
+        sync_bin_sem_post(cspace_sem);
         free(l4_pt);
         free(l3_pt);
         free(l2_pt);
         return err;
     }
+    sync_bin_sem_post(cspace_sem);
 
     pt_entry entry = {.valid = 1, .swapped = 0, .perms = perms, .page = {frame_ref, frame_cap}};
     l4_pt[l4_index] = entry;
@@ -259,7 +263,10 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
         attr |= seL4_ARM_ExecuteNever;
     }
 
-    return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, l1_pt);
+    sync_bin_sem_wait(cspace_sem);
+    err = map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, l1_pt);
+    sync_bin_sem_post(cspace_sem);
+    return err;
 }
 
 extern sync_bin_sem_t *data_sem;

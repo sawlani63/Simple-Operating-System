@@ -13,8 +13,12 @@
 
 #include <sel4runtime.h>
 #include "ut.h"
+#include <sync/bin_sem.h>
 
 extern cspace_t cspace;
+extern sync_bin_sem_t *cspace_sem;
+
+ut_t *alloc_retype_cspace(cspace_t *manual_cspace, seL4_CPtr *cptr, seL4_Word type, size_t size_bits);
 
 /* helper to allocate a ut + cslot, and retype the ut into the cslot */
 ut_t *alloc_retype(seL4_CPtr *cptr, seL4_Word type, size_t size_bits);

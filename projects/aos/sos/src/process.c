@@ -33,6 +33,8 @@ int pid_queue_tail = NUM_PROC;
 sync_bin_sem_t *pid_queue_sem = NULL;
 sync_bin_sem_t *process_list_sem = NULL;
 
+NORETURN void syscall_loop(void *arg);
+
 int init_proc()
 {
     user_process_list = calloc(NUM_PROC, sizeof(user_process_t));
@@ -598,7 +600,7 @@ int start_process(char *app_name, bool initial)
 
     if (!initial) {
         /* Create our per-process system call handler thread */
-        user_process.handler_thread = thread_create(handler_function, (void *) user_process.pid, user_process.pid, false, seL4_MaxPrio, seL4_CapNull, true, app_name);
+        user_process.handler_thread = thread_create(syscall_loop, (void *) user_process.pid, user_process.pid, false, seL4_MaxPrio, seL4_CapNull, true, app_name);
         if (user_process.handler_thread == NULL) {
             ZF_LOGE("Could not create system call handler thread for %s\n", app_name);
             free_process(user_process, false);
