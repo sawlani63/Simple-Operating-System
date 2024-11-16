@@ -152,6 +152,7 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
     /* get the first word of the message, which in the SOS protocol is the number
      * of the SOS "syscall". */
     seL4_Word syscall_number = seL4_GetMR(0);
+    ZF_LOGE("SYSTEM CALL NUM %d", syscall_number);
 
     /* Process system call */
     switch (syscall_number) {
@@ -235,6 +236,7 @@ NORETURN void syscall_loop(void *arg)
         /* Awake! We got a message - check the label and badge to
          * see what the message is about */
         seL4_Word label = seL4_MessageInfo_get_label(message);
+        ZF_LOGE("LABEL AND PID %d %d", label, pid);
         if (label == seL4_Fault_NullFault) {
             /* It's not a fault or an interrupt, it must be an IPC
              * message from console_test! */
@@ -434,6 +436,9 @@ NORETURN void *main_continued(UNUSED void *arg)
     /* Initialise the list of processes and process id bitmap */
     error = init_proc();
     ZF_LOGF_IF(error, "Failed to initialise process list / bitmap");
+
+    error = start_process("clock_driver", false);
+    ZF_LOGF_IF(error == -1, "Failed to start process");
 
     /* Start the first user application */
     printf("Start process\n");

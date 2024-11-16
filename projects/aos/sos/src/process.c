@@ -433,6 +433,54 @@ int start_process(char *app_name, bool initial)
         return -1;
     }
 
+    user_process.timer_slot = cspace_alloc_slot(&user_process.cspace);
+    if (user_process.timer_slot == seL4_CapNull) {
+        ZF_LOGE("Failed to alloc user ep slot");
+        free_process(user_process, false);
+        return -1;
+    }
+
+    if (user_process.pid != 0) {
+        /* now mutate the cap, thereby setting the badge */
+        err = cspace_mint(&user_process.cspace, user_process.timer_slot, &cspace, user_process_list[0].ep, seL4_AllRights, (seL4_Word) user_process.pid);
+        if (err) {
+            ZF_LOGE("Failed to mint user ep");
+            free_process(user_process, false);
+            return -1;
+        }
+    } else {
+        /* now mutate the cap, thereby setting the badge */
+        err = cspace_mint(&user_process.cspace, user_process.timer_slot, &cspace, user_process.ep, seL4_AllRights, (seL4_Word) user_process.pid);
+        if (err) {
+            ZF_LOGE("Failed to mint user ep");
+            free_process(user_process, false);
+            return -1;
+        }
+    }
+
+    /* Create our per-process reply object */
+    seL4_CPtr reply;
+    ut_t *ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
+    if (ut == NULL) {
+        ZF_LOGE("Failed to create reply object");
+        free_process(user_process, false);
+        return -1;
+    }
+
+    user_process.reply_slot = cspace_alloc_slot(&user_process.cspace);
+    if (user_process.reply_slot == seL4_CapNull) {
+        ZF_LOGE("Failed to alloc user ep slot");
+        free_process(user_process, false);
+        return -1;
+    }
+    /* now mutate the cap, thereby setting the badge */
+    err = cspace_mint(&user_process.cspace, user_process.reply_slot, &cspace, reply, seL4_AllRights, (seL4_Word) user_process.pid);
+    if (err) {
+        ZF_LOGE("Failed to mint user ep");
+        free_process(user_process, false);
+        return -1;
+    }
+
     /* Create a new TCB object */
     user_process.tcb_ut = alloc_retype(&user_process.tcb, seL4_TCBObject, seL4_TCBBits);
     if (user_process.tcb_ut == NULL) {
@@ -550,7 +598,7 @@ int start_process(char *app_name, bool initial)
 
     if (!initial) {
         /* Create our per-process system call handler thread */
-        user_process.handler_thread = thread_create(handler_function, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true, app_name);
+        user_process.handler_thread = thread_create(handler_function, (void *) user_process.pid, user_process.pid, false, seL4_MaxPrio, seL4_CapNull, true, app_name);
         if (user_process.handler_thread == NULL) {
             ZF_LOGE("Could not create system call handler thread for %s\n", app_name);
             free_process(user_process, false);
@@ -596,8 +644,20 @@ int start_process(char *app_name, bool initial)
     }
 
     free(elf_base);
-    user_process.stime = timestamp_ms(timestamp_get_freq());
+    //user_process.stime = timestamp_ms(timestamp_get_freq());
+    if (user_process.pid != 0) {
+        ZF_LOGE("PUT REQUEST IN MR");
+        seL4_SetMR(0, 2);
+        ZF_LOGE("CALL ON TIMER PROCESS");
+        seL4_Call(user_process_list[0].ep, seL4_MessageInfo_new(0, 0, 0, 1));
+        ZF_LOGE("RECEIVED RESPONSE");
+        user_process.stime = seL4_GetMR(0);
+        ZF_LOGE("GOT TIME");
+    } else {
+        user_process.stime = timestamp_ms(timestamp_get_freq());
+    }
     user_process_list[user_process.pid] = user_process;
+    ZF_LOGE("SUCESS IN PROC CREATION");
     return user_process.pid;
 }
 
