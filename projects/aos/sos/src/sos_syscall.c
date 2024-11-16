@@ -72,7 +72,7 @@ static inline void wakeup(UNUSED uint32_t id, UNUSED void* data)
     seL4_Signal(sleep_signal);
 }
 
-int netcon_send(open_file *file, char *data, UNUSED uint64_t offset, uint64_t len, void *callback, void *args) {
+int netcon_send(UNUSED pid_t pid, open_file *file, char *data, UNUSED uint64_t offset, uint64_t len, void *callback, void *args) {
     int res = network_console_send(file->handle, data, len, callback, args);
     io_args *arg = (io_args *) args;
     struct task task = {len, res, arg->signal_cap};
@@ -91,9 +91,9 @@ static inline int perform_io_core(user_process_t user_process, uint16_t data_off
     *args = (io_args){.err = len, .buff = data + data_offset, .signal_cap = signal_cap, .entry = entry};
     int res;
     if (read) {
-        res = file->file_read(file, data + data_offset, file_offset, len, callback, args);
+        res = file->file_read(user_process.pid, file, data + data_offset, file_offset, len, callback, args);
     } else {
-        res = file->file_write(file, data + data_offset, file_offset, len, callback, args);
+        res = file->file_write(user_process.pid, file, data + data_offset, file_offset, len, callback, args);
     }
 
     return res < 0 ? -1 : res;
@@ -302,7 +302,7 @@ void syscall_sos_read(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         return;
     }
 
-    int res = perform_io(user_process, nbyte, vaddr, found, nfs_async_read_cb, true);
+    int res = perform_io(user_process, nbyte, vaddr, found, nfs_buffercache_read_rdcb, true);
     if (res > 0) {
         found->offset += res;
     }
@@ -330,9 +330,12 @@ void syscall_sos_write(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         seL4_SetMR(0, -1);
         return;
     }
-    int res = perform_io(user_process, nbyte, vaddr, found, nfs_async_write_cb, false);
+    int res = perform_io(user_process, nbyte, vaddr, found, nfs_buffercache_read_wrcb, false);
     if (res > 0) {
         found->offset += res;
+        if (found->offset > found->size) {
+            found->size = found->offset;
+        }
     }
     seL4_SetMR(0, res);
 }

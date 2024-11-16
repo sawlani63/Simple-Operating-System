@@ -127,7 +127,7 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
     }
 
     /* Allocate a new frame to be mapped by the shadow page table. */
-    frame_ref_t frame_ref = clock_alloc_frame(fault_addr, user_process, 0);
+    frame_ref_t frame_ref = clock_alloc_frame(fault_addr, user_process.pid, 0, 0);
     if (frame_ref == NULL_FRAME) {
         ZF_LOGD("Failed to alloc frame");
         free_process(user_process, true);
@@ -218,7 +218,7 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
 
 NORETURN void syscall_loop(void *arg)
 {
-    pid_t pid = (pid_t) arg;
+    pid_t pid = (pid_t)(size_t)arg;
     sync_bin_sem_wait(process_list_sem);
     user_process_t process = user_process_list[pid];
     sync_bin_sem_post(process_list_sem);
@@ -400,7 +400,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     ZF_LOGF_IF(err, "Failed to initialize debugger %d", err);
 #endif /* CONFIG_SOS_GDB_ENABLED */
 
-    /* Initialise a temporary irq handling thread that binds the notification object to its TCB and handles irqs until the main thread is done with its tasks */
+    /* Initialise an irq handling thread. */
     printf("\nSOS entering irq loop\n");
     if (!thread_create(irq_loop, (void *)ntfn, 0, true, seL4_MaxPrio, 0, false, "irq")) {
         ZF_LOGE("Could not create irq handler thread\n");
@@ -440,7 +440,7 @@ NORETURN void *main_continued(UNUSED void *arg)
 
     /* We create the initial process's handler thread after killing our irq_temp_thread to ensure no irqs are sent by our thread before we can kill the temp thread */
     user_process_t user_process = user_process_list[success];
-    user_process.handler_thread = thread_create(syscall_loop, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true, APP_NAME);
+    user_process.handler_thread = thread_create(syscall_loop, (void *)(size_t)user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true, APP_NAME);
     ZF_LOGF_IF(user_process.handler_thread == NULL, "Failed to create syscall thread");
     sync_bin_sem_wait(process_list_sem);
     user_process_list[success] = user_process;
@@ -478,7 +478,7 @@ int main(void)
 
     ut_t *ut = ut_alloc(seL4_NotificationBits, &cspace);
     if (ut == NULL) {
-        ZF_LOGE("No memory for object of size %zu", seL4_NotificationBits);
+        ZF_LOGE("No memory for object of size %u", seL4_NotificationBits);
         return -1;
     }
     seL4_CPtr cspace_sem_cptr = cspace_alloc_slot(&cspace);

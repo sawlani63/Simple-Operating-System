@@ -38,7 +38,7 @@ extern "C" {
 #define LIBNFS_FEATURE_READAHEAD
 #define LIBNFS_FEATURE_PAGECACHE
 #define LIBNFS_FEATURE_DEBUG
-#define NFS_BLKSIZE 4096
+#define NFS_BLKSIZE 4096ul
 #define NFS_PAGECACHE_DEFAULT_TTL 5
 
 struct nfs_context;

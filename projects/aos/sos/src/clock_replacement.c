@@ -126,8 +126,14 @@ frame_t *clock_choose_victim(frame_ref_t *clock_hand, frame_ref_t first) {
 
 int clock_page_out(frame_t *victim) {
     /* Get the address space specific to the process this frame we are paging out belongs to. */
-    addrspace_t *as = get_process(victim->pid).addrspace;
-    seL4_Word vaddr = victim->vaddr;
+    addrspace_t *as = get_process(victim->user_frame.pid).addrspace;
+    seL4_Word vaddr = victim->user_frame.vaddr;
+    
+    if (victim->cache) {
+        /* Assert that the vaddr is not mapped. Something definitely went wrong if it is. */
+        assert(!vaddr_is_mapped(as, vaddr));
+        return 0;
+    }
 
     /* Assert that the vaddr we are paging out is actually mapped. Something definitely went wrong if it isn't. */
     assert(vaddr_is_mapped(as, vaddr));
@@ -140,7 +146,7 @@ int clock_page_out(frame_t *victim) {
 
     /* Perform the actual write to the NFS page file. Wait for it to finish and make sure it succeeds. */
     sync_bin_sem_wait(pagefile_sem);
-    int res = nfs_pwrite_file(nfs_pagefile, data, file_offset, PAGE_SIZE_4K, nfs_pagefile_write_cb, &args);
+    int res = nfs_pwrite_file(0, nfs_pagefile, data, file_offset, PAGE_SIZE_4K, nfs_pagefile_write_cb, &args);
     if (res < 0) {
         sync_bin_sem_post(pagefile_sem);
         return -1;
@@ -189,7 +195,7 @@ int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
         assert(!vaddr_is_mapped(as, vaddr));
 
         /* Allocate a new frame to be mapped by the shadow page table. Start the frame off as pinned. */
-        ref = clock_alloc_frame(vaddr, *user_process, 1);
+        ref = clock_alloc_frame(vaddr, user_process->pid, 1, 0);
         if (ref == NULL_FRAME) {
             ZF_LOGD("Failed to alloc frame");
             return -1;
@@ -201,7 +207,7 @@ int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
         char *data = (char *)frame_data(ref);
         io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, NULL, NULL_FRAME, 0};
         sync_bin_sem_wait(pagefile_sem);
-        int res = nfs_pread_file(nfs_pagefile, NULL, file_offset, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
+        int res = nfs_pread_file(user_process->pid, nfs_pagefile, NULL, file_offset, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
         if (res < (int)PAGE_SIZE_4K) {
             sync_bin_sem_post(pagefile_sem);
             sync_bin_sem_post(data_sem);

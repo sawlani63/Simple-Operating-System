@@ -10,7 +10,7 @@ typedef const char * string;
 struct file;
 
 typedef const char * string;
-typedef int (*execute_io)(struct file *file, char *data, uint64_t offset, uint64_t len, void *cb, void *args);
+typedef int (*execute_io)(int pid, struct file *file, char *data, uint64_t offset, uint64_t len, void *cb, void *args);
 
 typedef struct file {
     // File metadata
