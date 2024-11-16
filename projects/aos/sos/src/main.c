@@ -39,6 +39,8 @@
 #include "drivers/uart.h"
 #include "mapping.h"
 #include "clock_replacement.h"
+#include "buffercache.h"
+#include "dentry.h"
 
 #include <sos/gen_config.h>
 #ifdef CONFIG_SOS_GDB_ENABLED
@@ -393,6 +395,8 @@ NORETURN void *main_continued(UNUSED void *arg)
 
     /* Initialise our swap map and queue for demand paging */
     init_bitmap();
+    buffercache_init();
+    dentry_init();
 
 #ifdef CONFIG_SOS_GDB_ENABLED
     /* Initialize the debugger */

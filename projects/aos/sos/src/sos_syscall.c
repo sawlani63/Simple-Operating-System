@@ -244,14 +244,33 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 
     open_file *file;
     if (strcmp(file_path, "console")) {
-        file = file_create(file_path, mode, nfs_pwrite_file, nfs_pread_file);
-        io_args args = {.signal_cap = nfs_signal};
-        if (nfs_open_file(file, nfs_async_open_cb, &args) < 0) {
-            file_destroy(file);
-            seL4_SetMR(0, -1);
-            return;
+        execute_io nfs_write = buffercache_enable ? buffercache_write : nfs_pwrite_file;
+        execute_io nfs_read = buffercache_enable ? buffercache_read : nfs_pread_file;
+        file = dentry_check(file_path, mode, nfs_write, nfs_read);
+        if (file->handle == NULL) {
+            io_args args = {.signal_cap = nfs_signal};
+            if (nfs_open_file(file, nfs_async_open_cb, &args) < 0) {
+                file_destroy(file);
+                seL4_SetMR(0, -1);
+                return;
+            }
+            file->handle = args.buff;
+
+            sos_stat_t stat;
+            args = (io_args){0, &stat, nfs_signal, NULL, NULL_FRAME, 0};
+            if (nfs_stat_file(file_path, nfs_async_stat_cb, &args)) {
+                seL4_SetMR(0, -1);
+                return;
+            }
+            if (args.err < 0) {
+                seL4_SetMR(0, -1);
+                return;
+            }
+            file->size = stat.st_size;
+
+            int res = dentry_write(file);
+            ZF_LOGE_IF(res == -1, "Failed to add to dentry cache");
         }
-        file->handle = args.buff;
     } else {
         sync_bin_sem_wait(file_sem);
         /* Check if stdin is already open by another process */
@@ -292,11 +311,8 @@ void syscall_sos_close(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         seL4_SetMR(0, -1);
         return;
     } else if (strcmp(found->path, "console")) {
-        io_args args = {.signal_cap = nfs_signal};
-        if (nfs_close_file(found, nfs_async_close_cb, &args) < 0) {
-            seL4_SetMR(0, -1);
-            return;
-        }
+        dentry_mark_closed(found);
+        buffercache_flush(found);
     } else if (found->mode != O_WRONLY) {
         sync_bin_sem_wait(file_sem);
         console_open_for_read = false;
