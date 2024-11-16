@@ -81,9 +81,6 @@ static struct {
 
 frame_ref_t clock_hand = NULL_FRAME;
 
-/* Management of frame nodes */
-static frame_ref_t ref_from_frame(frame_t *frame);
-
 /* Management of frame list */
 static void push_front(frame_list_t *list, frame_t *frame);
 static void push_back(frame_list_t *list, frame_t *frame);
@@ -145,7 +142,7 @@ frame_ref_t clock_alloc_frame(size_t vaddr, user_process_t process, size_t pinne
         if (!clock_hand) {
             clock_hand = frame_table.allocated.first;
         }
-        frame_t *victim = clock_choose_victim(clock_hand, frame_table.allocated.first);
+        frame_t *victim = clock_choose_victim(&clock_hand, frame_table.allocated.first);
         if (clock_page_out(victim) < 0) {
             sync_bin_sem_post(data_sem);
             ZF_LOGE("Failed to page out a frame!");
@@ -207,7 +204,7 @@ frame_t *frame_from_ref(frame_ref_t frame_ref)
     return &frame_table.frames[frame_ref];
 }
 
-static frame_ref_t ref_from_frame(frame_t *frame)
+frame_ref_t ref_from_frame(frame_t *frame)
 {
     assert(frame >= frame_table.frames);
     assert(frame < frame_table.frames + frame_table.used);
@@ -399,9 +396,11 @@ static seL4_ARM_Page alloc_frame_at(uintptr_t vaddr)
     }
 
     /* Allocate a slot for the page capability. */
+    sync_bin_sem_wait(cspace_sem);
     seL4_ARM_Page cptr = cspace_alloc_slot(frame_table.cspace);
     if (cptr == seL4_CapNull) {
         ut_free(ut);
+        sync_bin_sem_post(cspace_sem);
         return seL4_CapNull;
     }
 
@@ -410,16 +409,20 @@ static seL4_ARM_Page alloc_frame_at(uintptr_t vaddr)
     if (err != 0) {
         cspace_free_slot(frame_table.cspace, cptr);
         ut_free(ut);
+        sync_bin_sem_post(cspace_sem);
         return seL4_CapNull;
     }
+    sync_bin_sem_post(cspace_sem);
 
     /* Map the frame into SOS. */
     seL4_ARM_VMAttributes attrs = seL4_ARM_Default_VMAttributes | seL4_ARM_ExecuteNever;
     err = map_frame(frame_table.cspace, cptr, frame_table.vspace, vaddr, seL4_ReadWrite, attrs);
     if (err != 0) {
+        sync_bin_sem_wait(cspace_sem);
         cspace_delete(frame_table.cspace, cptr);
         cspace_free_slot(frame_table.cspace, cptr);
         ut_free(ut);
+        sync_bin_sem_post(cspace_sem);
         return seL4_CapNull;
     }
 

@@ -37,8 +37,10 @@ void nfs_async_read_cb(int err, UNUSED struct nfs_context *nfs, void *data, void
     }
     seL4_SetMR(0, args->err);
     seL4_SetMR(1, err);
-    seL4_Send(args->signal_cap, seL4_MessageInfo_new(0, 0, 0, 2));
+    sync_bin_sem_wait(data_sem);
     unpin_frame(args->entry->page.frame_ref);
+    sync_bin_sem_post(data_sem);
+    seL4_Send(args->signal_cap, seL4_MessageInfo_new(0, 0, 0, 2));
     free(args);
 }
 
@@ -49,8 +51,10 @@ void nfs_async_write_cb(int err, UNUSED struct nfs_context *nfs, void *data, voi
     }
     seL4_SetMR(0, args->err);
     seL4_SetMR(1, err);
-    seL4_Send(args->signal_cap, seL4_MessageInfo_new(0, 0, 0, 2));
+    sync_bin_sem_wait(data_sem);
     unpin_frame(args->entry->page.frame_ref);
+    sync_bin_sem_post(data_sem);
+    seL4_Send(args->signal_cap, seL4_MessageInfo_new(0, 0, 0, 2));
     free(args);
 }
 

@@ -3,6 +3,8 @@
 #include "mapping.h"
 #include "nfs.h"
 
+#include <sync/condition_var.h>
+
 #define GET_PAGE(pt, vaddr) pt[(vaddr >> 39) & MASK(9)].l2[(vaddr >> 30) & MASK(9)].l3[(vaddr >> 21) & MASK(9)].l4[(vaddr >> 12) & MASK(9)]
 #define SWAPMAP_SIZE (128 * 1024 * 5)                       // 640KiB in bytes
 #define NUM_BLOCKS (SWAPMAP_SIZE * 8)                       // Total number of 4KiB blocks in 20GiB (can be stored in an int)
@@ -22,6 +24,9 @@ struct {
 
 extern open_file *nfs_pagefile;
 
+sync_bin_sem_t *pagefile_sem;
+sync_cv_t *pagefile_cv;
+
 // Initialize bitmap (0 means free, 1 means used)
 void init_bitmap() {
     swap_manager.swap_map = calloc(SWAPMAP_SIZE, sizeof(uint8_t));
@@ -31,6 +36,20 @@ void init_bitmap() {
     ZF_LOGF_IF(!swap_manager.swap_queue, "Could not initialise swap queue!\n");
 
     alloc_retype(&swap_manager.page_notif, seL4_NotificationObject, seL4_NotificationBits);
+
+    pagefile_sem = malloc(sizeof(sync_bin_sem_t));
+    seL4_CPtr pagefile_sem_cptr;
+    ZF_LOGF_IF(!pagefile_sem, "No memory for semaphore object");
+    ut_t *sem_ut = alloc_retype(&pagefile_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!sem_ut, "No memory for notification");
+    sync_bin_sem_init(pagefile_sem, pagefile_sem_cptr, 1);
+
+    pagefile_cv = malloc(sizeof(sync_cv_t));
+    ZF_LOGF_IF(!pagefile_cv, "No memory for new cv object");
+    seL4_CPtr pagefile_cv_cptr;
+    sem_ut = alloc_retype(&pagefile_cv_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!sem_ut, "No memory for notification");
+    sync_cv_init(pagefile_cv, pagefile_cv_cptr);
 }
 
 // Mark a block as used (set bit to 1)
@@ -94,19 +113,14 @@ static inline uint64_t get_page_file_offset() {
     return swap_map_index * PAGE_SIZE_4K;
 }
 
-frame_t *clock_choose_victim(frame_ref_t clock_hand, frame_ref_t first) {
-    assert(clock_hand != NULL_FRAME);
-    frame_t *curr_frame = frame_from_ref(clock_hand);
+frame_t *clock_choose_victim(frame_ref_t *clock_hand, frame_ref_t first) {
+    assert(clock_hand != NULL && *clock_hand != NULL_FRAME && first != NULL_FRAME);
+    frame_t *curr_frame = frame_from_ref(*clock_hand);
     while (curr_frame->pinned || curr_frame->referenced) {
         curr_frame->referenced = 0;
-        frame_ref_t next = curr_frame->next;
-        if (next == NULL_FRAME) {
-            curr_frame = frame_from_ref(first);
-        } else {
-            curr_frame = frame_from_ref(curr_frame->next);
-        }
+        *clock_hand = curr_frame->next ? curr_frame->next : first;
+        curr_frame = frame_from_ref(*clock_hand);
     }
-
     return curr_frame;
 }
 
@@ -125,14 +139,18 @@ int clock_page_out(frame_t *victim) {
     io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, NULL};
 
     /* Perform the actual write to the NFS page file. Wait for it to finish and make sure it succeeds. */
+    sync_bin_sem_wait(pagefile_sem);
     int res = nfs_pwrite_file(nfs_pagefile, data, file_offset, PAGE_SIZE_4K, nfs_pagefile_write_cb, &args);
     if (res < 0) {
+        sync_bin_sem_post(pagefile_sem);
         return -1;
     }
     seL4_Wait(swap_manager.page_notif, 0);
     if (args.err < 0) {
+        sync_bin_sem_post(pagefile_sem);
         return -1;
     }
+    sync_bin_sem_post(pagefile_sem);
 
     /* Unmap the entry from the process's vspace and free the frame and its capability. */
     seL4_CPtr frame_cptr = entry.page.frame_cptr;
@@ -167,8 +185,11 @@ int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
         }
         sync_bin_sem_post(data_sem);
     } else if (entry.swapped) {
-        /* Allocate a new frame to be mapped by the shadow page table. */
-        ref = clock_alloc_frame(vaddr, *user_process, 0);
+        /* Assert that the vaddr we are paging in is not mapped. Something definitely went wrong if it is. */
+        assert(!vaddr_is_mapped(as, vaddr));
+
+        /* Allocate a new frame to be mapped by the shadow page table. Start the frame off as pinned. */
+        ref = clock_alloc_frame(vaddr, *user_process, 1);
         if (ref == NULL_FRAME) {
             ZF_LOGD("Failed to alloc frame");
             return -1;
@@ -179,16 +200,21 @@ int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
         sync_bin_sem_wait(data_sem);
         char *data = (char *)frame_data(ref);
         io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, NULL};
+        sync_bin_sem_wait(pagefile_sem);
         int res = nfs_pread_file(nfs_pagefile, NULL, file_offset, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
         if (res < (int)PAGE_SIZE_4K) {
+            sync_bin_sem_post(pagefile_sem);
             sync_bin_sem_post(data_sem);
             return -1;
         }
         seL4_Wait(swap_manager.page_notif, 0);
         if (args.err < 0) {
+            sync_bin_sem_post(pagefile_sem);
             sync_bin_sem_post(data_sem);
             return 1;
         }
+        unpin_frame(ref);
+        sync_bin_sem_post(pagefile_sem);
         sync_bin_sem_post(data_sem);
 
         /* Update our swap manager bitmap and queue to cache the newly unused file offset. */
@@ -198,8 +224,8 @@ int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
         return 1;
     }
 
-    /* Assert the reference we got is not null as a sanity check, and map the new frame into the process's vspace. */
-    assert(ref != NULL_FRAME);
+    /* Assert the frame we got is not null as a sanity check, and map the new frame into the process's vspace. */
+    assert(frame_from_ref(ref) != NULL);
     if (sos_map_frame(&cspace, user_process->vspace, vaddr, entry.perms, ref, as) != 0) {
         ZF_LOGE("Could not map the frame into the two page tables");
         return -1;

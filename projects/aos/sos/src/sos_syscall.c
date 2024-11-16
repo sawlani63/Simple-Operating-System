@@ -10,19 +10,13 @@
 #include "console.h"
 #include "thread_pool.h"
 
-#ifdef CONFIG_SOS_FRAME_LIMIT
-    #define MAX_BATCH_SIZE (CONFIG_SOS_FRAME_LIMIT != 0ul ? 1 : 3)
-#else
-    #define MAX_BATCH_SIZE 3
-#endif
+#define MAX_BATCH_SIZE 3
 
 extern user_process_t *user_process_list;
+extern sync_bin_sem_t *process_list_sem;
 bool console_open_for_read = false;
 
-seL4_CPtr data_sem_cptr;
 sync_bin_sem_t *data_sem = NULL;
-
-seL4_CPtr file_sem_cptr;
 sync_bin_sem_t *file_sem = NULL;
 
 seL4_CPtr nfs_signal;
@@ -35,12 +29,14 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge);
 
 void init_semaphores(void) {
     data_sem = malloc(sizeof(sync_bin_sem_t));
+    seL4_CPtr data_sem_cptr;
     ZF_LOGF_IF(!data_sem, "No memory for semaphore object");
     ut_t *sem_ut = alloc_retype(&data_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!sem_ut, "No memory for notification");
     sync_bin_sem_init(data_sem, data_sem_cptr, 1);
 
     file_sem = malloc(sizeof(sync_bin_sem_t));
+    seL4_CPtr file_sem_cptr;
     ZF_LOGF_IF(!file_sem, "No memory for semaphore object");
     ut_t *data_ut = alloc_retype(&file_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!data_ut, "No memory for notification");
@@ -86,13 +82,9 @@ int netcon_send(open_file *file, char *data, UNUSED uint64_t offset, uint64_t le
 
 static inline int perform_io_core(user_process_t user_process, uint16_t data_offset, uint64_t file_offset, uintptr_t vaddr,
                                   open_file *file, void *callback, bool read, uint16_t len) {
-    if (!vaddr_check(user_process, vaddr)) {
-        return -1;
-    }
-
     pt_entry *entry = get_page(user_process.addrspace, vaddr);
-    pin_frame(entry->page.frame_ref);
     sync_bin_sem_wait(data_sem);
+    pin_frame(entry->page.frame_ref);
     char *data = (char *)frame_data(entry->page.frame_ref);
     sync_bin_sem_post(data_sem);
     io_args *args = malloc(sizeof(io_args));
@@ -125,6 +117,12 @@ static int perform_io(user_process_t user_process, size_t nbyte, uintptr_t vaddr
         /* Start the new batch of I/O requests. */
         while (outstanding_requests < MAX_BATCH_SIZE && bytes_left > 0) {
             uint16_t len = MIN(bytes_left, PAGE_SIZE_4K - offset);
+            if (!vaddr_is_mapped(user_process.addrspace, vaddr)) {
+                if (outstanding_requests > 0) {
+                    break;
+                }
+                handle_vm_fault(vaddr, user_process.pid);
+            }
             int res = perform_io_core(user_process, offset, file->offset + (nbyte - bytes_left), vaddr, file, callback, read, len);
             
             if (res < 0) {
@@ -197,11 +195,13 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     ZF_LOGV("syscall: thread example made syscall %d!\n", SYSCALL_SOS_OPEN);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    user_process_t user_process = user_process_list[badge];
-
     seL4_Word vaddr = seL4_GetMR(1);
     int path_len = seL4_GetMR(2) + 1;
     int mode = seL4_GetMR(3);
+
+    sync_bin_sem_wait(process_list_sem);
+    user_process_t user_process = user_process_list[badge];
+    sync_bin_sem_post(process_list_sem);
 
     if ((mode != O_WRONLY) && (mode != O_RDONLY) && (mode != O_RDWR)) {
         seL4_SetMR(0, -1);
@@ -255,8 +255,11 @@ void syscall_sos_close(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_CLOSE);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    user_process_t user_process = user_process_list[badge];
     int close_fd = seL4_GetMR(1);
+
+    sync_bin_sem_wait(process_list_sem);
+    user_process_t user_process = user_process_list[badge];
+    sync_bin_sem_post(process_list_sem);
 
     open_file *found = fdt_get_file(user_process.fdt, close_fd);
     if (found == NULL) {
@@ -283,11 +286,14 @@ void syscall_sos_read(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_READ);
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    user_process_t user_process = user_process_list[badge];
     /* Receive a fd from sos.c */
     int read_fd = seL4_GetMR(1);
     seL4_Word vaddr = seL4_GetMR(2);
     int nbyte = seL4_GetMR(3);
+
+    sync_bin_sem_wait(process_list_sem);
+    user_process_t user_process = user_process_list[badge];
+    sync_bin_sem_post(process_list_sem);
 
     open_file *found = fdt_get_file(user_process.fdt, read_fd);
     if (found == NULL || found->mode == O_WRONLY) {
@@ -308,12 +314,14 @@ void syscall_sos_write(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_WRITE);
     /* Construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    user_process_t user_process = user_process_list[badge];
-
     /* Receive fd, virtual address, and number of bytes from sos.c */
     int write_fd = seL4_GetMR(1);
     seL4_Word vaddr = seL4_GetMR(2);
     size_t nbyte = seL4_GetMR(3);
+
+    sync_bin_sem_wait(process_list_sem);
+    user_process_t user_process = user_process_list[badge];
+    sync_bin_sem_post(process_list_sem);
 
     /* Find the file associated with the file descriptor */
     open_file *found = fdt_get_file(user_process.fdt, write_fd);
@@ -356,7 +364,9 @@ void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     seL4_Word buf_vaddr = seL4_GetMR(2);
     size_t path_len = seL4_GetMR(3) + 1;
 
+    sync_bin_sem_wait(process_list_sem);
     user_process_t user_process = user_process_list[badge];
+    sync_bin_sem_post(process_list_sem);
 
     /* Perform stat operation. We don't assume it's only on 1 page */
     char *file_path = malloc(path_len);
@@ -389,10 +399,13 @@ void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_GETDIRENT);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    user_process_t user_process = user_process_list[badge];
     int pos = seL4_GetMR(1);
     seL4_Word vaddr = seL4_GetMR(2);
     size_t nbyte = seL4_GetMR(3);
+
+    sync_bin_sem_wait(process_list_sem);
+    user_process_t user_process = user_process_list[badge];
+    sync_bin_sem_post(process_list_sem);
 
     io_args args = {.err = 0, .signal_cap = nfs_signal};
     if (nfs_open_dir(nfs_async_opendir_cb, &args)) {
@@ -445,9 +458,12 @@ inline void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SYS_BRK);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    user_process_t user_process = user_process_list[badge];
-
     uintptr_t newbrk = seL4_GetMR(1);
+
+    sync_bin_sem_wait(process_list_sem);
+    user_process_t user_process = user_process_list[badge];
+    sync_bin_sem_post(process_list_sem);
+
     if (newbrk <= 0) {
         seL4_SetMR(0, PROCESS_HEAP_START);        
     } else if (newbrk >= ALIGN_DOWN(user_process.addrspace->above_heap->base, PAGE_SIZE_4K)) {
@@ -462,13 +478,15 @@ void syscall_sys_mmap(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SYS_MMAP);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    user_process_t user_process = user_process_list[badge];
-
     /* For malloc, we only care about the first 3 arguments of mmap. Even the 3rd one
      * we can technically hard-code, but we'll take it in case we want to extend later.*/
     seL4_Word addr = PAGE_ALIGN(seL4_GetMR(1), PAGE_SIZE_4K);
     size_t length = PAGE_ALIGN(seL4_GetMR(2), PAGE_SIZE_4K);
     int prot = seL4_GetMR(3);
+
+    sync_bin_sem_wait(process_list_sem);
+    user_process_t user_process = user_process_list[badge];
+    sync_bin_sem_post(process_list_sem);
 
     if (!addr) {
         /* Find the first slot in the user address space where we can insert this region. */
@@ -504,10 +522,12 @@ static inline void free_page(user_process_t user_process, seL4_Word vaddr) {
 void syscall_sys_munmap(seL4_MessageInfo_t *reply_msg, seL4_Word badge) {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SYS_MUNMAP);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
-    user_process_t user_process = user_process_list[badge];
-
     seL4_Word addr = PAGE_ALIGN(seL4_GetMR(1), PAGE_SIZE_4K);
     size_t length = PAGE_ALIGN(seL4_GetMR(2), PAGE_SIZE_4K);
+
+    sync_bin_sem_wait(process_list_sem);
+    user_process_t user_process = user_process_list[badge];
+    sync_bin_sem_post(process_list_sem);
 
     /* Assume the given addr is the start of the address space which is enough for malloc + free:
      * The free() function frees the memory space pointed to by ptr, which must have been returned

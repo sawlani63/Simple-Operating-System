@@ -20,7 +20,7 @@ void mark_block_free(uint32_t block_num);
  * @param clock_hand the current position of the circular buffer
  * @param first the very first frame in the frame table incase the clock hand needs to wrap around
  */
-frame_t *clock_choose_victim(frame_ref_t clock_hand, frame_ref_t first);
+frame_t *clock_choose_victim(frame_ref_t *clock_hand, frame_ref_t first);
 
 /**
  * Function to page out frames

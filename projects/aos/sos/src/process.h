@@ -30,8 +30,8 @@ typedef struct {
 
     addrspace_t *addrspace;
     fdt *fdt;
-    sos_thread_t *handler_thread;
 
+    sos_thread_t *handler_thread;
     sync_bin_sem_t *handler_busy_sem;
     seL4_CPtr handler_busy_cptr;
     ut_t *handler_busy_ut;
