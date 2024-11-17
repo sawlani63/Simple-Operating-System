@@ -114,7 +114,6 @@ int timer_irq(void *data, seL4_Word irq, seL4_IRQHandler irq_handler)
         //seL4_IRQHandler_Ack(irq_handler);
         return CLOCK_R_OK;
     }
-
     /* Run the necessary callbacks, reset timer A, and acknowledge that the IRQ has been handled. */
     if (invoke_callbacks()) {
         return CLOCK_R_FAIL;

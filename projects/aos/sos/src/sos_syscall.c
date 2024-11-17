@@ -346,12 +346,12 @@ void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg, UNUSED seL4_Word badge)
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_USLEEP);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
 
-    //register_timer(seL4_GetMR(1), wakeup, NULL);
-    seL4_SetMR(0, 0);
+    register_timer(seL4_GetMR(1), wakeup, sleep_signal);
+    /*seL4_SetMR(0, 0);
     seL4_SetMR(1, seL4_GetMR(1));
     seL4_SetMR(2, sleep_signal);
     ZF_LOGE("DELAY CALLBACK DATA %d %p", seL4_GetMR(1), sleep_signal);
-    seL4_Send(clock_driver.ep, seL4_MessageInfo_new(0, 0, 0, 3));
+    seL4_Send(ipc_ep, seL4_MessageInfo_new(0, 0, 0, 3));*/
     ZF_LOGE("GOING TO SLEEP");
     seL4_Wait(sleep_signal, 0);
     ZF_LOGE("WOKE UP");

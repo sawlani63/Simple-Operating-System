@@ -382,6 +382,9 @@ NORETURN void *main_continued(UNUSED void *arg)
     init_semaphores();
     /* Initialise our swap map and queue for demand paging */
     init_bitmap();
+    /* Initialise the list of processes and process id bitmap */
+    int error = init_proc();
+    ZF_LOGF_IF(error, "Failed to initialise process list / bitmap");
 
     /* Map the timer device (NOTE: this is the same mapping you will use for your timer driver -
      * sos uses the watchdog timers on this page to implement reset infrastructure & network ticks,
@@ -412,26 +415,30 @@ NORETURN void *main_continued(UNUSED void *arg)
     io_args args = {.signal_cap = nfs_signal};
     /* Wait for NFS to finish mounting */
     seL4_Wait(nfs_signal, 0);
-    int error = nfs_open_file(nfs_pagefile, nfs_async_open_cb, &args);
+    error = nfs_open_file(nfs_pagefile, nfs_async_open_cb, &args);
     ZF_LOGF_IF(error, "NFS: Error in opening pagefile");
     nfs_pagefile->handle = args.buff;
 
     /* Initialises the timer */
+
+    seL4_CPtr ntfn2;
+    ut_t *ut = alloc_retype(&ntfn2, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!ut, "No memory for notification object");
+
     printf("Timer init\n");
     error = start_timer(timer_vaddr);
     ZF_LOGF_IF(error, "Error, unable to initialise the timer");
     /* Start the clock driver */
-    error = start_clock_process();
+    //error = start_clock_process();
+    error = start_process(TIMER_DEVICE, false);
     ZF_LOGF_IF(error == -1, "Failed to start clock driver");
     /* Sets up the timer irq */
-    int init_irq_err = init_driver_irq_handling(seL4_CapIRQControl, meson_timeout_irq(MESON_TIMER_A), true, IRQ_EP_BADGE);
+    seL4_TCB_BindNotification(user_process_list[0].tcb, ntfn2);
+    /*int init_irq_err = init_driver_irq_handling(seL4_CapIRQControl, meson_timeout_irq(MESON_TIMER_A), true, IRQ_EP_BADGE, ntfn2, user_process_list[0]);
     ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");
-    init_irq_err = init_driver_irq_handling(seL4_CapIRQControl, meson_timeout_irq(MESON_TIMER_B), true, IRQ_EP_BADGE);
-    ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");
+    init_irq_err = init_driver_irq_handling(seL4_CapIRQControl, meson_timeout_irq(MESON_TIMER_B), true, IRQ_EP_BADGE, ntfn2, user_process_list[0]);
+    ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");*/
 
-    /* Initialise the list of processes and process id bitmap */
-    error = init_proc();
-    ZF_LOGF_IF(error, "Failed to initialise process list / bitmap");
 
     /* Start the first user application */
     printf("Start process\n");

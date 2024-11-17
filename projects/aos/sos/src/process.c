@@ -445,12 +445,21 @@ int start_process(char *app_name, bool initial)
         free_process(user_process, false);
         return -1;
     }
-
-    err = cspace_mint(&user_process.cspace, user_process.timer_slot, &cspace, clock_driver.ep, seL4_AllRights, (seL4_Word) user_process.pid);
-    if (err) {
-        ZF_LOGE("Failed to mint user ep");
-        free_process(user_process, false);
-        return -1;
+    if (user_process.pid == 0) {
+        ut_t *ut = alloc_retype(&user_process.clock_ep, seL4_EndpointObject, seL4_EndpointBits);
+        //cspace_copy(&cspace, user_process.clock_ep, &cspace, ipc_ep, seL4_AllRights);
+        err = cspace_mint(&user_process.cspace, user_process.timer_slot, &cspace, user_process.clock_ep, seL4_AllRights, (seL4_Word) user_process.pid);
+        if (err) {
+            ZF_LOGE("Failed to mint user ep");
+            free_process(user_process, false);
+            return -1;
+        }
+        seL4_CPtr reply;
+        ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
+        seL4_CPtr slot = cspace_alloc_slot(&user_process.cspace);
+        cspace_mint(&user_process.cspace, slot, &cspace, reply, seL4_AllRights, (seL4_Word) user_process.pid);
+    } else {
+        
     }
 
     /* Create a new TCB object */
@@ -616,11 +625,14 @@ int start_process(char *app_name, bool initial)
     }
 
     free(elf_base);
-    
-    /* Make a request to the clock driver to get the bootup time of the process in milliseconds */
-    seL4_SetMR(0, timer_MilliTimestamp);
-    seL4_Call(clock_driver.ep, seL4_MessageInfo_new(0, 0, 0, 1));
-    user_process.stime = seL4_GetMR(0);
+
+    if (user_process.pid != 0) {
+        seL4_SetMR(0, 2);
+        seL4_Call(user_process_list[0].clock_ep, seL4_MessageInfo_new(0, 0, 0, 1));
+        user_process.stime = seL4_GetMR(0);
+    } else {
+        user_process.stime = timestamp_ms(timestamp_get_freq());
+    }
 
     user_process_list[user_process.pid] = user_process;
     return user_process.pid;
