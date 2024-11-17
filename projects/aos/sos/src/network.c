@@ -235,7 +235,7 @@ void network_init(cspace_t *cspace, void *timer_vaddr, seL4_CPtr irq_ntfn, seL4_
 
     /* Map the ethernet MAC MMIO registers into our address space */
     uint64_t eth_base_vaddr =
-        (uint64_t)sos_map_device(cspace, ETH_PHYS_ADDR, ETH_PHYS_SIZE);
+        (uint64_t)sos_map_device(cspace, ETH_PHYS_ADDR, ETH_PHYS_SIZE, seL4_CapInitThreadVSpace, NULL, false);
 
     /* Populate DMA operations required by the ethernet driver */
     ethif_dma_ops_t ethif_dma_ops;
@@ -268,11 +268,7 @@ void network_init(cspace_t *cspace, void *timer_vaddr, seL4_CPtr irq_ntfn, seL4_
 
     /* Configure a watchdog IRQ for 1 millisecond from now. Whenever the watchdog is reset
      * using watchdog_reset(), we will get another IRQ 1ms later */
-    //watchdog_init(timer_vaddr, WATCHDOG_TIMEOUT);
-    seL4_SetMR(0, 3);
-    seL4_SetMR(1, timer_vaddr);
-    seL4_SetMR(2, WATCHDOG_TIMEOUT);
-    seL4_Call(ipc_ep, seL4_MessageInfo_new(0, 0, 0, 3));
+    watchdog_init(timer_vaddr, WATCHDOG_TIMEOUT);
 
     /* Start DHCP negotiation */
     uint32_t dhcp_xid;

@@ -12,6 +12,7 @@
 #include "mapping.h"
 
 #include "boot_driver.h"
+#include <cpio/cpio.h>
 
 /* The number of additional stack pages to provide to the initial
  * process */
@@ -321,9 +322,11 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
 /* Start the first process, and return the process ID if successful,
  * -1 otherwise.
  */
-int start_process(char *app_name, bool initial)
+int start_process(char *app_name, bool initial, user_process_t user_process)
 {
-    user_process_t user_process = (user_process_t) {0};
+    if (initial) {
+        user_process = (user_process_t) {0};
+    }
     user_process.pid = get_pid();
     if (user_process.pid == -1) {
         ZF_LOGE("Ran out of IDs for processes");
@@ -353,22 +356,25 @@ int start_process(char *app_name, bool initial)
         free_process(user_process, false);
         return -1;
     }
-
+    ZF_LOGE("VSPACE %d", user_process.vspace);
+    seL4_Word err;
     /* Create a VSpace */
-    user_process.vspace_ut = alloc_retype(&user_process.vspace, seL4_ARM_PageGlobalDirectoryObject,
-                                            seL4_PGDBits);
-    if (user_process.vspace_ut == NULL) {
-        ZF_LOGE("Failed to create vspace");
-        free_process(user_process, false);
-        return -1;
-    }
+    if (user_process.pid != 0) {
+        user_process.vspace_ut = alloc_retype(&user_process.vspace, seL4_ARM_PageGlobalDirectoryObject,
+                                                seL4_PGDBits);
+        if (user_process.vspace_ut == NULL) {
+            ZF_LOGE("Failed to create vspace");
+            free_process(user_process, false);
+            return -1;
+        }
 
-    /* assign the vspace to an asid pool */
-    seL4_Word err = seL4_ARM_ASIDPool_Assign(seL4_CapInitThreadASIDPool, user_process.vspace);
-    if (err != seL4_NoError) {
-        ZF_LOGE("Failed to assign asid pool");
-        free_process(user_process, false);
-        return -1;
+        /* assign the vspace to an asid pool */
+        err = seL4_ARM_ASIDPool_Assign(seL4_CapInitThreadASIDPool, user_process.vspace);
+        if (err != seL4_NoError) {
+            ZF_LOGE("Failed to assign asid pool");
+            free_process(user_process, false);
+            return -1;
+        }
     }
 
     /* Create our per-process reply object */
@@ -663,7 +669,7 @@ void syscall_proc_create(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     }
     path[len - 1] = '\0';
 
-    pid_t pid = start_process(path, false);
+    pid_t pid = start_process(path, false, (user_process_t) {0});
     seL4_SetMR(0, pid);
 }
 

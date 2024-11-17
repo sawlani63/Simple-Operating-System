@@ -271,7 +271,6 @@ NORETURN void irq_loop(void* arg)
 {
     seL4_CPtr ntfn = (seL4_CPtr) arg;
     seL4_Word badge = 0;
-
     while (1) {
         seL4_MessageInfo_t message = seL4_Wait(ntfn, &badge);
 
@@ -390,7 +389,20 @@ NORETURN void *main_continued(UNUSED void *arg)
     /* Map the timer device (NOTE: this is the same mapping you will use for your timer driver -
      * sos uses the watchdog timers on this page to implement reset infrastructure & network ticks,
      * so touching the watchdog timers here is not recommended!) */
-    void *timer_vaddr = sos_map_device(&cspace, PAGE_ALIGN_4K(TIMER_MAP_BASE), PAGE_SIZE_4K);
+    user_process_t user_process = (user_process_t) {0};
+    alloc_retype(&user_process.vspace, seL4_ARM_PageGlobalDirectoryObject, seL4_PGDBits);
+    seL4_ARM_ASIDPool_Assign(seL4_CapInitThreadASIDPool, user_process.vspace);
+    seL4_CPtr frame;
+    void *timer_vaddr = sos_map_device(&cspace, PAGE_ALIGN_4K(TIMER_MAP_BASE), PAGE_SIZE_4K, user_process.vspace, &frame, true);
+    ZF_LOGE("AFTER TIMER VADDR FRAME %d %d", frame);
+    seL4_CPtr frame_slot = cspace_alloc_slot(&cspace);
+    seL4_Error mike = cspace_copy(&cspace, frame_slot, &cspace, frame, seL4_AllRights);
+    ZF_LOGE("GOING INTO MAP TO TIMER DRIVER %d %d %d", frame, frame_slot, mike);
+    sos_map_timer(&cspace, PAGE_ALIGN_4K(TIMER_MAP_BASE), PAGE_SIZE_4K, seL4_CapInitThreadVSpace, frame_slot, timer_vaddr);
+
+    //ZF_LOGE("CHECK IF");
+    //register_timer(10000, printf, NULL);
+    //ZF_LOGE("THIS WORKS");
 
     error = start_timer(timer_vaddr);
     ZF_LOGF_IF(error, "Error, unable to initialise the timer");
@@ -424,8 +436,18 @@ NORETURN void *main_continued(UNUSED void *arg)
     nfs_pagefile->handle = args.buff;
 
     /* Initialises the timer */
-    error = start_process(TIMER_DEVICE, false);
+    error = start_process(TIMER_DEVICE, false, user_process);
     ZF_LOGF_IF(error == -1, "Failed to start clock driver");
+
+    /*seL4_CPtr frame_slot = cspace_alloc_slot(&cspace);
+    seL4_Error mike = cspace_copy(&cspace, frame_slot, &cspace, frame, seL4_AllRights);
+    ZF_LOGE("GOING INTO MAP TO TIMER DRIVER %d %d %d", frame, frame_slot, mike);
+    sos_map_timer(&cspace, PAGE_ALIGN_4K(TIMER_MAP_BASE), PAGE_SIZE_4K, user_process_list[0].vspace, frame_slot, timer_vaddr);*/
+    //insert_region(user_process_list[0].addrspace, timer_vaddr, PAGE_SIZE_4K,  REGION_RD | REGION_WR);
+    //frame_ref_t frame_ref = alloc_frame();
+    //memcpy(frame_data(frame_ref), frame, PAGE_SIZE_4K);
+    //sos_map_frame(&cspace, user_process_list[0].vspace, timer_vaddr,  REGION_RD | REGION_WR, frame_ref, user_process_list[0].addrspace);
+    print_regions(user_process_list[0].addrspace);
 
     seL4_CPtr ntfn2;
     ut_t *ut = alloc_retype(&ntfn2, seL4_NotificationObject, seL4_NotificationBits);
@@ -444,15 +466,15 @@ NORETURN void *main_continued(UNUSED void *arg)
 
     /* Start the first user application */
     printf("Start process\n");
-    int success = start_process(APP_NAME, true);
+    int success = start_process(APP_NAME, true, (user_process_t) {0});
     ZF_LOGF_IF(success == -1, "Failed to start process");
 
     /* We create the initial process's handler thread after killing our irq_temp_thread to ensure no irqs are sent by our thread before we can kill the temp thread */
-    user_process_t user_process = user_process_list[success];
-    user_process.handler_thread = thread_create(syscall_loop, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true, APP_NAME);
-    ZF_LOGF_IF(user_process.handler_thread == NULL, "Failed to create syscall thread");
+    user_process_t user_process1 = user_process_list[success];
+    user_process1.handler_thread = thread_create(syscall_loop, (void *) user_process1.pid, user_process1.pid, true, seL4_MaxPrio, seL4_CapNull, true, APP_NAME);
+    ZF_LOGF_IF(user_process1.handler_thread == NULL, "Failed to create syscall thread");
     sync_bin_sem_wait(process_list_sem);
-    user_process_list[success] = user_process;
+    user_process_list[success] = user_process1;
     sync_bin_sem_post(process_list_sem);
 
     become_hitman();

@@ -28,7 +28,7 @@ static inline void handle_operation(int fd)
     seL4_Word op = seL4_GetMR(0);
     switch(op) {
         case REGISTER_TIMER:
-            sos_write(fd, "here", strlen("here"));
+            sos_write(fd, "here\n", strlen("here\n"));
             uint64_t delay = seL4_GetMR(1);
             register_timer(delay, wakeup, NULL);
             sos_write(fd, "never got out", strlen("never got out"));
@@ -39,9 +39,6 @@ static inline void handle_operation(int fd)
         case MILLI_TIMESTAMP:
             seL4_SetMR(0, timestamp_ms(timestamp_get_freq()));
             break;
-        case 3:
-            watchdog_init(seL4_GetMR(1), seL4_GetMR(2));
-            seL4_SetMR(0, 0);
         default:
             /* Do nothing */
         }
