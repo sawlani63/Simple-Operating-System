@@ -148,25 +148,13 @@ static uintptr_t init_clock_process_stack(cspace_t *cspace, seL4_CPtr local_vspa
     return stack_top;
 }
 
-int start_clock_process()
+int start_clock_process(seL4_CPtr ipc_ep, seL4_CPtr ntfn)
 {
     clock_driver = (clock_process_t) {0};
     clock_driver.pid = TIMER_ID;
 
-    /* Create our per-process endpoint */
-    clock_driver.ep_ut = alloc_retype(&clock_driver.ep, seL4_EndpointObject, seL4_EndpointBits);
-    if (clock_driver.ep == seL4_CapNull) {
-        ZF_LOGE("No memory for endpoints");
-        return -1;
-    }
-
     clock_driver.reply_ut = alloc_retype(&clock_driver.reply, seL4_ReplyObject, seL4_ReplyBits);
     if (clock_driver.reply_ut == NULL){
-        return -1;
-    }
-
-    clock_driver.ntfn_ut = alloc_retype(&clock_driver.ntfn, seL4_NotificationObject, seL4_NotificationBits);
-    if (clock_driver.ntfn_ut == NULL) {
         return -1;
     }
 
@@ -232,12 +220,12 @@ int start_clock_process()
     }
 
     /* now mutate the cap, thereby setting the badge */
-    err = cspace_mint(&clock_driver.cspace, slot1, &cspace, clock_driver.ep, seL4_AllRights, (seL4_Word) clock_driver.pid);
+    err = cspace_mint(&clock_driver.cspace, slot1, &cspace, ipc_ep, seL4_AllRights, (seL4_Word) clock_driver.pid);
     if (err) {
         ZF_LOGE("Failed to mint user ep");
         return -1;
     }
-    err = cspace_mint(&clock_driver.cspace, slot2, &cspace, clock_driver.ep, seL4_AllRights, (seL4_Word) clock_driver.pid);
+    err = cspace_mint(&clock_driver.cspace, slot2, &cspace, ipc_ep, seL4_AllRights, (seL4_Word) clock_driver.pid);
     if (err) {
         ZF_LOGE("Failed to mint user ep");
         return -1;
@@ -362,12 +350,11 @@ int start_clock_process()
     }
 
     free(elf_base);
-    err = seL4_TCB_BindNotification(clock_driver.tcb, clock_driver.ntfn);
+    err = seL4_TCB_BindNotification(clock_driver.tcb, ntfn);
     if (err) {
         ZF_LOGE("Failed to bind notification");
         return -1;
     }
-    clock_driver = clock_driver;
     return 0;
 }
 

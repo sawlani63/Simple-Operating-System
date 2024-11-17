@@ -262,7 +262,6 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
     if (!(perms & REGION_EX)) {
         attr |= seL4_ARM_ExecuteNever;
     }
-
     sync_bin_sem_wait(cspace_sem);
     err = map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, l1_pt);
     sync_bin_sem_post(cspace_sem);
@@ -388,6 +387,49 @@ void *sos_map_device(cspace_t *cspace, uintptr_t addr, size_t size)
 
         /* map */
         err = map_frame(cspace, frame, seL4_CapInitThreadVSpace, device_virt, seL4_AllRights, false);
+        if (err != seL4_NoError) {
+            ZF_LOGE("Failed to map device frame at %p", (void *) device_virt);
+            cspace_delete(cspace, frame);
+            cspace_free_slot(cspace, frame);
+            return NULL;
+        }
+
+        device_virt += PAGE_SIZE_4K;
+    }
+
+    return vstart;
+}
+
+void *sos_map_timer(cspace_t *cspace, uintptr_t addr, size_t size, seL4_CPtr vspace)
+{
+    assert(cspace != NULL);
+    void *vstart = (void *) device_virt;
+
+    for (uintptr_t curr = addr; curr < (addr + size); curr += PAGE_SIZE_4K) {
+        ut_t *ut = ut_alloc_4k_device(curr);
+        if (ut == NULL) {
+            ZF_LOGE("Failed to find ut for phys address %p", (void *) curr);
+            return NULL;
+        }
+
+        /* allocate a slot to retype into */
+        seL4_CPtr frame = cspace_alloc_slot(cspace);
+        if (frame == seL4_CapNull) {
+            ZF_LOGE("Out of caps");
+            return NULL;
+        }
+
+        /* retype */
+        seL4_Error err = cspace_untyped_retype(cspace, ut->cap, frame, seL4_ARM_SmallPageObject,
+                                               seL4_PageBits);
+        if (err != seL4_NoError) {
+            ZF_LOGE("Failed to retype %lx", (seL4_CPtr)ut->cap);
+            cspace_free_slot(cspace, frame);
+            return NULL;
+        }
+
+        /* map */
+        err = map_frame(cspace, frame, vspace, device_virt, seL4_AllRights, false);
         if (err != seL4_NoError) {
             ZF_LOGE("Failed to map device frame at %p", (void *) device_virt);
             cspace_delete(cspace, frame);

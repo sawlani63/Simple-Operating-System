@@ -36,6 +36,7 @@ sync_bin_sem_t *pid_queue_sem = NULL;
 sync_bin_sem_t *process_list_sem = NULL;
 
 extern clock_process_t clock_driver;
+extern seL4_CPtr ipc_ep;
 
 NORETURN void syscall_loop(void *arg);
 
@@ -355,7 +356,7 @@ int start_process(char *app_name, bool initial)
 
     /* Create a VSpace */
     user_process.vspace_ut = alloc_retype(&user_process.vspace, seL4_ARM_PageGlobalDirectoryObject,
-                                              seL4_PGDBits);
+                                            seL4_PGDBits);
     if (user_process.vspace_ut == NULL) {
         ZF_LOGE("Failed to create vspace");
         free_process(user_process, false);
@@ -445,21 +446,26 @@ int start_process(char *app_name, bool initial)
         free_process(user_process, false);
         return -1;
     }
+
     if (user_process.pid == 0) {
-        ut_t *ut = alloc_retype(&user_process.clock_ep, seL4_EndpointObject, seL4_EndpointBits);
-        //cspace_copy(&cspace, user_process.clock_ep, &cspace, ipc_ep, seL4_AllRights);
-        err = cspace_mint(&user_process.cspace, user_process.timer_slot, &cspace, user_process.clock_ep, seL4_AllRights, (seL4_Word) user_process.pid);
+        //alloc_retype(&user_process.clock_ep, seL4_EndpointObject, seL4_EndpointBits);
+        err = cspace_mint(&user_process.cspace, user_process.timer_slot, &cspace, ipc_ep, seL4_AllRights, (seL4_Word) user_process.pid);
         if (err) {
             ZF_LOGE("Failed to mint user ep");
             free_process(user_process, false);
             return -1;
         }
         seL4_CPtr reply;
-        ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
+        ut_t *ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
         seL4_CPtr slot = cspace_alloc_slot(&user_process.cspace);
-        cspace_mint(&user_process.cspace, slot, &cspace, reply, seL4_AllRights, (seL4_Word) user_process.pid);
+        cspace_mint(&user_process.cspace, slot, &cspace, reply, seL4_AllRights, 0);
     } else {
-        
+        err = cspace_mint(&user_process.cspace, user_process.timer_slot, &cspace, ipc_ep, seL4_AllRights, (seL4_Word) user_process.pid);
+        if (err) {
+            ZF_LOGE("Failed to mint user ep");
+            free_process(user_process, false);
+            return -1;
+        }
     }
 
     /* Create a new TCB object */
@@ -628,7 +634,7 @@ int start_process(char *app_name, bool initial)
 
     if (user_process.pid != 0) {
         seL4_SetMR(0, 2);
-        seL4_Call(user_process_list[0].clock_ep, seL4_MessageInfo_new(0, 0, 0, 1));
+        seL4_Call(ipc_ep, seL4_MessageInfo_new(0, 0, 0, 1));
         user_process.stime = seL4_GetMR(0);
     } else {
         user_process.stime = timestamp_ms(timestamp_get_freq());

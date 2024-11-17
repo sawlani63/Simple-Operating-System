@@ -109,3 +109,5 @@ void sos_destroy_page_table(addrspace_t *as);
  * @return address that the device is mapped at.
  * */
 void *sos_map_device(cspace_t *cspace, uintptr_t addr, size_t size);
+
+void *sos_map_timer(cspace_t *cspace, uintptr_t addr, size_t size, seL4_CPtr vspace);

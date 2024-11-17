@@ -75,6 +75,7 @@ static char nfs_dir_buf[PATH_MAX];
 static uint8_t ip_octet;
 
 extern sync_bin_sem_t *nfs_sem;
+extern seL4_CPtr ipc_ep;
 
 static void nfs_mount_cb(int status, struct nfs_context *nfs, void *data, void *private_data);
 
@@ -267,7 +268,11 @@ void network_init(cspace_t *cspace, void *timer_vaddr, seL4_CPtr irq_ntfn, seL4_
 
     /* Configure a watchdog IRQ for 1 millisecond from now. Whenever the watchdog is reset
      * using watchdog_reset(), we will get another IRQ 1ms later */
-    watchdog_init(timer_vaddr, WATCHDOG_TIMEOUT);
+    //watchdog_init(timer_vaddr, WATCHDOG_TIMEOUT);
+    seL4_SetMR(0, 3);
+    seL4_SetMR(1, timer_vaddr);
+    seL4_SetMR(2, WATCHDOG_TIMEOUT);
+    seL4_Call(ipc_ep, seL4_MessageInfo_new(0, 0, 0, 3));
 
     /* Start DHCP negotiation */
     uint32_t dhcp_xid;

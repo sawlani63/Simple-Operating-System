@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include <utils/util.h>
 #include <clock/clock.h>
+#include <clock/watchdog.h>
+#include <clock/timestamp.h>
+#include <clock/device.h>
 #include <string.h>
 
 #include <sos.h>
@@ -17,18 +20,18 @@
 
 static inline void wakeup(UNUSED uint32_t id, void *data)
 {
-    seL4_CPtr sleep_signal = (seL4_CPtr) data;
-    seL4_Signal(sleep_signal);
+    seL4_Signal((0x4));
 }
 
-static inline void handle_operation()
+static inline void handle_operation(int fd)
 {
     seL4_Word op = seL4_GetMR(0);
     switch(op) {
         case REGISTER_TIMER:
-            //sos_write(fd, "going to reg timer", strlen("going to reg timer"));
-            register_timer(seL4_GetMR(1), wakeup, seL4_GetMR(2));
-            //sos_write(fd, "done to reg timer", strlen("done to reg timer"));
+            sos_write(fd, "here", strlen("here"));
+            uint64_t delay = seL4_GetMR(1);
+            register_timer(delay, wakeup, NULL);
+            sos_write(fd, "never got out", strlen("never got out"));
             break;
         case MICRO_TIMESTAMP:
             seL4_SetMR(0, timestamp_us(timestamp_get_freq()));
@@ -36,8 +39,10 @@ static inline void handle_operation()
         case MILLI_TIMESTAMP:
             seL4_SetMR(0, timestamp_ms(timestamp_get_freq()));
             break;
+        case 3:
+            watchdog_init(seL4_GetMR(1), seL4_GetMR(2));
+            seL4_SetMR(0, 0);
         default:
-            //sos_write(fd, "wtf bruh", strlen("wtf bruh"));
             /* Do nothing */
         }
 }
@@ -46,7 +51,7 @@ static void driver_loop()
 {
     seL4_MessageInfo_t reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     bool have_reply = false;
-
+    int fd = sos_open("console", 1);
     while (1) {
         seL4_Word sender;
         seL4_MessageInfo_t message;
@@ -55,18 +60,13 @@ static void driver_loop()
         } else {
             message = seL4_Recv(TIMER_IPC_EP_CAP, &sender, TIMER_REPLY);
         }
-        //seL4_Wait((0x4), &sender);
-        //sos_write(fd, "received\n", strlen("received\n"));
         if (sender & IRQ_EP_BADGE) {
-            //sos_write(fd, "irqworks\n", strlen("irqworks\n"));
+            sos_write(fd, "irqworks", strlen("irqworks"));
             timer_irq(NULL, 0, 0);
-            //sos_write(fd, "not stuck in timer irq", strlen("not stuck in timer irq"));
             have_reply = false;
         } else {
-            //sos_write(fd, "op\n", strlen("op\n"));
-            handle_operation();
+            handle_operation(fd);
             have_reply = true;
-            //sos_write(fd, "backfromop\n", strlen("backfromop\n"));
         }
     }
 }
@@ -75,7 +75,5 @@ static void driver_loop()
 int main(void)
 {
     // start timer here from pcb
-    //int fd = sos_open("console", 1);
-    //sos_write(fd, "clock start\n", strlen("clock start\n"));
     driver_loop();
 }
