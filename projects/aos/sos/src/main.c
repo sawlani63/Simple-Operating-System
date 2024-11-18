@@ -389,9 +389,9 @@ NORETURN void *main_continued(UNUSED void *arg)
     /* Map the timer device (NOTE: this is the same mapping you will use for your timer driver -
      * sos uses the watchdog timers on this page to implement reset infrastructure & network ticks,
      * so touching the watchdog timers here is not recommended!) */
+    /* Copy the frame cap allocated for mapping of timer into sos into a new slot for mapping into our driver */
     seL4_CPtr frame = cspace_alloc_slot(&cspace);
-    void *timer_vaddr = sos_map_device(&cspace, PAGE_ALIGN_4K(TIMER_MAP_BASE), PAGE_SIZE_4K, seL4_CapInitThreadVSpace, frame, true);
-    ZF_LOGE("AFTER TIMER VADDR FRAME %d", frame);
+    void *timer_vaddr = sos_map_device(&cspace, PAGE_ALIGN_4K(TIMER_MAP_BASE), PAGE_SIZE_4K, frame, true);
 
     /* Initialise the network hardware. */
     printf("Network init\n");
@@ -425,10 +425,6 @@ NORETURN void *main_continued(UNUSED void *arg)
 
     error = start_process(TIMER_DEVICE, false);
     ZF_LOGF_IF(error == -1, "Failed to start clock driver");
-
-   // seL4_CPtr frame_slot = cspace_alloc_slot(&cspace);
-    //seL4_Error mike = cspace_copy(&cspace, frame_slot, &cspace, frame, seL4_AllRights);
-    //ZF_LOGE("GOING INTO MAP TO TIMER DRIVER %d %d %d", frame, frame_slot, mike);
     sos_map_timer(&cspace, PAGE_ALIGN_4K(TIMER_MAP_BASE), PAGE_SIZE_4K, user_process_list[0].vspace, frame, timer_vaddr);
     print_regions(user_process_list[0].addrspace);
 
@@ -446,9 +442,6 @@ NORETURN void *main_continued(UNUSED void *arg)
     ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");
     init_irq_err = init_driver_irq_handling(seL4_CapIRQControl, meson_timeout_irq(MESON_TIMER_B), true, IRQ_EP_BADGE, ntfn2, user_process_list[0]);
     ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");
-
-    //error = start_timer(timer_vaddr);
-    //ZF_LOGF_IF(error, "Error, unable to initialise the timer");
 
     /* Start the first user application */
     printf("Start process\n");

@@ -357,7 +357,7 @@ void sos_destroy_page_table(addrspace_t *as)
 
 static uintptr_t device_virt = SOS_DEVICE_START;
 
-void *sos_map_device(cspace_t *cspace, uintptr_t addr, size_t size, seL4_CPtr vspace, seL4_CPtr frame_cap, bool timer)
+void *sos_map_device(cspace_t *cspace, uintptr_t addr, size_t size, seL4_CPtr frame_cap, bool timer)
 {
     assert(cspace != NULL);
     void *vstart = (void *) device_virt;
@@ -386,8 +386,7 @@ void *sos_map_device(cspace_t *cspace, uintptr_t addr, size_t size, seL4_CPtr vs
         }
 
         /* map */
-        ZF_LOGE("VSTART REAL %p %d %p %p %d", cspace, frame, vspace, device_virt, timer);
-        err = map_frame(cspace, frame, vspace, device_virt, seL4_AllRights, false);
+        err = map_frame(cspace, frame, seL4_CapInitThreadVSpace, device_virt, seL4_AllRights, false);
         if (err != seL4_NoError) {
             ZF_LOGE("Failed to map device frame at %p", (void *) device_virt);
             cspace_delete(cspace, frame);
@@ -397,9 +396,7 @@ void *sos_map_device(cspace_t *cspace, uintptr_t addr, size_t size, seL4_CPtr vs
 
         device_virt += PAGE_SIZE_4K;
         if (timer) {
-            ZF_LOGE("FRAME %d", frame);
             cspace_copy(cspace, frame_cap, cspace, frame, seL4_AllRights);
-            ZF_LOGE("FRAME %d", frame_cap);
         }
     }
 

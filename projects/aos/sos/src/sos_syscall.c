@@ -348,8 +348,8 @@ void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg, UNUSED seL4_Word badge)
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
 
     //register_timer(seL4_GetMR(1), wakeup, sleep_signal);
-    //seL4_CPtr slot = cspace_alloc_slot(&user_process_list[0].cspace);
-    //cspace_copy(&user_process_list[0].cspace, slot, &cspace, sleep_signal, seL4_AllRights);
+    seL4_CPtr slot = cspace_alloc_slot(&user_process_list[0].cspace);
+    cspace_copy(&user_process_list[0].cspace, slot, &cspace, sleep_signal, seL4_AllRights);
     seL4_SetMR(0, 0);
     seL4_SetMR(1, seL4_GetMR(1));
     ZF_LOGE("DELAY CALLBACK DATA %d %p", seL4_GetMR(1), sleep_signal);
