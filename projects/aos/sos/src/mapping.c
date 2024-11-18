@@ -396,17 +396,20 @@ void *sos_map_device(cspace_t *cspace, uintptr_t addr, size_t size, seL4_CPtr fr
 
         device_virt += PAGE_SIZE_4K;
         if (timer) {
-            cspace_copy(cspace, frame_cap, cspace, frame, seL4_AllRights);
+            seL4_Error err = cspace_copy(cspace, frame_cap, cspace, frame, seL4_AllRights);
+            if (err) {
+                ZF_LOGE("Failed to copy timer frame cap");
+                return NULL;
+            }
         }
     }
 
     return vstart;
 }
 
-void sos_map_timer(cspace_t *cspace, uintptr_t addr, size_t size, seL4_CPtr vspace, seL4_CPtr frame, void *timer_vaddr)
+void sos_map_timer(cspace_t *cspace, seL4_CPtr vspace, seL4_CPtr frame, void *timer_vaddr)
 {
     assert(cspace != NULL);
-    ZF_LOGE("VSTART REAL %p %d %p %p 1", cspace, frame, vspace, timer_vaddr);
 
     /* map */
     seL4_Error err = map_frame(cspace, frame, vspace, timer_vaddr, seL4_AllRights, false);

@@ -17,6 +17,7 @@ extern seL4_CPtr sched_ctrl_end;
 extern seL4_CPtr nfs_signal;
 
 clock_process_t clock_driver;
+extern seL4_CPtr ipc_ep;
 
 NORETURN void syscall_loop(void *arg);
 
@@ -148,27 +149,33 @@ static uintptr_t init_clock_process_stack(cspace_t *cspace, seL4_CPtr local_vspa
     return stack_top;
 }
 
-int start_clock_process(seL4_CPtr ipc_ep, seL4_CPtr ntfn)
+int start_clock_process()
 {
     clock_driver = (clock_process_t) {0};
     clock_driver.pid = TIMER_ID;
 
     clock_driver.reply_ut = alloc_retype(&clock_driver.reply, seL4_ReplyObject, seL4_ReplyBits);
     if (clock_driver.reply_ut == NULL){
+        ZF_LOGE("Failed to create reply object");
+        return -1;
+    }
+
+    clock_driver.ntfn_ut = alloc_retype(&clock_driver.ntfn, seL4_NotificationObject, seL4_NotificationBits);
+    if (clock_driver.ntfn_ut == NULL) {
+        ZF_LOGE("Failed to create notification");
         return -1;
     }
 
     /* Create a VSpace */
-    seL4_CPtr vspace;
-    ut_t *ut = alloc_retype(&vspace, seL4_ARM_PageGlobalDirectoryObject,
+    clock_driver.vspace_ut = alloc_retype(&clock_driver.vspace, seL4_ARM_PageGlobalDirectoryObject,
                                               seL4_PGDBits);
-    if (ut == NULL) {
+    if (clock_driver.vspace_ut == NULL) {
         ZF_LOGE("Failed to create vspace");
         return -1;
     }
 
     /* assign the vspace to an asid pool */
-    seL4_Word err = seL4_ARM_ASIDPool_Assign(seL4_CapInitThreadASIDPool, vspace);
+    seL4_Word err = seL4_ARM_ASIDPool_Assign(seL4_CapInitThreadASIDPool, clock_driver.vspace);
     if (err != seL4_NoError) {
         ZF_LOGE("Failed to assign asid pool");
         return -1;
@@ -202,20 +209,24 @@ int start_clock_process(seL4_CPtr ipc_ep, seL4_CPtr ntfn)
     }
     clock_driver.ipc_buffer = frame_page(clock_driver.ipc_buffer_frame);
 
-    seL4_CPtr slot1, slot2, slot3;
-    slot1 = cspace_alloc_slot(&clock_driver.cspace);
+    seL4_CPtr slot1 = cspace_alloc_slot(&clock_driver.cspace);
     if (slot1 == seL4_CapNull) {
-        ZF_LOGE("Failed to alloc user ep slot");
+        ZF_LOGE("Failed to alloc slot");
         return -1;
     }
-    slot2 = cspace_alloc_slot(&clock_driver.cspace);
+    seL4_CPtr slot2 = cspace_alloc_slot(&clock_driver.cspace);
     if (slot2 == seL4_CapNull) {
-        ZF_LOGE("Failed to alloc user ep slot");
+        ZF_LOGE("Failed to alloc slot");
         return -1;
     }
-    slot3 = cspace_alloc_slot(&clock_driver.cspace);
+    seL4_CPtr slot3 = cspace_alloc_slot(&clock_driver.cspace);
     if (slot3 == seL4_CapNull) {
-        ZF_LOGE("Failed to alloc user ep slot");
+        ZF_LOGE("Failed to alloc slot");
+        return -1;
+    }
+    seL4_CPtr slot4 = cspace_alloc_slot(&clock_driver.cspace);
+    if (slot4 == seL4_CapNull) {
+        ZF_LOGE("Failed to alloc slot");
         return -1;
     }
 
@@ -235,6 +246,11 @@ int start_clock_process(seL4_CPtr ipc_ep, seL4_CPtr ntfn)
         ZF_LOGE("Failed to mint user ep");
         return -1;
     }
+    err = cspace_mint(&clock_driver.cspace, slot4, &cspace, clock_driver.ntfn, seL4_AllRights, (seL4_Word) clock_driver.pid);
+    if (err) {
+        ZF_LOGE("Failed to mint user ep");
+        return -1;
+    }
 
     /* Create a new TCB object */
     clock_driver.tcb_ut = alloc_retype(&clock_driver.tcb, seL4_TCBObject, seL4_TCBBits);
@@ -246,7 +262,7 @@ int start_clock_process(seL4_CPtr ipc_ep, seL4_CPtr ntfn)
     /* Configure the TCB */
     err = seL4_TCB_Configure(clock_driver.tcb,
                              clock_driver.cspace.root_cnode, seL4_NilData,
-                             vspace, seL4_NilData, PROCESS_IPC_BUFFER,
+                             clock_driver.vspace, seL4_NilData, PROCESS_IPC_BUFFER,
                              clock_driver.ipc_buffer);
     if (err != seL4_NoError) {
         ZF_LOGE("Unable to configure new TCB");
@@ -300,7 +316,7 @@ int start_clock_process(seL4_CPtr ipc_ep, seL4_CPtr ntfn)
     }
 
     /* set up the stack */
-    seL4_Word sp = init_clock_process_stack(&cspace, seL4_CapInitThreadVSpace, vspace);
+    seL4_Word sp = init_clock_process_stack(&cspace, seL4_CapInitThreadVSpace, clock_driver.vspace);
     if ((int) sp == -1) {
         ZF_LOGE("Failed to set up the stack");
         return -1;
@@ -314,7 +330,7 @@ int start_clock_process(seL4_CPtr ipc_ep, seL4_CPtr ntfn)
     }
 
     /* Map in the IPC buffer for the thread */
-    err = sos_map_frame(&cspace, vspace, PROCESS_IPC_BUFFER, REGION_RD | REGION_WR,
+    err = sos_map_frame(&cspace, clock_driver.vspace, PROCESS_IPC_BUFFER, REGION_RD | REGION_WR,
                         clock_driver.ipc_buffer_frame, clock_driver.addrspace);
     if (err != 0) {
         ZF_LOGE("Unable to map IPC buffer for user app");
@@ -323,7 +339,7 @@ int start_clock_process(seL4_CPtr ipc_ep, seL4_CPtr ntfn)
 
     /* load the elf image from nfs */
     unsigned size = 0;
-    err = elf_load(&cspace, &elf_file, elf, clock_driver.addrspace, vspace, &size, clock_driver.pid);
+    err = elf_load(&cspace, &elf_file, elf, clock_driver.addrspace, clock_driver.vspace, &size, clock_driver.pid);
     if (err) {
         ZF_LOGE("Failed to load elf image");
         return -1;
@@ -350,7 +366,7 @@ int start_clock_process(seL4_CPtr ipc_ep, seL4_CPtr ntfn)
     }
 
     free(elf_base);
-    err = seL4_TCB_BindNotification(clock_driver.tcb, ntfn);
+    err = seL4_TCB_BindNotification(clock_driver.tcb, clock_driver.ntfn);
     if (err) {
         ZF_LOGE("Failed to bind notification");
         return -1;
@@ -358,7 +374,7 @@ int start_clock_process(seL4_CPtr ipc_ep, seL4_CPtr ntfn)
     return 0;
 }
 
-int init_driver_irq_handling(seL4_IRQControl irq_control, seL4_Word irq, int level, seL4_Word badge, seL4_CPtr ntfn, user_process_t user_process)
+int init_driver_irq_handling(seL4_IRQControl irq_control, seL4_Word irq, int level)
 {
     seL4_CPtr handler_cptr = cspace_alloc_slot(&cspace);
     if (handler_cptr == seL4_CapNull) {
@@ -375,7 +391,7 @@ int init_driver_irq_handling(seL4_IRQControl irq_control, seL4_Word irq, int lev
         ZF_LOGE("Could not allocate irq handler for timer irq");
         return -1;
     }
-    err = cspace_mint(&cspace, notification_cptr, &cspace, ntfn, seL4_CanWrite, irq);
+    err = cspace_mint(&cspace, notification_cptr, &cspace, clock_driver.ntfn, seL4_CanWrite, irq);
     if (err != seL4_NoError) {
         ZF_LOGE("Could not mint notification for timer irq");
         return -1;
@@ -385,8 +401,11 @@ int init_driver_irq_handling(seL4_IRQControl irq_control, seL4_Word irq, int lev
         ZF_LOGE("Could not set notification for timer irq %d", err);
         return -1;
     }
-    seL4_CPtr handler_slot = cspace_alloc_slot(&user_process.cspace);
-    cspace_mint(&user_process.cspace, handler_slot, &cspace, handler_cptr, seL4_AllRights, 0);
+    seL4_CPtr handler_slot = cspace_alloc_slot(&clock_driver.cspace);
+    err = cspace_mint(&clock_driver.cspace, handler_slot, &cspace, handler_cptr, seL4_AllRights, 0);
+    if (err) {
+        ZF_LOGE("Failed to mint IRQ handler");
+    }
     seL4_IRQHandler_Ack((seL4_IRQHandler) handler_cptr);
     return 0;
 }

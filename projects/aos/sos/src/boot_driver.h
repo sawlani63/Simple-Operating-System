@@ -25,9 +25,13 @@ typedef struct {
     ut_t *ep_ut;
     seL4_CPtr reply;
     ut_t *reply_ut;
+    seL4_CPtr ntfn;
+    ut_t *ntfn_ut;
 
     ut_t *tcb_ut;
     seL4_CPtr tcb;
+    ut_t *vspace_ut;
+    seL4_CPtr vspace;
 
     frame_ref_t ipc_buffer_frame;
     seL4_CPtr ipc_buffer;
@@ -43,5 +47,5 @@ typedef struct {
     cspace_t cspace;
 } clock_process_t;
 
-int start_clock_process(seL4_CPtr ipc_ep, seL4_CPtr ntfn);
-int init_driver_irq_handling(seL4_IRQControl irq_control, seL4_Word irq, int level, seL4_Word badge, seL4_CPtr ntfn, user_process_t user_process);
+int start_clock_process();
+int init_driver_irq_handling(seL4_IRQControl irq_control, seL4_Word irq, int level);

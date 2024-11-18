@@ -7,13 +7,14 @@
 #include <clock/device.h>
 #include <string.h>
 
-#include <sos.h>
-
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 
 #define TIMER_VADDR (0xb0001000)
 #define TIMER_IPC_EP_CAP (0x2)
 #define TIMER_REPLY (0x3)
+#define TIMER_NOTIFICATION (0x4)
+#define TIMER_A_IRQ_HANDLER (0x5)
+#define TIMER_B_IRQ_HANDLER (0x6)
 
 #define REGISTER_TIMER 0
 #define MICRO_TIMESTAMP 1
@@ -21,22 +22,18 @@
 
 static inline void wakeup(UNUSED uint32_t id, void *data)
 {
-    seL4_Signal((0x4));
+    seL4_Signal(TIMER_NOTIFICATION);
 }
 
 static inline void handle_operation()
 {
     seL4_Word op = seL4_GetMR(0);
     switch(op) {
-        case REGISTER_TIMER: {
+        case REGISTER_TIMER:
             uint64_t delay = seL4_GetMR(1);
-            int fd = sos_open("console", 1);
-            sos_write(fd, "here\n", strlen("here\n"));
             register_timer(delay, wakeup, NULL);
-            char buffer[256];
-            snprintf(buffer, 256, "delay : %d\n", delay);
             break;
-        } case MICRO_TIMESTAMP:
+        case MICRO_TIMESTAMP:
             seL4_SetMR(0, timestamp_us(timestamp_get_freq()));
             break;
         case MILLI_TIMESTAMP:
@@ -59,15 +56,12 @@ static void driver_loop()
         } else {
             message = seL4_Recv(TIMER_IPC_EP_CAP, &sender, TIMER_REPLY);
         }
+
         if (sender == (meson_timeout_irq(MESON_TIMER_A))) {
-            int fd = sos_open("console", 1);
-            sos_write(fd, "irqa\n", strlen("irqa\n"));
-            timer_irq(NULL, meson_timeout_irq(MESON_TIMER_A), (0x5));
+            timer_irq(NULL, meson_timeout_irq(MESON_TIMER_A), TIMER_A_IRQ_HANDLER);
             have_reply = false;
         } else if (sender == (meson_timeout_irq(MESON_TIMER_B))) {
-            int fd = sos_open("console", 1);
-            sos_write(fd, "irqb\n", strlen("irqb\n"));
-            timer_irq(NULL, meson_timeout_irq(MESON_TIMER_B), (0x6));
+            timer_irq(NULL, meson_timeout_irq(MESON_TIMER_B), TIMER_B_IRQ_HANDLER);
             have_reply = false;
         } else {
             handle_operation();

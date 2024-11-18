@@ -79,6 +79,8 @@ struct network_console *console;
 extern seL4_CPtr nfs_signal;
 
 open_file *nfs_pagefile;
+
+extern clock_process_t clock_driver;
 seL4_CPtr ipc_ep;
 
 bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
@@ -421,40 +423,25 @@ NORETURN void *main_continued(UNUSED void *arg)
     ZF_LOGF_IF(error, "NFS: Error in opening pagefile");
     nfs_pagefile->handle = args.buff;
 
-    /* Initialises the timer */
-
-    error = start_process(TIMER_DEVICE, false);
-    ZF_LOGF_IF(error == -1, "Failed to start clock driver");
-    sos_map_timer(&cspace, PAGE_ALIGN_4K(TIMER_MAP_BASE), PAGE_SIZE_4K, user_process_list[0].vspace, frame, timer_vaddr);
-    print_regions(user_process_list[0].addrspace);
-
-    seL4_CPtr ntfn2;
-    ut_t *ut = alloc_retype(&ntfn2, seL4_NotificationObject, seL4_NotificationBits);
-    ZF_LOGF_IF(!ut, "No memory for notification object");
-
     printf("Timer init\n");
+    /* Initialises the timer */
+    int res = start_timer(timer_vaddr);
+    ZF_LOGF_IF(res < 0, "Failed to initialise timer");
     /* Start the clock driver */
-    //error = start_clock_process(ipc_ep, ntfn2);
-
+    error = start_clock_process();
+    ZF_LOGI_IF(error == -1, "Failed to start clock driver");
+    /* Map the timer device to the vspace of the clock driver */
+    sos_map_timer(&cspace, clock_driver.vspace, frame, timer_vaddr);
     /* Sets up the timer irq */
-    seL4_TCB_BindNotification(user_process_list[0].tcb, ntfn2);
-    int init_irq_err = init_driver_irq_handling(seL4_CapIRQControl, meson_timeout_irq(MESON_TIMER_A), true, IRQ_EP_BADGE, ntfn2, user_process_list[0]);
+    int init_irq_err = init_driver_irq_handling(seL4_CapIRQControl, meson_timeout_irq(MESON_TIMER_A), true);
     ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");
-    init_irq_err = init_driver_irq_handling(seL4_CapIRQControl, meson_timeout_irq(MESON_TIMER_B), true, IRQ_EP_BADGE, ntfn2, user_process_list[0]);
+    init_irq_err = init_driver_irq_handling(seL4_CapIRQControl, meson_timeout_irq(MESON_TIMER_B), true);
     ZF_LOGF_IF(init_irq_err != 0, "Failed to initialise IRQ");
 
     /* Start the first user application */
     printf("Start process\n");
-    int success = start_process(APP_NAME, true);
+    int success = start_process(APP_NAME);
     ZF_LOGF_IF(success == -1, "Failed to start process");
-
-    /* We create the initial process's handler thread after killing our irq_temp_thread to ensure no irqs are sent by our thread before we can kill the temp thread */
-    user_process_t user_process1 = user_process_list[success];
-    user_process1.handler_thread = thread_create(syscall_loop, (void *) user_process1.pid, user_process1.pid, true, seL4_MaxPrio, seL4_CapNull, true, APP_NAME);
-    ZF_LOGF_IF(user_process1.handler_thread == NULL, "Failed to create syscall thread");
-    sync_bin_sem_wait(process_list_sem);
-    user_process_list[success] = user_process1;
-    sync_bin_sem_post(process_list_sem);
 
     become_hitman();
 }
