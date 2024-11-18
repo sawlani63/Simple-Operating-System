@@ -10,7 +10,7 @@
 #include "vmem_layout.h"
 #include "mapping.h"
 
-int init_driver_irq_handling(seL4_IRQControl irq_control, seL4_Word irq, int level, user_process_t user_process, seL4_CPtr ntfn)
+int init_driver_irq_handling(seL4_IRQControl irq_control, seL4_Word irq, int level, cspace_t *user_cspace, seL4_CPtr ntfn)
 {
     seL4_CPtr handler_cptr = cspace_alloc_slot(&cspace);
     if (handler_cptr == seL4_CapNull) {
@@ -37,8 +37,8 @@ int init_driver_irq_handling(seL4_IRQControl irq_control, seL4_Word irq, int lev
         ZF_LOGE("Could not set notification for timer irq %d", err);
         return -1;
     }
-    seL4_CPtr handler_slot = cspace_alloc_slot(&user_process.cspace);
-    err = cspace_mint(&user_process.cspace, handler_slot, &cspace, handler_cptr, seL4_AllRights, 0);
+    seL4_CPtr handler_slot = cspace_alloc_slot(user_cspace);
+    err = cspace_mint(user_cspace, handler_slot, &cspace, handler_cptr, seL4_AllRights, 0);
     if (err) {
         ZF_LOGE("Failed to mint IRQ handler");
     }
