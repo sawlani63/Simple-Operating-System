@@ -424,9 +424,6 @@ NORETURN void *main_continued(UNUSED void *arg)
     nfs_pagefile->handle = args.buff;
 
     printf("Timer init\n");
-    /* Initialises the timer */
-    int res = start_timer(timer_vaddr);
-    ZF_LOGF_IF(res < 0, "Failed to initialise timer");
     /* Start the clock driver */
     error = start_clock_process();
     ZF_LOGI_IF(error == -1, "Failed to start clock driver");

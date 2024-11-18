@@ -5,9 +5,6 @@
 #include <clock/watchdog.h>
 #include <clock/timestamp.h>
 #include <clock/device.h>
-#include <string.h>
-
-#define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 
 #define TIMER_VADDR (0xb0001000)
 #define TIMER_IPC_EP_CAP (0x2)
