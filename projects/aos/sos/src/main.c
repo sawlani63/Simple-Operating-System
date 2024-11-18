@@ -131,23 +131,25 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
         }
     }
 
-    /* Allocate a new frame to be mapped by the shadow page table. */
-    frame_ref_t frame_ref = clock_alloc_frame(fault_addr, user_process.pid, 0);
-    if (frame_ref == NULL_FRAME) {
-        ZF_LOGD("Failed to alloc frame");
-        free_process(user_process, true);
-        return false;
-    }
-
     /* Map the frame into the relevant page tables. If we are a shared region, perform a global mapping. */
-    if (is_shared_region(reg) && map_shared_region(fault_addr, user_process.vspace, reg, frame_ref) != seL4_NoError) {
+    if (is_shared_region(reg) && map_shared_region(fault_addr, user_process, reg) != seL4_NoError) {
         ZF_LOGE("Could not map the shared frame into the two page tables");
         free_process(user_process, true);
         return false;
-    } else if (sos_map_frame(&cspace, user_process.vspace, fault_addr, reg->perms, frame_ref, as) != seL4_NoError) {
-        ZF_LOGE("Could not map the frame into the two page tables");
-        free_process(user_process, true);
-        return false;
+    } else {
+        /* Allocate a new frame to be mapped by the shadow page table. */
+        frame_ref_t frame_ref = clock_alloc_frame(fault_addr, user_process.pid, 0);
+        if (frame_ref == NULL_FRAME) {
+            ZF_LOGD("Failed to alloc frame");
+            free_process(user_process, true);
+            return false;
+        }
+
+        if (sos_map_frame(&cspace, user_process.vspace, fault_addr, reg->perms, frame_ref, as, true) != seL4_NoError) {
+            ZF_LOGE("Could not map the frame into the two page tables");
+            free_process(user_process, true);
+            return false;
+        }
     }
     
     user_process.size++;
@@ -392,6 +394,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     init_semaphores();
     /* Initialise our swap map and queue for demand paging */
     init_bitmap();
+    global_pagetable_create();
     /* Initialise the list of processes and process id bitmap */
     int error = init_proc();
     ZF_LOGF_IF(error, "Failed to initialise process list / bitmap");

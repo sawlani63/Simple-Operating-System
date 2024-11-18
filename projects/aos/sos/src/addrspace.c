@@ -40,6 +40,7 @@ void print_regions(addrspace_t *addrspace) {
         
         printf("Region: base=%p, size=%p, end=%p, perms=", reg->base, reg->size, reg->base + reg->size);
         
+        if (reg->perms & BIT(63)) printf("S");
         if (reg->perms & REGION_RD) printf("R");
         if (reg->perms & REGION_WR) printf("W");
         if (reg->perms & REGION_EX) printf("X");

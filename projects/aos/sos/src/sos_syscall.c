@@ -479,6 +479,7 @@ void syscall_sos_share_vm(seL4_MessageInfo_t *reply_msg, seL4_Word badge) {
     sync_bin_sem_post(process_list_sem);
 
     seL4_SetMR(0, insert_shared_region(user_process.addrspace, (size_t) adr, size, perms) ? 0 : -1);
+    print_regions(user_process.addrspace);
 }
 
 void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number)
