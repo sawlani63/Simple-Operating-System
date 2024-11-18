@@ -24,17 +24,19 @@ static inline void wakeup(UNUSED uint32_t id, void *data)
     seL4_Signal((0x4));
 }
 
-static inline void handle_operation(int fd)
+static inline void handle_operation()
 {
     seL4_Word op = seL4_GetMR(0);
     switch(op) {
-        case REGISTER_TIMER:
-            sos_write(fd, "here\n", strlen("here\n"));
+        case REGISTER_TIMER: {
             uint64_t delay = seL4_GetMR(1);
+            int fd = sos_open("console", 1);
+            sos_write(fd, "here\n", strlen("here\n"));
             register_timer(delay, wakeup, NULL);
-            sos_write(fd, "never got out", strlen("never got out"));
+            char buffer[256];
+            snprintf(buffer, 256, "delay : %d\n", delay);
             break;
-        case MICRO_TIMESTAMP:
+        } case MICRO_TIMESTAMP:
             seL4_SetMR(0, timestamp_us(timestamp_get_freq()));
             break;
         case MILLI_TIMESTAMP:
@@ -49,7 +51,6 @@ static void driver_loop()
 {
     seL4_MessageInfo_t reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     bool have_reply = false;
-    int fd = sos_open("console", 1);
     while (1) {
         seL4_Word sender;
         seL4_MessageInfo_t message;
@@ -59,15 +60,13 @@ static void driver_loop()
             message = seL4_Recv(TIMER_IPC_EP_CAP, &sender, TIMER_REPLY);
         }
         if (sender == (meson_timeout_irq(MESON_TIMER_A))) {
-            sos_write(fd, "irqworks b", strlen("irqworks b"));
             timer_irq(NULL, meson_timeout_irq(MESON_TIMER_A), (0x5));
             have_reply = false;
         } else if (sender == (meson_timeout_irq(MESON_TIMER_B))) {
-            sos_write(fd, "irqworks A", strlen("irqworks A"));
             timer_irq(NULL, meson_timeout_irq(MESON_TIMER_B), (0x6));
             have_reply = false;
         } else {
-            handle_operation(fd);
+            handle_operation();
             have_reply = true;
         }
     }

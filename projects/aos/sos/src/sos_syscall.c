@@ -350,7 +350,9 @@ void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg, UNUSED seL4_Word badge)
 
     //register_timer(seL4_GetMR(1), wakeup, sleep_signal);
     seL4_SetMR(0, 0);
-    seL4_SetMR(1, seL4_GetMR(1));
+    uint64_t delay = seL4_GetMR(1);
+    ZF_LOGE("DELAY %d", delay);
+    seL4_SetMR(1, delay);
     ZF_LOGE("DELAY CALLBACK DATA %d %p", seL4_GetMR(1), sleep_signal);
     seL4_Send(ipc_ep, seL4_MessageInfo_new(0, 0, 0, 2));
     ZF_LOGE("GOING TO SLEEP");
