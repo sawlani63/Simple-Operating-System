@@ -222,7 +222,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
 
     /* Map in the stack frame for the user app */
     seL4_Error err = sos_map_frame(cspace, user_process->vspace, stack_bottom, REGION_RD | REGION_WR,
-                                   user_process->stack_frame, as);
+                                   user_process->stack_frame, as, true);
     if (err != 0) {
         ZF_LOGE("Unable to map stack for user app");
         return -1;
@@ -308,7 +308,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
         }
 
         err = sos_map_frame(cspace, user_process->vspace, stack_bottom,
-                            REGION_RD | REGION_WR, frame, as);
+                            REGION_RD | REGION_WR, frame, as, true);
         if (err != 0) {
             ZF_LOGE("Unable to map stack for user app");
             return -1;
@@ -389,8 +389,8 @@ int start_process(char *app_name, bool timer)
     }
 
     /* Create a simple 1 level CSpace */
-    err = cspace_create_one_level(&cspace, &user_process.cspace);
-    if (err != CSPACE_NOERROR) {
+    int cspace_err = cspace_create_one_level(&cspace, &user_process.cspace);
+    if (cspace_err != CSPACE_NOERROR) {
         ZF_LOGE("Failed to create cspace");
         free_process(user_process, false);
         return -1;
@@ -457,7 +457,7 @@ int start_process(char *app_name, bool timer)
 
     if (timer) {
         seL4_CPtr reply;
-        ut_t *ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
+        alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
         seL4_CPtr slot = cspace_alloc_slot(&user_process.cspace);
         err = cspace_mint(&user_process.cspace, slot, &cspace, reply, seL4_AllRights, (seL4_Word) user_process.pid);
         if (err) {
@@ -576,7 +576,7 @@ int start_process(char *app_name, bool timer)
 
     /* Map in the IPC buffer for the thread */
     err = sos_map_frame(&cspace, user_process.vspace, PROCESS_IPC_BUFFER, REGION_RD | REGION_WR,
-                        user_process.ipc_buffer_frame, user_process.addrspace);
+                        user_process.ipc_buffer_frame, user_process.addrspace, true);
     if (err != 0) {
         ZF_LOGE("Unable to map IPC buffer for user app");
         free_process(user_process, false);
@@ -604,7 +604,7 @@ int start_process(char *app_name, bool timer)
     init_threads(user_process.ep, user_process.ep, sched_ctrl_start, sched_ctrl_end);
 
     /* Create our per-process system call handler thread */
-    user_process.handler_thread = thread_create(syscall_loop, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true, app_name);
+    user_process.handler_thread = thread_create(syscall_loop, (void *)(size_t)user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true, app_name);
     if (user_process.handler_thread == NULL) {
         ZF_LOGE("Could not create system call handler thread for %s\n", app_name);
         free_process(user_process, false);

@@ -175,3 +175,18 @@ int64_t sos_time_stamp(void)
     /* Return the response received from SOS */
     return seL4_GetMR(0);
 }
+
+/*************************************************************************/
+/*                                   */
+/* Optional (bonus) system calls                     */
+/*                                   */
+/*************************************************************************/
+
+int sos_share_vm(void *adr, size_t size, int writable) {
+    seL4_SetMR(0, SYSCALL_SOS_SHARE_VM);
+    seL4_SetMR(1, (seL4_Word) adr);
+    seL4_SetMR(2, (seL4_Word) size);
+    seL4_SetMR(3, (seL4_Word) writable);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 4));
+    return seL4_GetMR(0);
+}

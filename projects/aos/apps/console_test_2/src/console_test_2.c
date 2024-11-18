@@ -7,16 +7,9 @@
 #include <sos.h>
 int main (void)
 {
-    /*int fd = sos_open("chirag.txt", O_RDWR);
-    assert(fd > 2);
-    int err = sos_write(fd, "ThisIsAnExampleStringForWhichIAmAddingAUniqueIdThatShowsIWroteThis:Malenia\n", 76);
-    assert(err == 76);
-    int res = sos_close(fd);
-    assert(!res);*/
-    for (int i = 0; i < 10; i++) {
-        uint64_t prev_seconds = sos_time_stamp();
-        sos_usleep(1000000);
-        uint64_t next_seconds = sos_time_stamp();
-        assert(next_seconds > prev_seconds);
-    }
+    #define SHARED_ADDRESS   0x1000
+    #define SHARED_PAGE_SIZE 0x1000
+    int res = sos_share_vm(SHARED_ADDRESS, SHARED_PAGE_SIZE, 1);
+    assert(!strcmp(SHARED_ADDRESS, "Hello World!"));
+    strncpy(SHARED_ADDRESS, "Goodbye World!", SHARED_PAGE_SIZE - 1);
 }

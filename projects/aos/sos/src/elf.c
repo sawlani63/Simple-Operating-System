@@ -84,7 +84,7 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
         }
 
         /* map the frame into the loadee address space */
-        err = sos_map_frame(cspace, loadee, loadee_vaddr, flags, frame, as);
+        err = sos_map_frame(cspace, loadee, loadee_vaddr, flags, frame, as, true);
         (*size)++;
 
         /* A frame has already been mapped at this address. This occurs when segments overlap in

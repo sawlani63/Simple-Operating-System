@@ -41,6 +41,7 @@
 #include "clock_replacement.h"
 
 #include "boot_driver.h"
+#include "sharedvm.h"
 
 #include <sos/gen_config.h>
 #ifdef CONFIG_SOS_GDB_ENABLED
@@ -59,7 +60,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "sosh"
+#define APP_NAME             "console_test"
 
 extern char __eh_frame_start[];
 /* provided by gcc */
@@ -94,7 +95,7 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
         return false;
     }
 
-    /* Try paging in: continue in vm fault if 1 is returned*/
+    /* Try paging in: continue in vm fault if 1 is returned. */
     int try_page_in_res = clock_try_page_in(&user_process, fault_addr);
     if (try_page_in_res < 0) {
         /* Major error */
@@ -114,7 +115,7 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
         as->stack_reg->size = PROCESS_STACK_TOP - ALIGN_DOWN(fault_addr, PAGE_SIZE_4K);
         reg = as->stack_reg;
     } else {
-        mem_region_t tmp = { .base = fault_addr };
+        mem_region_t tmp = { .base = fault_addr + 1 };
         reg = sglib_mem_region_t_find_closest_member(as->region_tree, &tmp);
         if (reg != NULL && fault_addr < reg->base + reg->size && fault_addr >= reg->base) {
             // Check permissions for write faults
@@ -130,20 +131,27 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
         }
     }
 
-    /* Allocate a new frame to be mapped by the shadow page table. */
-    frame_ref_t frame_ref = clock_alloc_frame(fault_addr, user_process.pid, 0);
-    if (frame_ref == NULL_FRAME) {
-        ZF_LOGD("Failed to alloc frame");
+    /* Map the frame into the relevant page tables. If we are a shared region, perform a global mapping. */
+    if (is_shared_region(reg) && map_shared_region(fault_addr, user_process, reg) != seL4_NoError) {
+        ZF_LOGE("Could not map the shared frame into the two page tables");
         free_process(user_process, true);
         return false;
-    }
+    } else {
+        /* Allocate a new frame to be mapped by the shadow page table. */
+        frame_ref_t frame_ref = clock_alloc_frame(fault_addr, user_process.pid, 0);
+        if (frame_ref == NULL_FRAME) {
+            ZF_LOGD("Failed to alloc frame");
+            free_process(user_process, true);
+            return false;
+        }
 
-    /* Map the frame into the relevant page tables. */
-    if (sos_map_frame(&cspace, user_process.vspace, fault_addr, reg->perms, frame_ref, as) != 0) {
-        ZF_LOGE("Could not map the frame into the two page tables");
-        free_process(user_process, true);
-        return false;
+        if (sos_map_frame(&cspace, user_process.vspace, fault_addr, reg->perms, frame_ref, as, true) != seL4_NoError) {
+            ZF_LOGE("Could not map the frame into the two page tables");
+            free_process(user_process, true);
+            return false;
+        }
     }
+    
     user_process.size++;
     sync_bin_sem_wait(process_list_sem);
     user_process_list[badge] = user_process;
@@ -212,6 +220,9 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
         break;
     case SYSCALL_PROC_WAIT:
         syscall_proc_wait(&reply_msg, badge);
+        break;
+    case SYSCALL_SOS_SHARE_VM:
+        syscall_sos_share_vm(&reply_msg, badge);
         break;
     default:
         syscall_unknown_syscall(&reply_msg, syscall_number);
@@ -383,6 +394,7 @@ NORETURN void *main_continued(UNUSED void *arg)
     init_semaphores();
     /* Initialise our swap map and queue for demand paging */
     init_bitmap();
+    global_pagetable_create();
     /* Initialise the list of processes and process id bitmap */
     int error = init_proc();
     ZF_LOGF_IF(error, "Failed to initialise process list / bitmap");
@@ -478,7 +490,7 @@ int main(void)
 
     ut_t *ut = ut_alloc(seL4_NotificationBits, &cspace);
     if (ut == NULL) {
-        ZF_LOGE("No memory for object of size %zu", seL4_NotificationBits);
+        ZF_LOGE("No memory for object of size %u", seL4_NotificationBits);
         return -1;
     }
     seL4_CPtr cspace_sem_cptr = cspace_alloc_slot(&cspace);

@@ -67,6 +67,9 @@
         "executor": "c",
         "gen_config.h": "c",
         "random": "cpp",
-        "watchdog.h": "c"
+        "watchdog.h": "c",
+        "sharedvm.h": "c",
+        "page.h": "c",
+        "mman.h": "c"
     }
 }
