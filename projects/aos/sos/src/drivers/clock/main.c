@@ -27,8 +27,7 @@ static inline void handle_operation()
     seL4_Word op = seL4_GetMR(0);
     switch(op) {
         case REGISTER_TIMER:
-            uint64_t delay = seL4_GetMR(1);
-            register_timer(delay, wakeup, NULL);
+            register_timer(seL4_GetMR(1), wakeup, NULL);
             break;
         case MICRO_TIMESTAMP:
             seL4_SetMR(0, timestamp_us(timestamp_get_freq()));
