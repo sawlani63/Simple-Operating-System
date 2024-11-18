@@ -361,7 +361,6 @@ void *sos_map_device(cspace_t *cspace, uintptr_t addr, size_t size, seL4_CPtr vs
 {
     assert(cspace != NULL);
     void *vstart = (void *) device_virt;
-    ZF_LOGE("VSTART REAL %p %d", vstart, timer);
 
     for (uintptr_t curr = addr; curr < (addr + size); curr += PAGE_SIZE_4K) {
         ut_t *ut = ut_alloc_4k_device(curr);
@@ -386,8 +385,8 @@ void *sos_map_device(cspace_t *cspace, uintptr_t addr, size_t size, seL4_CPtr vs
             return NULL;
         }
 
-        ZF_LOGE("DEVICE VIRT %p", device_virt);
         /* map */
+        ZF_LOGE("VSTART REAL %p %d %p %p %d", cspace, frame, vspace, device_virt, timer);
         err = map_frame(cspace, frame, vspace, device_virt, seL4_AllRights, false);
         if (err != seL4_NoError) {
             ZF_LOGE("Failed to map device frame at %p", (void *) device_virt);
@@ -410,10 +409,10 @@ void *sos_map_device(cspace_t *cspace, uintptr_t addr, size_t size, seL4_CPtr vs
 void sos_map_timer(cspace_t *cspace, uintptr_t addr, size_t size, seL4_CPtr vspace, seL4_CPtr frame, void *timer_vaddr)
 {
     assert(cspace != NULL);
-    ZF_LOGE("VSTART FAKE %p 1 %d", timer_vaddr, frame);
+    ZF_LOGE("VSTART REAL %p %d %p %p 1", cspace, frame, vspace, timer_vaddr);
 
     /* map */
-    seL4_Error err = map_frame(cspace, frame, vspace, timer_vaddr, seL4_AllRights, false);
+    seL4_Error err = map_frame(cspace, frame, vspace, 0xb0000000, seL4_AllRights, false);
     if (err != seL4_NoError) {
         ZF_LOGE("Failed to map device frame at %p", (void *) timer_vaddr);
         cspace_delete(cspace, frame);

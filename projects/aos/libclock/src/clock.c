@@ -51,6 +51,7 @@ int start_timer(unsigned char *timer_vaddr)
     stop_timer();
 
     /* Set the clock registers to the base + reg offset and start timer E. */
+    //clock.regs = (meson_timer_reg_t *) (timer_vaddr + (TIMER_BASE + 0x2650 * 4 - TIMER_MAP_BASE));
     clock.regs = (meson_timer_reg_t *) (timer_vaddr + TIMER_REG_START);
 
     /* Allocate the min heap for keeping track of timers and configure timer A. */

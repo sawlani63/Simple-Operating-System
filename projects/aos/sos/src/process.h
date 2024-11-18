@@ -76,7 +76,7 @@ typedef int pid_t;
 int init_proc();
 user_process_t get_process(pid_t pid);
 void free_process(user_process_t user_process, bool suicidal);
-int start_process(char *app_name, bool initial, user_process_t user_process);
+int start_process(char *app_name, bool initial);
 
 /* Process system calls */
 void syscall_proc_create(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
