@@ -36,7 +36,6 @@ int pid_queue_tail = NUM_PROC;
 sync_bin_sem_t *pid_queue_sem = NULL;
 sync_bin_sem_t *process_list_sem = NULL;
 
-extern clock_process_t clock_driver;
 extern seL4_CPtr ipc_ep;
 
 NORETURN void syscall_loop(void *arg);
@@ -176,6 +175,7 @@ void free_process(user_process_t user_process, bool suicidal)
     free_pid(user_process.pid);
 
     /* Free the remainder of the untyped memory and caps for the process, including the VSpace and other ntfn/ep objects. */
+    free_untype(&user_process.timer, user_process.timer_ut);
     free_untype(&user_process.wake, user_process.wake_ut);
     free_untype(&user_process.reply, user_process.reply_ut);
     free_untype(&user_process.ep, user_process.ep_ut);
@@ -322,7 +322,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
 /* Start the first process, and return the process ID if successful,
  * -1 otherwise.
  */
-int start_process(char *app_name)
+int start_process(char *app_name, bool timer)
 {
     user_process_t user_process = (user_process_t) {0};
     user_process.pid = get_pid();
@@ -453,6 +453,31 @@ int start_process(char *app_name)
         ZF_LOGE("Failed to mint user ep");
         free_process(user_process, false);
         return -1;
+    }
+
+    if (timer) {
+        seL4_CPtr reply;
+        ut_t *ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
+        seL4_CPtr slot = cspace_alloc_slot(&user_process.cspace);
+        err = cspace_mint(&user_process.cspace, slot, &cspace, reply, seL4_AllRights, (seL4_Word) user_process.pid);
+        if (err) {
+            ZF_LOGE("Failed to mint user ep");
+            free_process(user_process, false);
+            return -1;
+        }
+        user_process.timer_ut = alloc_retype(&user_process.timer, seL4_NotificationObject, seL4_NotificationBits);
+        if (user_process.timer_ut == NULL) {
+            ZF_LOGE("Failed to create notification object");
+            free_process(user_process, false);
+            return -1;
+        }
+        seL4_CPtr slot2 = cspace_alloc_slot(&user_process.cspace);
+        err = cspace_mint(&user_process.cspace, slot2, &cspace, user_process.timer, seL4_AllRights, (seL4_Word) user_process.pid);
+        if (err) {
+            ZF_LOGE("Failed to mint user ep");
+            free_process(user_process, false);
+            return -1;
+        }
     }
 
     /* Create a new TCB object */
@@ -618,9 +643,11 @@ int start_process(char *app_name)
     free(elf_base);
 
     /* Send a request to the clock driver to get the timestamp in milliseconds */
-    seL4_SetMR(0, 2);
-    seL4_Call(ipc_ep, seL4_MessageInfo_new(0, 0, 0, 1));
-    user_process.stime = seL4_GetMR(0);
+    if (!timer) {
+        seL4_SetMR(0, timer_MilliTimestamp);
+        seL4_Call(ipc_ep, seL4_MessageInfo_new(0, 0, 0, 1));
+        user_process.stime = seL4_GetMR(0);
+    }
 
     user_process_list[user_process.pid] = user_process;
     return user_process.pid;
@@ -645,7 +672,7 @@ void syscall_proc_create(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     }
     path[len - 1] = '\0';
 
-    pid_t pid = start_process(path);
+    pid_t pid = start_process(path, false);
     seL4_SetMR(0, pid);
 }
 

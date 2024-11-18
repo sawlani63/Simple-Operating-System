@@ -42,6 +42,8 @@ typedef struct {
     ut_t *reply_ut;
     seL4_CPtr wake;
     ut_t *wake_ut;
+    seL4_CPtr timer;
+    ut_t *timer_ut;
 
     seL4_CPtr ep_slot;
     ut_t *tcb_ut;
@@ -76,7 +78,7 @@ typedef int pid_t;
 int init_proc();
 user_process_t get_process(pid_t pid);
 void free_process(user_process_t user_process, bool suicidal);
-int start_process(char *app_name);
+int start_process(char *app_name, bool timer);
 
 /* Process system calls */
 void syscall_proc_create(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
