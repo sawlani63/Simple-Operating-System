@@ -114,7 +114,7 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
         as->stack_reg->size = PROCESS_STACK_TOP - ALIGN_DOWN(fault_addr, PAGE_SIZE_4K);
         reg = as->stack_reg;
     } else {
-        mem_region_t tmp = { .base = fault_addr };
+        mem_region_t tmp = { .base = fault_addr + 1 };
         reg = sglib_mem_region_t_find_closest_member(as->region_tree, &tmp);
         if (reg != NULL && fault_addr < reg->base + reg->size && fault_addr >= reg->base) {
             // Check permissions for write faults
