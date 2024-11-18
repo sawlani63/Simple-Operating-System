@@ -235,7 +235,7 @@ void network_init(cspace_t *cspace, void *timer_vaddr, seL4_CPtr irq_ntfn, seL4_
 
     /* Map the ethernet MAC MMIO registers into our address space */
     uint64_t eth_base_vaddr =
-        (uint64_t)sos_map_device(cspace, ETH_PHYS_ADDR, ETH_PHYS_SIZE, seL4_CapInitThreadVSpace, NULL, false);
+        (uint64_t)sos_map_device(cspace, ETH_PHYS_ADDR, ETH_PHYS_SIZE, seL4_CapNull, false);
 
     /* Populate DMA operations required by the ethernet driver */
     ethif_dma_ops_t ethif_dma_ops;

@@ -11,6 +11,7 @@
 
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 
+#define TIMER_VADDR (0xb0001000)
 #define TIMER_IPC_EP_CAP (0x2)
 #define TIMER_REPLY (0x3)
 
@@ -20,7 +21,7 @@
 
 static inline void wakeup(UNUSED uint32_t id, void *data)
 {
-    seL4_Signal((0x4));
+    seL4_Signal((0x6));
 }
 
 static inline void handle_operation(int fd)
@@ -59,7 +60,13 @@ static void driver_loop()
         }
         if (sender & IRQ_EP_BADGE) {
             sos_write(fd, "irqworks", strlen("irqworks"));
-            timer_irq(NULL, 0, 0);
+            if (sender & meson_timeout_irq(MESON_TIMER_A)) {
+                sos_write(fd, "irqworks A", strlen("irqworks A"));
+                timer_irq(NULL, meson_timeout_irq(MESON_TIMER_A), (0x4));
+            } else if (sender & meson_timeout_irq(MESON_TIMER_B)) {
+                sos_write(fd, "irqworks B", strlen("irqworks B"));
+                timer_irq(NULL, meson_timeout_irq(MESON_TIMER_B), (0x5));
+            }
             have_reply = false;
         } else {
             handle_operation(fd);
@@ -71,6 +78,10 @@ static void driver_loop()
 
 int main(void)
 {
-    // start timer here from pcb
+    int res = start_timer(TIMER_VADDR);
+    if (res < 0) {
+        return 1;
+    }
     driver_loop();
+    return 0;
 }

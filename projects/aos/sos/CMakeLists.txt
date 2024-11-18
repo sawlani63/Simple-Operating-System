@@ -125,7 +125,7 @@ target_link_libraries(
     sos_Config
     sel4sync
 )
-
+add_app(clock_driver)
 
 if(SosGDBSupport)
     target_link_libraries(sos gdb libco)
