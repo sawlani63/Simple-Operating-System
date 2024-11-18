@@ -11,20 +11,24 @@
 #include "thread_pool.h"
 #include "clock_replacement.h"
 
+#include "boot_driver.h"
+
 #define MAX_BATCH_SIZE 3
 
 extern user_process_t *user_process_list;
 extern sync_bin_sem_t *process_list_sem;
+sync_bin_sem_t *nfs_sem = NULL;
 bool console_open_for_read = false;
 
 sync_bin_sem_t *data_sem = NULL;
 sync_bin_sem_t *file_sem = NULL;
 
 seL4_CPtr nfs_signal;
-seL4_CPtr sleep_signal;
 
 seL4_CPtr signal_cap;
 seL4_CPtr reply;
+
+extern seL4_CPtr ipc_ep;
 
 bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge);
 
@@ -45,8 +49,13 @@ void init_semaphores(void) {
 
     ut_t *nfs_ut = alloc_retype(&nfs_signal, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!nfs_ut, "No memory for notification");
-    ut_t *sleep_ut = alloc_retype(&sleep_signal, seL4_NotificationObject, seL4_NotificationBits);
-    ZF_LOGF_IF(!sleep_ut, "No memory for notification");
+
+    nfs_sem = malloc(sizeof(sync_bin_sem_t));
+    seL4_CPtr nfs_sem_cptr;
+    ZF_LOGF_IF(!nfs_sem, "No memory for semaphore object");
+    nfs_ut = alloc_retype(&nfs_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!nfs_ut, "No memory for notification");
+    sync_bin_sem_init(nfs_sem, nfs_sem_cptr, 1);
 
     alloc_retype(&signal_cap, seL4_EndpointObject, seL4_EndpointBits);
     ut_t *reply_ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
@@ -66,11 +75,6 @@ static inline pt_entry *get_page(addrspace_t *as, seL4_Word vaddr) {
     uint16_t l3_i = (vaddr >> 21) & MASK(9); /* Next 9 bits */
     uint16_t l4_i = (vaddr >> 12) & MASK(9); /* Next 9 bits */
     return &as->page_table[l1_i].l2[l2_i].l3[l3_i].l4[l4_i];
-}
-
-static inline void wakeup(UNUSED uint32_t id, UNUSED void* data)
-{
-    seL4_Signal(sleep_signal);
 }
 
 int netcon_send(open_file *file, char *data, UNUSED uint64_t offset, uint64_t len, void *callback, void *args) {
@@ -303,10 +307,12 @@ void syscall_sos_read(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         return;
     }
 
+    sync_bin_sem_wait(nfs_sem);
     int res = perform_io(user_process, nbyte, vaddr, found, nfs_async_read_cb, true);
     if (res > 0) {
         found->offset += res;
     }
+    sync_bin_sem_post(nfs_sem);
     seL4_SetMR(0, res);
 }
 
@@ -331,10 +337,12 @@ void syscall_sos_write(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         seL4_SetMR(0, -1);
         return;
     }
+    sync_bin_sem_wait(nfs_sem);
     int res = perform_io(user_process, nbyte, vaddr, found, nfs_async_write_cb, false);
     if (res > 0) {
         found->offset += res;
     }
+    sync_bin_sem_post(nfs_sem);
     seL4_SetMR(0, res);
 }
 
@@ -343,9 +351,13 @@ void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg, UNUSED seL4_Word badge)
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_USLEEP);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
 
-    register_timer(seL4_GetMR(1), wakeup, NULL);
+    user_process_t clock_driver = user_process_list[0];
 
-    seL4_Wait(sleep_signal, 0);
+    seL4_SetMR(0, timer_RegisterTimer);
+    uint64_t delay = seL4_GetMR(1);
+    seL4_SetMR(1, delay);
+    seL4_Send(ipc_ep, seL4_MessageInfo_new(0, 0, 0, 2));
+    seL4_Wait(clock_driver.timer, 0);
 }
 
 inline void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
@@ -354,7 +366,9 @@ inline void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Set the reply message to be the timestamp since booting in microseconds */
-    seL4_SetMR(0, timestamp_us(timestamp_get_freq()));
+    seL4_SetMR(0, timer_MicroTimestamp);
+    seL4_Call(ipc_ep, seL4_MessageInfo_new(0, 0, 0, 1));
+    seL4_SetMR(0, seL4_GetMR(0));
 }
 
 void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, seL4_Word badge)

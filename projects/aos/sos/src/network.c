@@ -75,6 +75,7 @@ static char nfs_dir_buf[PATH_MAX];
 static uint8_t ip_octet;
 
 extern sync_bin_sem_t *nfs_sem;
+extern seL4_CPtr ipc_ep;
 
 static void nfs_mount_cb(int status, struct nfs_context *nfs, void *data, void *private_data);
 
@@ -234,7 +235,7 @@ void network_init(cspace_t *cspace, void *timer_vaddr, seL4_CPtr irq_ntfn, seL4_
 
     /* Map the ethernet MAC MMIO registers into our address space */
     uint64_t eth_base_vaddr =
-        (uint64_t)sos_map_device(cspace, ETH_PHYS_ADDR, ETH_PHYS_SIZE);
+        (uint64_t)sos_map_device(cspace, ETH_PHYS_ADDR, ETH_PHYS_SIZE, seL4_CapNull, false);
 
     /* Populate DMA operations required by the ethernet driver */
     ethif_dma_ops_t ethif_dma_ops;
