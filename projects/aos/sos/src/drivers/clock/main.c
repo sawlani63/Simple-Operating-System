@@ -72,5 +72,6 @@ static void driver_loop()
 int main(void)
 {
     // start timer here from pcb
+    start_timer(0xb0001000);
     driver_loop();
 }
