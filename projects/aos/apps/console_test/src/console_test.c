@@ -218,11 +218,11 @@ int main(void)
     assert(fd == 0);
     printf("Passed open/close test\n");
 
-    //test_nfs();
-    //printf("Passed nfs test\n");
+    test_nfs();
+    printf("Passed nfs test\n");
     
-    //pt_test();
-    //mmap_test();
+    pt_test();
+    mmap_test();
     //test_stack_write(fd);
 
     test_buffers(fd);
