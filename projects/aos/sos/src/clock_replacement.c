@@ -189,7 +189,7 @@ int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
         assert(!vaddr_is_mapped(as, vaddr));
 
         /* Allocate a new frame to be mapped by the shadow page table. Start the frame off as pinned. */
-        ref = clock_alloc_frame(vaddr, *user_process, 1);
+        ref = clock_alloc_frame(vaddr, user_process->pid, 1);
         if (ref == NULL_FRAME) {
             ZF_LOGD("Failed to alloc frame");
             return -1;

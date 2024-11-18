@@ -262,7 +262,6 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
     if (!(perms & REGION_EX)) {
         attr |= seL4_ARM_ExecuteNever;
     }
-
     sync_bin_sem_wait(cspace_sem);
     err = map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, l1_pt);
     sync_bin_sem_post(cspace_sem);
@@ -358,7 +357,7 @@ void sos_destroy_page_table(addrspace_t *as)
 
 static uintptr_t device_virt = SOS_DEVICE_START;
 
-void *sos_map_device(cspace_t *cspace, uintptr_t addr, size_t size)
+void *sos_map_device(cspace_t *cspace, uintptr_t addr, size_t size, seL4_CPtr vspace, seL4_CPtr *frame_cap, bool timer)
 {
     assert(cspace != NULL);
     void *vstart = (void *) device_virt;
@@ -387,7 +386,8 @@ void *sos_map_device(cspace_t *cspace, uintptr_t addr, size_t size)
         }
 
         /* map */
-        err = map_frame(cspace, frame, seL4_CapInitThreadVSpace, device_virt, seL4_AllRights, false);
+        ZF_LOGE("VSTART REAL %p %d %p %p %d", cspace, frame, vspace, device_virt, timer);
+        err = map_frame(cspace, frame, vspace, device_virt, seL4_AllRights, false);
         if (err != seL4_NoError) {
             ZF_LOGE("Failed to map device frame at %p", (void *) device_virt);
             cspace_delete(cspace, frame);
@@ -396,7 +396,27 @@ void *sos_map_device(cspace_t *cspace, uintptr_t addr, size_t size)
         }
 
         device_virt += PAGE_SIZE_4K;
+        if (timer) {
+            ZF_LOGE("FRAME %d", frame);
+            *frame_cap = frame;
+            ZF_LOGE("FRAME %d", *frame_cap);
+        }
     }
 
     return vstart;
+}
+
+void sos_map_timer(cspace_t *cspace, uintptr_t addr, size_t size, seL4_CPtr vspace, seL4_CPtr frame, void *timer_vaddr)
+{
+    assert(cspace != NULL);
+    ZF_LOGE("VSTART REAL %p %d %p %p 1", cspace, frame, vspace, timer_vaddr);
+
+    /* map */
+    seL4_Error err = map_frame(cspace, frame, vspace, 0xb0000000, seL4_AllRights, false);
+    if (err != seL4_NoError) {
+        ZF_LOGE("Failed to map device frame at %p", (void *) timer_vaddr);
+        cspace_delete(cspace, frame);
+        cspace_free_slot(cspace, frame);
+        return;
+    }
 }

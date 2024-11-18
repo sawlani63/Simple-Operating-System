@@ -66,6 +66,7 @@
         "assert.h": "c",
         "executor": "c",
         "gen_config.h": "c",
-        "random": "cpp"
+        "random": "cpp",
+        "watchdog.h": "c"
     }
 }

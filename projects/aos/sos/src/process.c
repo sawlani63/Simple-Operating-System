@@ -11,6 +11,9 @@
 #include "vmem_layout.h"
 #include "mapping.h"
 
+#include "boot_driver.h"
+#include <cpio/cpio.h>
+
 /* The number of additional stack pages to provide to the initial
  * process */
 #define INITIAL_PROCESS_EXTRA_STACK_PAGES 4
@@ -32,6 +35,9 @@ int pid_queue_tail = NUM_PROC;
 
 sync_bin_sem_t *pid_queue_sem = NULL;
 sync_bin_sem_t *process_list_sem = NULL;
+
+extern clock_process_t clock_driver;
+extern seL4_CPtr ipc_ep;
 
 NORETURN void syscall_loop(void *arg);
 
@@ -207,7 +213,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
     uintptr_t local_stack_bottom = SOS_SCRATCH - PAGE_SIZE_4K;
 
     /* Create a stack frame */
-    user_process->stack_frame = clock_alloc_frame(stack_bottom, *user_process, 0);
+    user_process->stack_frame = clock_alloc_frame(stack_bottom, user_process->pid, 0);
     if (user_process->stack_frame == NULL_FRAME) {
         ZF_LOGD("Failed to alloc frame");
         return -1;
@@ -295,7 +301,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
     /* Exend the stack with extra pages */
     for (int page = 0; page < INITIAL_PROCESS_EXTRA_STACK_PAGES; page++) {
         stack_bottom -= PAGE_SIZE_4K;
-        frame_ref_t frame = clock_alloc_frame(stack_bottom, *user_process, 0);
+        frame_ref_t frame = clock_alloc_frame(stack_bottom, user_process->pid, 0);
         if (frame == NULL_FRAME) {
             ZF_LOGE("Couldn't allocate additional stack frame");
             return -1;
@@ -351,7 +357,7 @@ int start_process(char *app_name, bool initial)
 
     /* Create a VSpace */
     user_process.vspace_ut = alloc_retype(&user_process.vspace, seL4_ARM_PageGlobalDirectoryObject,
-                                              seL4_PGDBits);
+                                            seL4_PGDBits);
     if (user_process.vspace_ut == NULL) {
         ZF_LOGE("Failed to create vspace");
         free_process(user_process, false);
@@ -359,7 +365,7 @@ int start_process(char *app_name, bool initial)
     }
 
     /* assign the vspace to an asid pool */
-    seL4_Word err = seL4_ARM_ASIDPool_Assign(seL4_CapInitThreadASIDPool, user_process.vspace);
+    seL4_Error err = seL4_ARM_ASIDPool_Assign(seL4_CapInitThreadASIDPool, user_process.vspace);
     if (err != seL4_NoError) {
         ZF_LOGE("Failed to assign asid pool");
         free_process(user_process, false);
@@ -409,7 +415,7 @@ int start_process(char *app_name, bool initial)
     }
 
     /* Create an IPC buffer */
-    user_process.ipc_buffer_frame = clock_alloc_frame(PROCESS_IPC_BUFFER, user_process, 1);
+    user_process.ipc_buffer_frame = clock_alloc_frame(PROCESS_IPC_BUFFER, user_process.pid, 1);
     if (user_process.ipc_buffer_frame == NULL_FRAME) {
         ZF_LOGE("Failed to alloc ipc buffer ut");
         free_process(user_process, false);
@@ -433,6 +439,34 @@ int start_process(char *app_name, bool initial)
         ZF_LOGE("Failed to mint user ep");
         free_process(user_process, false);
         return -1;
+    }
+
+    user_process.timer_slot = cspace_alloc_slot(&user_process.cspace);
+    if (user_process.timer_slot == seL4_CapNull) {
+        ZF_LOGE("Failed to alloc user ep slot");
+        free_process(user_process, false);
+        return -1;
+    }
+
+    if (user_process.pid == 0) {
+        //alloc_retype(&user_process.clock_ep, seL4_EndpointObject, seL4_EndpointBits);
+        err = cspace_mint(&user_process.cspace, user_process.timer_slot, &cspace, ipc_ep, seL4_AllRights, (seL4_Word) user_process.pid);
+        if (err) {
+            ZF_LOGE("Failed to mint user ep");
+            free_process(user_process, false);
+            return -1;
+        }
+        seL4_CPtr reply;
+        ut_t *ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
+        seL4_CPtr slot = cspace_alloc_slot(&user_process.cspace);
+        cspace_mint(&user_process.cspace, slot, &cspace, reply, seL4_AllRights, 0);
+    } else {
+        err = cspace_mint(&user_process.cspace, user_process.timer_slot, &cspace, ipc_ep, seL4_AllRights, (seL4_Word) user_process.pid);
+        if (err) {
+            ZF_LOGE("Failed to mint user ep");
+            free_process(user_process, false);
+            return -1;
+        }
     }
 
     /* Create a new TCB object */
@@ -532,7 +566,7 @@ int start_process(char *app_name, bool initial)
     user_process.size++;
 
     /* load the elf image from nfs */
-    err = elf_load(&cspace, &elf_file, elf, &user_process);
+    err = elf_load(&cspace, &elf_file, elf, user_process.addrspace, user_process.vspace, &user_process.size, user_process.pid);
     if (err) {
         ZF_LOGE("Failed to load elf image");
         free_process(user_process, false);
@@ -598,7 +632,15 @@ int start_process(char *app_name, bool initial)
     }
 
     free(elf_base);
-    user_process.stime = timestamp_ms(timestamp_get_freq());
+
+    if (user_process.pid != 0) {
+        seL4_SetMR(0, 2);
+        seL4_Call(ipc_ep, seL4_MessageInfo_new(0, 0, 0, 1));
+        user_process.stime = seL4_GetMR(0);
+    } else {
+        user_process.stime = timestamp_ms(timestamp_get_freq());
+    }
+
     user_process_list[user_process.pid] = user_process;
     return user_process.pid;
 }

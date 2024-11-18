@@ -51,6 +51,7 @@ int start_timer(unsigned char *timer_vaddr)
     stop_timer();
 
     /* Set the clock registers to the base + reg offset and start timer E. */
+    //clock.regs = (meson_timer_reg_t *) (timer_vaddr + (TIMER_BASE + 0x2650 * 4 - TIMER_MAP_BASE));
     clock.regs = (meson_timer_reg_t *) (timer_vaddr + TIMER_REG_START);
 
     /* Allocate the min heap for keeping track of timers and configure timer A. */
@@ -111,16 +112,15 @@ int timer_irq(void *data, seL4_Word irq, seL4_IRQHandler irq_handler)
 {
     /* May want to change later, not sure if CLOCK_R_OK is best to return here. */
     if (SGLIB_HEAP_IS_EMPTY(timer_node, min_heap, first_free)) {
-        seL4_IRQHandler_Ack(irq_handler);
+        //seL4_IRQHandler_Ack(irq_handler);
         return CLOCK_R_OK;
     }
-
     /* Run the necessary callbacks, reset timer A, and acknowledge that the IRQ has been handled. */
     if (invoke_callbacks()) {
         return CLOCK_R_FAIL;
     }
     reset_timer();
-    seL4_IRQHandler_Ack(irq_handler);
+    //seL4_IRQHandler_Ack(irq_handler);
     return CLOCK_R_OK;
 }
 
