@@ -12,6 +12,7 @@
 #include "clock_replacement.h"
 
 #include "boot_driver.h"
+#include "sharedvm.h"
 
 #define MAX_BATCH_SIZE 3
 
@@ -459,6 +460,20 @@ void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     nfs_close_dir(args.buff);
     
     seL4_SetMR(0, res);
+}
+
+void syscall_sos_share_vm(seL4_MessageInfo_t *reply_msg, seL4_Word badge) {
+    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_SHARE_VM);
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    void *adr = (void *) seL4_GetMR(1);
+    size_t size = seL4_GetMR(2);
+    int writable = seL4_GetMR(3);
+
+    sync_bin_sem_wait(process_list_sem);
+    user_process_t user_process = user_process_list[badge];
+    sync_bin_sem_post(process_list_sem);
+
+    insert_shared_region(user_process.addrspace, (size_t) adr, size, writable);
 }
 
 void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number)

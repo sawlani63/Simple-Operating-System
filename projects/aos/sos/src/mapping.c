@@ -412,7 +412,7 @@ void sos_map_timer(cspace_t *cspace, seL4_CPtr vspace, seL4_CPtr frame, void *ti
     assert(cspace != NULL);
 
     /* map */
-    seL4_Error err = map_frame(cspace, frame, vspace, timer_vaddr, seL4_AllRights, false);
+    seL4_Error err = map_frame(cspace, frame, vspace, (seL4_Word) timer_vaddr, seL4_AllRights, false);
     if (err != seL4_NoError) {
         ZF_LOGE("Failed to map device frame at %p", (void *) timer_vaddr);
         cspace_delete(cspace, frame);

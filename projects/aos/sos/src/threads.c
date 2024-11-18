@@ -42,7 +42,7 @@ seL4_CPtr dark_web;
 void thread_destroy();
 
 /* Initialize our hitman to kill other threads appropriately */
-void become_hitman()
+NORETURN void become_hitman()
 {
     /* Don't keep track of the following uts since they are never freed */
     ut_t *ut = alloc_retype(&dark_web, seL4_EndpointObject, seL4_EndpointBits);

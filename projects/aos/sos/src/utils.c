@@ -18,36 +18,6 @@
 #include "ut.h"
 
 /* helper to allocate a ut + cslot, and retype the ut into the cslot */
-ut_t *alloc_retype_cspace(cspace_t *manual_cspace, seL4_CPtr *cptr, seL4_Word type, size_t size_bits)
-{
-    /* Allocate the object */
-    ut_t *ut = ut_alloc(size_bits, &manual_cspace);
-    if (ut == NULL) {
-        ZF_LOGE("No memory for object of size %zu", size_bits);
-        return NULL;
-    }
-
-    /* allocate a slot to retype the memory for object into */
-    *cptr = cspace_alloc_slot(&manual_cspace);
-    if (*cptr == seL4_CapNull) {
-        ut_free(ut);
-        ZF_LOGE("Failed to allocate slot");
-        return NULL;
-    }
-
-    /* now do the retype */
-    printf("Hey\n");
-    seL4_Error err = cspace_untyped_retype(&manual_cspace, ut->cap, *cptr, type, size_bits);
-    printf("Yo\n");
-    ZF_LOGE_IFERR(err, "Failed retype untyped");
-    if (err != seL4_NoError) {
-        ut_free(ut);
-        return NULL;
-    }
-    return ut;
-}
-
-/* helper to allocate a ut + cslot, and retype the ut into the cslot */
 ut_t *alloc_retype(seL4_CPtr *cptr, seL4_Word type, size_t size_bits)
 {
     sync_bin_sem_wait(cspace_sem);

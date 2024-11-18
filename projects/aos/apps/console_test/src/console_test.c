@@ -30,6 +30,7 @@
 #include <sos.h>
 
 #include <utils/page.h>
+#include <sys/mman.h>
 
 #define NBLOCKS 9
 #define NPAGES_PER_BLOCK 28
@@ -178,9 +179,8 @@ int test_stack_write(int console_fd) {
 #define MMAP_THRESHOLD (0x1c00*SIZE_ALIGN)
 
 int mmap_test_core(int size) {
-    char *buf = malloc(size);
+    char *buf = mmap(0, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
     char *buf1 = malloc(size);
-    printf("buf addr: %p\n", buf);
 
     /* Set */
     for (int b = 0; b < size / PAGE_SIZE_4K; b+=PAGE_SIZE_4K) {
@@ -194,7 +194,7 @@ int mmap_test_core(int size) {
         assert(buf1[b] == b);
     }
 
-    free(buf);
+    munmap(buf, size);
     free(buf1);
 }
 

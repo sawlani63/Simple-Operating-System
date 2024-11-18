@@ -389,8 +389,8 @@ int start_process(char *app_name, bool timer)
     }
 
     /* Create a simple 1 level CSpace */
-    err = cspace_create_one_level(&cspace, &user_process.cspace);
-    if (err != CSPACE_NOERROR) {
+    int cspace_err = cspace_create_one_level(&cspace, &user_process.cspace);
+    if (cspace_err != CSPACE_NOERROR) {
         ZF_LOGE("Failed to create cspace");
         free_process(user_process, false);
         return -1;
@@ -457,7 +457,7 @@ int start_process(char *app_name, bool timer)
 
     if (timer) {
         seL4_CPtr reply;
-        ut_t *ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
+        alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
         seL4_CPtr slot = cspace_alloc_slot(&user_process.cspace);
         err = cspace_mint(&user_process.cspace, slot, &cspace, reply, seL4_AllRights, (seL4_Word) user_process.pid);
         if (err) {
@@ -604,7 +604,7 @@ int start_process(char *app_name, bool timer)
     init_threads(user_process.ep, user_process.ep, sched_ctrl_start, sched_ctrl_end);
 
     /* Create our per-process system call handler thread */
-    user_process.handler_thread = thread_create(syscall_loop, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true, app_name);
+    user_process.handler_thread = thread_create(syscall_loop, (void *)(size_t)user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true, app_name);
     if (user_process.handler_thread == NULL) {
         ZF_LOGE("Could not create system call handler thread for %s\n", app_name);
         free_process(user_process, false);

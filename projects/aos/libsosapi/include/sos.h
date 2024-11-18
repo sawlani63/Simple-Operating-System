@@ -32,6 +32,7 @@
 #define SYSCALL_PROC_GETID SYS_getpid
 #define SYSCALL_PROC_STATUS 173
 #define SYSCALL_PROC_WAIT SYS_waitid
+#define SYSCALL_SOS_SHARE_VM 1
 
 /* Endpoint for talking to SOS */
 #define SOS_IPC_EP_CAP     (0x1)
