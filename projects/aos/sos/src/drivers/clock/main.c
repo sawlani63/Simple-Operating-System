@@ -60,9 +60,13 @@ static void driver_loop()
             message = seL4_Recv(TIMER_IPC_EP_CAP, &sender, TIMER_REPLY);
         }
         if (sender == (meson_timeout_irq(MESON_TIMER_A))) {
+            int fd = sos_open("console", 1);
+            sos_write(fd, "irqa\n", strlen("irqa\n"));
             timer_irq(NULL, meson_timeout_irq(MESON_TIMER_A), (0x5));
             have_reply = false;
         } else if (sender == (meson_timeout_irq(MESON_TIMER_B))) {
+            int fd = sos_open("console", 1);
+            sos_write(fd, "irqb\n", strlen("irqb\n"));
             timer_irq(NULL, meson_timeout_irq(MESON_TIMER_B), (0x6));
             have_reply = false;
         } else {
