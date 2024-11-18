@@ -59,7 +59,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "sosh"
+#define APP_NAME             "console_test"
 
 extern char __eh_frame_start[];
 /* provided by gcc */
@@ -176,12 +176,6 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
         break;
     case SYSCALL_SOS_WRITE:
         syscall_sos_write(&reply_msg, badge);
-        break;
-    case SYSCALL_SOS_USLEEP:
-        syscall_sos_usleep(&reply_msg, badge);
-        break;
-    case SYSCALL_SOS_TIME_STAMP:
-        syscall_sos_time_stamp(&reply_msg);
         break;
     case SYSCALL_SYS_BRK:
         syscall_sys_brk(&reply_msg, badge);

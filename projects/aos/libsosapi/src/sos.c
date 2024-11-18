@@ -158,19 +158,20 @@ pid_t sos_process_wait(pid_t pid)
 void sos_usleep(int msec)
 {
     /* Set the first message register to the sos_usleep syscall number */
-    seL4_SetMR(0, SYSCALL_SOS_USLEEP);
+    seL4_SetMR(0, 0);
     /* Set the second message register to the amount of time to sleep for */
     seL4_SetMR(1, msec);
     /* Invokes the SOS endpoint to request a response (SOS only responds after the given delay has passed so thread remains blocked for that time) */
-    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 2));
+    seL4_Send(TIMER_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 2));
+    seL4_Wait(TIMER_NTFN, 0);
 }
 
 int64_t sos_time_stamp(void)
 {
     /* Set the first message register to the sos_time_stamp syscall number */
-    seL4_SetMR(0, SYSCALL_SOS_TIME_STAMP);
+    seL4_SetMR(0, 1);
     /* Invokes the SOS endpoint for the IPC protocol to request a response and block until one is received */
-    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
+    seL4_Call(TIMER_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
     /* Return the response received from SOS */
     return seL4_GetMR(0);
 }

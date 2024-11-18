@@ -478,6 +478,14 @@ int start_process(char *app_name, bool timer)
             free_process(user_process, false);
             return -1;
         }
+    } else {
+        user_process.ntfn_slot = cspace_alloc_slot(&user_process.cspace);
+        err = cspace_mint(&user_process.cspace, user_process.ntfn_slot, &cspace, user_process_list[0].timer, seL4_AllRights, (seL4_Word) user_process.pid);
+        if (err) {
+            ZF_LOGE("Failed to mint user ep");
+            free_process(user_process, false);
+            return -1;
+        }
     }
 
     /* Create a new TCB object */
