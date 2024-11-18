@@ -21,7 +21,7 @@
 
 static inline void wakeup(UNUSED uint32_t id, void *data)
 {
-    seL4_Signal((0x6));
+    seL4_Signal((0x4));
 }
 
 static inline void handle_operation(int fd)
@@ -40,7 +40,7 @@ static inline void handle_operation(int fd)
         case MILLI_TIMESTAMP:
             seL4_SetMR(0, timestamp_ms(timestamp_get_freq()));
             break;
-        default:
+        //default:
             /* Do nothing */
         }
 }
@@ -58,15 +58,13 @@ static void driver_loop()
         } else {
             message = seL4_Recv(TIMER_IPC_EP_CAP, &sender, TIMER_REPLY);
         }
-        if (sender & IRQ_EP_BADGE) {
-            sos_write(fd, "irqworks", strlen("irqworks"));
-            if (sender & meson_timeout_irq(MESON_TIMER_A)) {
-                sos_write(fd, "irqworks A", strlen("irqworks A"));
-                timer_irq(NULL, meson_timeout_irq(MESON_TIMER_A), (0x4));
-            } else if (sender & meson_timeout_irq(MESON_TIMER_B)) {
-                sos_write(fd, "irqworks B", strlen("irqworks B"));
-                timer_irq(NULL, meson_timeout_irq(MESON_TIMER_B), (0x5));
-            }
+        if (sender == (meson_timeout_irq(MESON_TIMER_A))) {
+            sos_write(fd, "irqworks b", strlen("irqworks b"));
+            timer_irq(NULL, meson_timeout_irq(MESON_TIMER_A), (0x5));
+            have_reply = false;
+        } else if (sender == (meson_timeout_irq(MESON_TIMER_B))) {
+            sos_write(fd, "irqworks A", strlen("irqworks A"));
+            timer_irq(NULL, meson_timeout_irq(MESON_TIMER_B), (0x6));
             have_reply = false;
         } else {
             handle_operation(fd);

@@ -460,6 +460,9 @@ int start_process(char *app_name, bool initial)
         ut_t *ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
         seL4_CPtr slot = cspace_alloc_slot(&user_process.cspace);
         cspace_mint(&user_process.cspace, slot, &cspace, reply, seL4_AllRights, 0);
+        seL4_CPtr slot2 = cspace_alloc_slot(&user_process.cspace);
+        cspace_mint(&user_process.cspace, slot2, &cspace, user_process.wake, seL4_AllRights, 0);
+        ZF_LOGE("SLOT2 %d", slot2);
     } else {
         err = cspace_mint(&user_process.cspace, user_process.timer_slot, &cspace, ipc_ep, seL4_AllRights, (seL4_Word) user_process.pid);
         if (err) {
