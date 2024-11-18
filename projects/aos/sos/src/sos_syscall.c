@@ -346,6 +346,31 @@ void syscall_sos_write(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     seL4_SetMR(0, res);
 }
 
+void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg, UNUSED seL4_Word badge)
+{
+    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_USLEEP);
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
+
+    user_process_t clock_driver = user_process_list[0];
+
+    seL4_SetMR(0, timer_RegisterTimer);
+    uint64_t delay = seL4_GetMR(1);
+    seL4_SetMR(1, delay);
+    seL4_Send(ipc_ep, seL4_MessageInfo_new(0, 0, 0, 2));
+    seL4_Wait(clock_driver.timer, 0);
+}
+
+inline void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
+{
+    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_TIME_STAMP);
+    /* construct a reply message of length 1 */
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    /* Set the reply message to be the timestamp since booting in microseconds */
+    seL4_SetMR(0, timer_MicroTimestamp);
+    seL4_Call(ipc_ep, seL4_MessageInfo_new(0, 0, 0, 1));
+    seL4_SetMR(0, seL4_GetMR(0));
+}
+
 void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_STAT);

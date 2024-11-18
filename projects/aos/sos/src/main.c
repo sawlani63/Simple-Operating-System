@@ -177,6 +177,12 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
     case SYSCALL_SOS_WRITE:
         syscall_sos_write(&reply_msg, badge);
         break;
+    case SYSCALL_SOS_USLEEP:
+        syscall_sos_usleep(&reply_msg, badge);
+        break;
+    case SYSCALL_SOS_TIME_STAMP:
+        syscall_sos_time_stamp(&reply_msg);
+        break;
     case SYSCALL_SYS_BRK:
         syscall_sys_brk(&reply_msg, badge);
         break;
