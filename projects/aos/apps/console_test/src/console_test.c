@@ -118,7 +118,7 @@ int test_buffers(int console_fd) {
         sos_usleep(1000000);
         uint64_t next_seconds = sos_time_stamp();
         assert(next_seconds > prev_seconds);
-        printf("Tick\n");
+        printf("Tick %d %d\n", prev_seconds, next_seconds);
     }
 }
 
