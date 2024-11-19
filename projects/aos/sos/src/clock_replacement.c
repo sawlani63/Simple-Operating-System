@@ -119,10 +119,10 @@ frame_t *clock_choose_victim(frame_ref_t *clock_hand, frame_ref_t first) {
     frame_t *curr_frame = frame_from_ref(*clock_hand);
     while (curr_frame->pinned || curr_frame->referenced) {
         curr_frame->referenced = 0;
-        /*if (!curr_frame->pinned) {
+        if (!curr_frame->pinned) {
             addrspace_t *as = get_process(curr_frame->pid).addrspace;
             seL4_ARM_Page_Unmap(GET_PAGE(as->page_table, curr_frame->vaddr).page.frame_cptr);
-        }*/
+        }
         *clock_hand = curr_frame->next ? curr_frame->next : first;
         curr_frame = frame_from_ref(*clock_hand);
     }
@@ -211,7 +211,7 @@ int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
             return -1;
         }
         if (frame_from_ref(ref)->shared) {
-            entry = GET_PAGE(get_global_addrspace()->page_table, vaddr);
+            entry = GET_PAGE(get_global_addrspace(), vaddr);
         }
 
         /* Grab the offset into the swap file and load PAGE_SIZE_4K bytes into the newly alloc'd frame. */

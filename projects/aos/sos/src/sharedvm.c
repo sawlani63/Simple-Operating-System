@@ -1,5 +1,7 @@
 #include "sharedvm.h"
 #include "mapping.h"
+#include "frame_table.h"
+#include "process.h"
 #include <stdlib.h>
 
 /* Macro for getting a page assuming it is already valid. */

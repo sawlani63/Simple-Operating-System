@@ -1,7 +1,6 @@
 #pragma once
 
 #include "process.h"
-#include "frame_table.h"
 
 /**
  * Initialises a global page table
@@ -31,5 +30,3 @@ static inline bool is_shared_region(mem_region_t *region) {
 
 int make_shared_region(user_process_t process, void *vaddr, size_t len, bool is_writeable);
 addrspace_t *get_global_addrspace();
-int page_in_shared(frame_ref_t ref, seL4_Word vaddr);
-int page_out_shared(frame_t *victim);
