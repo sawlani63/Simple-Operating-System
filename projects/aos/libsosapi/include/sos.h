@@ -36,6 +36,7 @@
 /* Endpoint for talking to SOS */
 #define SOS_IPC_EP_CAP     (0x1)
 #define TIMER_IPC_EP_CAP   (0x2)
+#define TIMER_NTFN (0x3)
 
 /* Limits */
 #define PROCESS_MAX_FILES 16

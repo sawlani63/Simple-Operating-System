@@ -9,13 +9,20 @@
 #include "network.h"
 #include "console.h"
 #include "thread_pool.h"
+<<<<<<< HEAD
 #include "buffercache.h"
 #include "dentry.h"
+=======
+#include "clock_replacement.h"
+
+#include "boot_driver.h"
+>>>>>>> 9eb26ba2359ee842b499d62a8b78c2d22b84ee92
 
 #define MAX_BATCH_SIZE 3
 
 extern user_process_t *user_process_list;
 extern sync_bin_sem_t *process_list_sem;
+sync_bin_sem_t *nfs_sem = NULL;
 bool console_open_for_read = false;
 bool buffercache_enable = true;
 
@@ -23,10 +30,11 @@ sync_bin_sem_t *data_sem = NULL;
 sync_bin_sem_t *file_sem = NULL;
 
 seL4_CPtr nfs_signal;
-seL4_CPtr sleep_signal;
 
 seL4_CPtr signal_cap;
 seL4_CPtr reply;
+
+extern seL4_CPtr ipc_ep;
 
 bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge);
 
@@ -47,8 +55,13 @@ void init_semaphores(void) {
 
     ut_t *nfs_ut = alloc_retype(&nfs_signal, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!nfs_ut, "No memory for notification");
-    ut_t *sleep_ut = alloc_retype(&sleep_signal, seL4_NotificationObject, seL4_NotificationBits);
-    ZF_LOGF_IF(!sleep_ut, "No memory for notification");
+
+    nfs_sem = malloc(sizeof(sync_bin_sem_t));
+    seL4_CPtr nfs_sem_cptr;
+    ZF_LOGF_IF(!nfs_sem, "No memory for semaphore object");
+    nfs_ut = alloc_retype(&nfs_sem_cptr, seL4_NotificationObject, seL4_NotificationBits);
+    ZF_LOGF_IF(!nfs_ut, "No memory for notification");
+    sync_bin_sem_init(nfs_sem, nfs_sem_cptr, 1);
 
     alloc_retype(&signal_cap, seL4_EndpointObject, seL4_EndpointBits);
     ut_t *reply_ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
@@ -70,12 +83,16 @@ static inline pt_entry *get_page(addrspace_t *as, seL4_Word vaddr) {
     return &as->page_table[l1_i].l2[l2_i].l3[l3_i].l4[l4_i];
 }
 
+<<<<<<< HEAD
 static inline void wakeup(UNUSED uint32_t id, UNUSED void* data)
 {
     seL4_Signal(sleep_signal);
 }
 
 int netcon_send(UNUSED pid_t pid, open_file *file, char *data, UNUSED uint64_t offset, uint64_t len, void *callback, void *args) {
+=======
+int netcon_send(open_file *file, char *data, UNUSED uint64_t offset, uint64_t len, void *callback, void *args) {
+>>>>>>> 9eb26ba2359ee842b499d62a8b78c2d22b84ee92
     int res = network_console_send(file->handle, data, len, callback, args);
     io_args *arg = (io_args *) args;
     struct task task = {len, res, arg->signal_cap};
@@ -346,10 +363,16 @@ void syscall_sos_read(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         return;
     }
 
+<<<<<<< HEAD
     int res = perform_io(user_process, nbyte, vaddr, found, nfs_buffercache_read_rdcb, true);
+=======
+    sync_bin_sem_wait(nfs_sem);
+    int res = perform_io(user_process, nbyte, vaddr, found, nfs_async_read_cb, true);
+>>>>>>> 9eb26ba2359ee842b499d62a8b78c2d22b84ee92
     if (res > 0) {
         found->offset += res;
     }
+    sync_bin_sem_post(nfs_sem);
     seL4_SetMR(0, res);
 }
 
@@ -374,13 +397,19 @@ void syscall_sos_write(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         seL4_SetMR(0, -1);
         return;
     }
+<<<<<<< HEAD
     int res = perform_io(user_process, nbyte, vaddr, found, nfs_buffercache_read_wrcb, false);
+=======
+    sync_bin_sem_wait(nfs_sem);
+    int res = perform_io(user_process, nbyte, vaddr, found, nfs_async_write_cb, false);
+>>>>>>> 9eb26ba2359ee842b499d62a8b78c2d22b84ee92
     if (res > 0) {
         found->offset += res;
         if (found->offset > found->size) {
             found->size = found->offset;
         }
     }
+    sync_bin_sem_post(nfs_sem);
     seL4_SetMR(0, res);
 }
 
@@ -389,9 +418,13 @@ void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg, UNUSED seL4_Word badge)
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_USLEEP);
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 0);
 
-    register_timer(seL4_GetMR(1), wakeup, NULL);
+    user_process_t clock_driver = user_process_list[0];
 
-    seL4_Wait(sleep_signal, 0);
+    seL4_SetMR(0, timer_RegisterTimer);
+    uint64_t delay = seL4_GetMR(1);
+    seL4_SetMR(1, delay);
+    seL4_Send(ipc_ep, seL4_MessageInfo_new(0, 0, 0, 2));
+    seL4_Wait(clock_driver.timer, 0);
 }
 
 inline void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
@@ -400,7 +433,9 @@ inline void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
     /* construct a reply message of length 1 */
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Set the reply message to be the timestamp since booting in microseconds */
-    seL4_SetMR(0, timestamp_us(timestamp_get_freq()));
+    seL4_SetMR(0, timer_MicroTimestamp);
+    seL4_Call(ipc_ep, seL4_MessageInfo_new(0, 0, 0, 1));
+    seL4_SetMR(0, seL4_GetMR(0));
 }
 
 void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
@@ -541,7 +576,6 @@ void syscall_sys_mmap(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         if (mmap_region == NULL) {
             seL4_SetMR(0, -1);
         } else {
-            assert(mmap_region->base != 0);
             seL4_SetMR(0, mmap_region->base);
         }
     } else {
@@ -557,12 +591,16 @@ static inline void free_page(user_process_t user_process, seL4_Word vaddr) {
     uint16_t l4_i = (vaddr >> 12) & MASK(9); /* Next 9 bits */
     pt_entry *l4_table = user_process.addrspace->page_table[l1_i].l2[l2_i].l3[l3_i].l4;
 
-    sync_bin_sem_wait(data_sem);
-    free_frame(l4_table[l4_i].page.frame_ref);
-    sync_bin_sem_post(data_sem);
-    seL4_CPtr frame_cptr = l4_table[l4_i].page.frame_cptr;
-    seL4_ARM_Page_Unmap(frame_cptr);
-    free_untype(&frame_cptr, NULL);
+    if (l4_table[l4_i].valid) {
+        sync_bin_sem_wait(data_sem);
+        free_frame(l4_table[l4_i].page.frame_ref);
+        sync_bin_sem_post(data_sem);
+        seL4_CPtr frame_cptr = l4_table[l4_i].page.frame_cptr;
+        seL4_ARM_Page_Unmap(frame_cptr);
+        free_untype(&frame_cptr, NULL);
+    } else if (l4_table[l4_i].swapped) {
+        mark_block_free(l4_table[l4_i].swap_map_index);
+    }
     l4_table[l4_i] = (pt_entry){0};
 }
 
@@ -582,9 +620,20 @@ void syscall_sys_munmap(seL4_MessageInfo_t *reply_msg, seL4_Word badge) {
      * been called before, undefined behavior occurs. If ptr is NULL, no operation is performed. */
     mem_region_t tmp = { .base = addr };
     mem_region_t *reg = sglib_mem_region_t_find_member(user_process.addrspace->region_tree, &tmp);
-    if (reg != NULL) {
+    if (reg == NULL) {
         seL4_SetMR(0, -1);
         return;
+    }
+
+    /* Remove the frames belonging to the mmap region. */
+    for (size_t bytes_left = length; bytes_left > 0; bytes_left -= PAGE_SIZE_4K) {
+        if (!vaddr_check(user_process, addr)) {
+            seL4_SetMR(0, -1);
+            return;
+        }
+
+        free_page(user_process, addr);
+        addr += PAGE_SIZE_4K;
     }
 
     /* Remove the mmapped memory region. */
@@ -592,18 +641,6 @@ void syscall_sys_munmap(seL4_MessageInfo_t *reply_msg, seL4_Word badge) {
         remove_region(user_process.addrspace, reg->base);
     } else {
         reg->base += length;
-    }
-
-    /* Remove the page and its contents. */
-    size_t vaddr = addr;
-    for (size_t bytes_left = length; bytes_left > 0; bytes_left -= PAGE_SIZE_4K) {
-        if (!vaddr_check(user_process, vaddr)) {
-            seL4_SetMR(0, -1);
-            return;
-        }
-
-        free_page(user_process, vaddr);
-        vaddr += PAGE_SIZE_4K;
     }
 
     seL4_SetMR(0, 0);

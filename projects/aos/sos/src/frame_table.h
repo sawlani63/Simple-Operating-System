@@ -121,7 +121,11 @@ cspace_t *frame_table_cspace(void);
  */
 frame_ref_t alloc_frame(void);
 
+<<<<<<< HEAD
 frame_ref_t clock_alloc_frame(size_t vaddr, pid_t pid, size_t pinned, uintptr_t cache_key);
+=======
+frame_ref_t clock_alloc_frame(size_t vaddr, pid_t pid, size_t pinned);
+>>>>>>> 9eb26ba2359ee842b499d62a8b78c2d22b84ee92
 
 void pin_frame(frame_ref_t frame_ref);
 

@@ -75,8 +75,12 @@ add_executable(
     src/console.c
     src/clock_replacement.c
     src/process.c
+<<<<<<< HEAD
     src/buffercache.c
     src/dentry.c
+=======
+    src/boot_driver.c
+>>>>>>> 9eb26ba2359ee842b499d62a8b78c2d22b84ee92
 )
 target_include_directories(sos PRIVATE "include")
 target_link_libraries(
@@ -99,6 +103,34 @@ target_link_libraries(
     sos_Config
     sel4sync
 )
+
+add_executable(
+    clock_driver
+    src/drivers/clock/main.c
+)
+target_include_directories(clock_driver PRIVATE "include")
+target_link_libraries(
+    clock_driver
+    sel4_autoconf
+    sosapi
+    sel4runtime
+    muslc
+    sel4
+    elf
+    cpio
+    networkconsole
+    clock
+    sel4cspace
+    aos
+    utils
+    picotcp
+    picotcp_bsd
+    nfs
+    ethernet
+    sos_Config
+    sel4sync
+)
+add_app(clock_driver)
 
 if(SosGDBSupport)
     target_link_libraries(sos gdb libco)

@@ -11,6 +11,9 @@
 #include "vmem_layout.h"
 #include "mapping.h"
 
+#include "boot_driver.h"
+#include <cpio/cpio.h>
+
 /* The number of additional stack pages to provide to the initial
  * process */
 #define INITIAL_PROCESS_EXTRA_STACK_PAGES 4
@@ -32,6 +35,8 @@ int pid_queue_tail = NUM_PROC;
 
 sync_bin_sem_t *pid_queue_sem = NULL;
 sync_bin_sem_t *process_list_sem = NULL;
+
+extern seL4_CPtr ipc_ep;
 
 NORETURN void syscall_loop(void *arg);
 
@@ -170,6 +175,7 @@ void free_process(user_process_t user_process, bool suicidal)
     free_pid(user_process.pid);
 
     /* Free the remainder of the untyped memory and caps for the process, including the VSpace and other ntfn/ep objects. */
+    free_untype(&user_process.timer, user_process.timer_ut);
     free_untype(&user_process.wake, user_process.wake_ut);
     free_untype(&user_process.reply, user_process.reply_ut);
     free_untype(&user_process.ep, user_process.ep_ut);
@@ -316,7 +322,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
 /* Start the first process, and return the process ID if successful,
  * -1 otherwise.
  */
-int start_process(char *app_name, bool initial)
+int start_process(char *app_name, bool timer)
 {
     user_process_t user_process = (user_process_t) {0};
     user_process.pid = get_pid();
@@ -351,7 +357,7 @@ int start_process(char *app_name, bool initial)
 
     /* Create a VSpace */
     user_process.vspace_ut = alloc_retype(&user_process.vspace, seL4_ARM_PageGlobalDirectoryObject,
-                                              seL4_PGDBits);
+                                            seL4_PGDBits);
     if (user_process.vspace_ut == NULL) {
         ZF_LOGE("Failed to create vspace");
         free_process(user_process, false);
@@ -359,7 +365,7 @@ int start_process(char *app_name, bool initial)
     }
 
     /* assign the vspace to an asid pool */
-    seL4_Word err = seL4_ARM_ASIDPool_Assign(seL4_CapInitThreadASIDPool, user_process.vspace);
+    seL4_Error err = seL4_ARM_ASIDPool_Assign(seL4_CapInitThreadASIDPool, user_process.vspace);
     if (err != seL4_NoError) {
         ZF_LOGE("Failed to assign asid pool");
         free_process(user_process, false);
@@ -433,6 +439,53 @@ int start_process(char *app_name, bool initial)
         ZF_LOGE("Failed to mint user ep");
         free_process(user_process, false);
         return -1;
+    }
+
+    user_process.timer_slot = cspace_alloc_slot(&user_process.cspace);
+    if (user_process.timer_slot == seL4_CapNull) {
+        ZF_LOGE("Failed to alloc user ep slot");
+        free_process(user_process, false);
+        return -1;
+    }
+
+    err = cspace_mint(&user_process.cspace, user_process.timer_slot, &cspace, ipc_ep, seL4_AllRights, (seL4_Word) user_process.pid);
+    if (err) {
+        ZF_LOGE("Failed to mint user ep");
+        free_process(user_process, false);
+        return -1;
+    }
+
+    if (timer) {
+        seL4_CPtr reply;
+        ut_t *ut = alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
+        seL4_CPtr slot = cspace_alloc_slot(&user_process.cspace);
+        err = cspace_mint(&user_process.cspace, slot, &cspace, reply, seL4_AllRights, (seL4_Word) user_process.pid);
+        if (err) {
+            ZF_LOGE("Failed to mint user ep");
+            free_process(user_process, false);
+            return -1;
+        }
+        user_process.timer_ut = alloc_retype(&user_process.timer, seL4_NotificationObject, seL4_NotificationBits);
+        if (user_process.timer_ut == NULL) {
+            ZF_LOGE("Failed to create notification object");
+            free_process(user_process, false);
+            return -1;
+        }
+        seL4_CPtr slot2 = cspace_alloc_slot(&user_process.cspace);
+        err = cspace_mint(&user_process.cspace, slot2, &cspace, user_process.timer, seL4_AllRights, (seL4_Word) user_process.pid);
+        if (err) {
+            ZF_LOGE("Failed to mint user ep");
+            free_process(user_process, false);
+            return -1;
+        }
+    } else {
+        user_process.ntfn_slot = cspace_alloc_slot(&user_process.cspace);
+        err = cspace_mint(&user_process.cspace, user_process.ntfn_slot, &cspace, user_process_list[0].timer, seL4_AllRights, (seL4_Word) user_process.pid);
+        if (err) {
+            ZF_LOGE("Failed to mint user ep");
+            free_process(user_process, false);
+            return -1;
+        }
     }
 
     /* Create a new TCB object */
@@ -532,7 +585,7 @@ int start_process(char *app_name, bool initial)
     user_process.size++;
 
     /* load the elf image from nfs */
-    err = elf_load(&cspace, &elf_file, elf, &user_process);
+    err = elf_load(&cspace, &elf_file, elf, user_process.addrspace, user_process.vspace, &user_process.size, user_process.pid);
     if (err) {
         ZF_LOGE("Failed to load elf image");
         free_process(user_process, false);
@@ -550,14 +603,12 @@ int start_process(char *app_name, bool initial)
 
     init_threads(user_process.ep, user_process.ep, sched_ctrl_start, sched_ctrl_end);
 
-    if (!initial) {
-        /* Create our per-process system call handler thread */
-        user_process.handler_thread = thread_create(syscall_loop, (void *)(size_t)user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true, app_name);
-        if (user_process.handler_thread == NULL) {
-            ZF_LOGE("Could not create system call handler thread for %s\n", app_name);
-            free_process(user_process, false);
-            return -1;
-        }
+    /* Create our per-process system call handler thread */
+    user_process.handler_thread = thread_create(syscall_loop, (void *) user_process.pid, user_process.pid, true, seL4_MaxPrio, seL4_CapNull, true, app_name);
+    if (user_process.handler_thread == NULL) {
+        ZF_LOGE("Could not create system call handler thread for %s\n", app_name);
+        free_process(user_process, false);
+        return -1;
     }
 
     /* Initialise the per-process file descriptor table */
@@ -598,7 +649,14 @@ int start_process(char *app_name, bool initial)
     }
 
     free(elf_base);
-    user_process.stime = timestamp_ms(timestamp_get_freq());
+
+    /* Send a request to the clock driver to get the timestamp in milliseconds */
+    if (!timer) {
+        seL4_SetMR(0, timer_MilliTimestamp);
+        seL4_Call(ipc_ep, seL4_MessageInfo_new(0, 0, 0, 1));
+        user_process.stime = seL4_GetMR(0);
+    }
+
     user_process_list[user_process.pid] = user_process;
     return user_process.pid;
 }

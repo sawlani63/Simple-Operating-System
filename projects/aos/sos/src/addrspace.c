@@ -130,6 +130,7 @@ void remove_region(addrspace_t *addrspace, size_t base) {
     if (sglib_mem_region_t_delete_if_member(&(addrspace->region_tree), &tmp, &found)) {
         free(found);
     }
+    assert(!sglib_mem_region_t_find_member(addrspace->region_tree, &tmp));
 }
 
 /* Function to remove a memory region by its start address */

@@ -262,7 +262,6 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
     if (!(perms & REGION_EX)) {
         attr |= seL4_ARM_ExecuteNever;
     }
-
     sync_bin_sem_wait(cspace_sem);
     err = map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, NULL, NULL, l1_pt);
     sync_bin_sem_post(cspace_sem);
@@ -358,7 +357,7 @@ void sos_destroy_page_table(addrspace_t *as)
 
 static uintptr_t device_virt = SOS_DEVICE_START;
 
-void *sos_map_device(cspace_t *cspace, uintptr_t addr, size_t size)
+void *sos_map_device(cspace_t *cspace, uintptr_t addr, size_t size, seL4_CPtr frame_cap, bool timer)
 {
     assert(cspace != NULL);
     void *vstart = (void *) device_virt;
@@ -396,7 +395,28 @@ void *sos_map_device(cspace_t *cspace, uintptr_t addr, size_t size)
         }
 
         device_virt += PAGE_SIZE_4K;
+        if (timer) {
+            seL4_Error err = cspace_copy(cspace, frame_cap, cspace, frame, seL4_AllRights);
+            if (err) {
+                ZF_LOGE("Failed to copy timer frame cap");
+                return NULL;
+            }
+        }
     }
 
     return vstart;
+}
+
+void sos_map_timer(cspace_t *cspace, seL4_CPtr vspace, seL4_CPtr frame, void *timer_vaddr)
+{
+    assert(cspace != NULL);
+
+    /* map */
+    seL4_Error err = map_frame(cspace, frame, vspace, timer_vaddr, seL4_AllRights, false);
+    if (err != seL4_NoError) {
+        ZF_LOGE("Failed to map device frame at %p", (void *) timer_vaddr);
+        cspace_delete(cspace, frame);
+        cspace_free_slot(cspace, frame);
+        return;
+    }
 }
