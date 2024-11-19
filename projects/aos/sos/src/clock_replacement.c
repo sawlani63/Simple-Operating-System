@@ -117,7 +117,7 @@ static inline uint64_t get_page_file_offset() {
 frame_t *clock_choose_victim(frame_ref_t *clock_hand, frame_ref_t first) {
     assert(clock_hand != NULL && *clock_hand != NULL_FRAME && first != NULL_FRAME);
     frame_t *curr_frame = frame_from_ref(*clock_hand);
-    while (curr_frame->pinned || curr_frame->referenced || curr_frame->pinned) {
+    while (curr_frame->pinned || curr_frame->referenced || curr_frame->cache) {
         curr_frame->referenced = 0;
         *clock_hand = curr_frame->next ? curr_frame->next : first;
         curr_frame = frame_from_ref(*clock_hand);
