@@ -47,7 +47,7 @@
 /* total file size to benchmark for each iteration of the benchmark.
  * You can make this smaller for testing, but performance graphs need
  * to be for 4 MB */
-#define TOTAL_FILE_SIZE (1 * MB)
+#define TOTAL_FILE_SIZE (4 * MB)
 
 _Static_assert(BIT(MAX_BUF_SIZE) <= TOTAL_FILE_SIZE, "total file size must be a multiple of MAX_BUF_SIZE");
 _Static_assert(MIN_BUF_SIZE > 0, "min buf size bigger than 0");

@@ -117,7 +117,7 @@ static inline uint64_t get_page_file_offset() {
 frame_t *clock_choose_victim(frame_ref_t *clock_hand, frame_ref_t first) {
     assert(clock_hand != NULL && *clock_hand != NULL_FRAME && first != NULL_FRAME);
     frame_t *curr_frame = frame_from_ref(*clock_hand);
-    while (curr_frame->pinned || curr_frame->referenced) {
+    while (curr_frame->pinned || curr_frame->referenced || curr_frame->pinned) {
         curr_frame->referenced = 0;
         *clock_hand = curr_frame->next ? curr_frame->next : first;
         curr_frame = frame_from_ref(*clock_hand);
@@ -129,13 +129,6 @@ int clock_page_out(frame_t *victim) {
     /* Get the address space specific to the process this frame we are paging out belongs to. */
     addrspace_t *as = get_process(victim->user_frame.pid).addrspace;
     seL4_Word vaddr = victim->user_frame.vaddr;
-    
-    if (victim->cache) {
-        /* Assert that the vaddr is not mapped. Something definitely went wrong if it is. */
-        assert(!vaddr_is_mapped(as, vaddr));
-        cache_key_t *key = (cache_key_t *) victim->buffer_cache_key;
-        return buffercache_clean_frame(*key, ref_from_frame(victim));
-    }
 
     /* Assert that the vaddr we are paging out is actually mapped. Something definitely went wrong if it isn't. */
     assert(vaddr_is_mapped(as, vaddr));
