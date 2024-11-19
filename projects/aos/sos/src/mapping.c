@@ -272,7 +272,7 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, si
 }
 
 extern sync_bin_sem_t *data_sem;
-void sos_destroy_page_table(addrspace_t *as)
+void sos_destroy_page_table(addrspace_t *as, pid_t pid)
 {
     page_upper_directory *l1_pt = as->page_table;
     for (size_t i = 0; i < PAGE_TABLE_ENTRIES; i++) {
@@ -306,7 +306,13 @@ void sos_destroy_page_table(addrspace_t *as)
                     }
                     free_untype(&frame_cptr, NULL);
                     sync_bin_sem_wait(data_sem);
-                    free_frame(entry.page.frame_ref);
+                    if (frame_from_ref(entry.page.frame_ref)->shared) {
+                        frame_t *frame = frame_from_ref(entry.page.frame_ref);
+                        frame->pid &= ~(1 << pid);
+                        if (frame->pid == 0) {
+                            free_frame(entry.page.frame_ref);
+                        }
+                    }
                     sync_bin_sem_post(data_sem);
                     l4_pt[m] = (pt_entry){0};
                 }

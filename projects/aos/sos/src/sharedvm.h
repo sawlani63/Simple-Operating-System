@@ -29,3 +29,4 @@ static inline bool is_shared_region(mem_region_t *region) {
 }
 
 int make_shared_region(user_process_t process, void *vaddr, size_t len, bool is_writeable);
+addrspace_t *get_global_addrspace();

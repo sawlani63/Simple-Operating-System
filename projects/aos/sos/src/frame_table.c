@@ -13,6 +13,7 @@
 #include "mapping.h"
 #include "vmem_layout.h"
 #include "clock_replacement.h"
+#include "sharedvm.h"
 
 #include <assert.h>
 #include <string.h>
@@ -154,10 +155,13 @@ frame_ref_t clock_alloc_frame(size_t vaddr, pid_t pid, size_t pinned)
             ZF_LOGE("Could not allocate frame!");
             return NULL_FRAME;
         }
+        if (vaddr_in_spt(get_global_addrspace(), vaddr)) {
+            frame_from_ref(ref)->shared = 1;
+        }
     }
     frame_t *frame = frame_from_ref(ref);
     frame->vaddr = vaddr;
-    frame->pid = pid;
+    frame->pid |= (1 << pid);
     frame->pinned = pinned;
     frame->referenced = 1;
     sync_bin_sem_post(data_sem);

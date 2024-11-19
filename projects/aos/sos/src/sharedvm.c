@@ -65,23 +65,33 @@ int make_shared_region(user_process_t process, void *vaddr, size_t len, bool is_
             pte = vaddr_to_page_entry(curr_addr, global_addrspace->page_table);
             pte->valid = 1;
             pte->swapped = 0;
-            pte->perms = REGION_RD | REGION_WR;
+            pte->perms = REGION_RD;
+            if (is_writeable) {
+                pte->perms |= REGION_WR;
+            }
 
             frame_ref_t ref = clock_alloc_frame(curr_addr, 0, 0);
             if (ref == NULL_FRAME) {
                 ZF_LOGE("Failed to alloc frame");
                 return false;
             }
-
+            frame_from_ref(ref)->shared = 1;
+            /* Set the bit at position pid of the process to 1 to indicate the frame being used by that process */
+            frame_from_ref(ref)->pid |= (1 << process.pid);
             pte->page.frame_ref = ref;
             pte->page.frame_cptr = frame_page(ref);
         } else {
             pte = vaddr_to_page_entry(curr_addr, global_addrspace->page_table);
+            frame_ref_t ref = pte->page.frame_ref;
+            frame_from_ref(ref)->pid |= (1 << process.pid);
         }
 
         seL4_Error err = sos_map_frame(&cspace, process.vspace, curr_addr,
-                                    REGION_RD | REGION_WR, pte->page.frame_ref,
-                                    process.addrspace, true);
+                                        pte->perms, pte->page.frame_ref,
+                                        process.addrspace, true);
+        if (err) {
+            return err;
+        }
     }
 
     printf("Done\n");
@@ -94,31 +104,77 @@ extern user_process_t *user_process_list;
 seL4_Error map_shared_region(uintptr_t fault_addr, user_process_t process, mem_region_t *shared_region) {
     /* If the vaddr is not mapped, map it into the global addrspace with SOS's VSpace. */
     pt_entry *pte;
-        if (!vaddr_is_mapped(global_addrspace, fault_addr)) {
-            pte = vaddr_to_page_entry(fault_addr, global_addrspace->page_table);
-            pte->valid = 1;
-            pte->swapped = 0;
-            pte->perms = REGION_RD | REGION_WR;
+    if (!vaddr_is_mapped(global_addrspace, fault_addr)) {
+        pte = vaddr_to_page_entry(fault_addr, global_addrspace->page_table);
+        pte->valid = 1;
+        pte->swapped = 0;
+        pte->perms = REGION_RD | REGION_WR;
 
-            frame_ref_t ref = clock_alloc_frame(fault_addr, 0, 0);
-            if (ref == NULL_FRAME) {
-                ZF_LOGE("Failed to alloc frame");
-                return false;
-            }
-
-            pte->page.frame_ref = ref;
-            pte->page.frame_cptr = frame_page(ref);
-        } else {
-            pte = vaddr_to_page_entry(fault_addr, global_addrspace->page_table);
+        frame_ref_t ref = clock_alloc_frame(fault_addr, 0, 0);
+        if (ref == NULL_FRAME) {
+            ZF_LOGE("Failed to alloc frame");
+            return false;
         }
 
-        seL4_Error err = sos_map_frame(&cspace, process.vspace, fault_addr,
-                                    REGION_RD | REGION_WR, pte->page.frame_ref,
-                                    process.addrspace, true);
+        pte->page.frame_ref = ref;
+        pte->page.frame_cptr = frame_page(ref);
+    } else {
+        pte = vaddr_to_page_entry(fault_addr, global_addrspace->page_table);
+    }
+
+    seL4_Error err = sos_map_frame(&cspace, process.vspace, fault_addr,
+                                REGION_RD | REGION_WR, pte->page.frame_ref,
+                                process.addrspace, true);
 }
 
 mem_region_t *insert_shared_region(addrspace_t *addrspace, size_t base, size_t size, uint64_t perms) {
     /* The convention we choose to follow, is the left-most bit of
      * the perms indicates whether the region is shared or not. */
     return insert_region(addrspace, base, size, perms | BIT(63));
+}
+
+int page_out_shared(frame_t *victim)
+{
+    seL4_Word vaddr = victim->vaddr;
+    for (int i = 0; i < NUM_PROC; i++) {
+        if (!(victim->pid & (1 << i))) {
+            continue;
+        }
+        addrspace_t *as = get_process(i).addrspace;
+        assert(vaddr_is_mapped(as, vaddr));
+        pt_entry entry = GET_PAGE(as->page_table, vaddr);
+        seL4_CPtr frame_cptr = entry.page.frame_cptr;
+        if (seL4_ARM_Page_Unmap(frame_cptr) != seL4_NoError) {
+            return -1;
+        }
+        free_untype(&frame_cptr, NULL);
+        GET_PAGE(as->page_table, vaddr) = (pt_entry){.valid = 0, .swapped = 1, .perms = GET_PAGE(as->page_table, vaddr).perms,
+                                                 .swap_map_index = 0};
+    }
+    return 0;
+}
+
+int page_in_shared(frame_ref_t ref, seL4_Word vaddr) {
+    pt_entry *pte = vaddr_to_page_entry(vaddr, global_addrspace->page_table);
+    pte->valid = 1;
+    pte->swapped = 0;
+    pte->page.frame_ref = ref;
+    pte->page.frame_cptr = frame_page(ref);
+    for (int i = 0; i < NUM_PROC; i++) {
+        mem_region_t tmp = {.base = vaddr + 1};
+        mem_region_t *reg = sglib_mem_region_t_find_closest_member(get_process(i).addrspace->region_tree, &tmp);
+        if (reg != NULL && vaddr < reg->base + reg->size && vaddr >= reg->base) {
+            if (is_shared_region(reg)) {
+                seL4_Error err = sos_map_frame(&cspace, get_process(i).vspace, vaddr, pte->perms, ref, get_process(i).addrspace, true);
+                if (err) {
+                    return -1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+addrspace_t *get_global_addrspace() {
+    return global_addrspace;
 }
