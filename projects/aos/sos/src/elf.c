@@ -77,7 +77,7 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
         uintptr_t loadee_vaddr = (ROUND_DOWN(dst, PAGE_SIZE_4K));
 
         /* allocate the frame for the loadees address space */
-        frame_ref_t frame = clock_alloc_frame(loadee_vaddr, user_process->pid, 1, 0);
+        frame_ref_t frame = clock_alloc_frame(loadee_vaddr, pid, 1, 0);
         if (frame == NULL_FRAME) {
             ZF_LOGD("Failed to alloc frame");
             return -1;
@@ -159,7 +159,7 @@ int elf_load(cspace_t *cspace, elf_t *elf_file, open_file *file, addrspace_t *as
 
         char *src = malloc(sizeof(char) * file_size);
         io_args args = {.signal_cap = nfs_signal, .buff = src};
-        int err = nfs_pread_file(0, file, NULL, offset, file_size, nfs_pagefile_read_cb, &args);
+        int err = nfs_pread_file(pid, file, NULL, offset, file_size, nfs_pagefile_read_cb, &args);
         if (err < (int) file_size) {
             free(src);
             ZF_LOGE("NFS: Error in reading ELF segment");

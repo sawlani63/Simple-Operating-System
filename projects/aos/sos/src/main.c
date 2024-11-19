@@ -61,7 +61,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "sosh"
+#define APP_NAME             "console_test"
 
 extern char __eh_frame_start[];
 /* provided by gcc */

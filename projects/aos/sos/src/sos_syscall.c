@@ -9,14 +9,11 @@
 #include "network.h"
 #include "console.h"
 #include "thread_pool.h"
-<<<<<<< HEAD
 #include "buffercache.h"
 #include "dentry.h"
-=======
 #include "clock_replacement.h"
 
 #include "boot_driver.h"
->>>>>>> 9eb26ba2359ee842b499d62a8b78c2d22b84ee92
 
 #define MAX_BATCH_SIZE 3
 
@@ -83,16 +80,7 @@ static inline pt_entry *get_page(addrspace_t *as, seL4_Word vaddr) {
     return &as->page_table[l1_i].l2[l2_i].l3[l3_i].l4[l4_i];
 }
 
-<<<<<<< HEAD
-static inline void wakeup(UNUSED uint32_t id, UNUSED void* data)
-{
-    seL4_Signal(sleep_signal);
-}
-
 int netcon_send(UNUSED pid_t pid, open_file *file, char *data, UNUSED uint64_t offset, uint64_t len, void *callback, void *args) {
-=======
-int netcon_send(open_file *file, char *data, UNUSED uint64_t offset, uint64_t len, void *callback, void *args) {
->>>>>>> 9eb26ba2359ee842b499d62a8b78c2d22b84ee92
     int res = network_console_send(file->handle, data, len, callback, args);
     io_args *arg = (io_args *) args;
     struct task task = {len, res, arg->signal_cap};
@@ -363,12 +351,7 @@ void syscall_sos_read(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         return;
     }
 
-<<<<<<< HEAD
     int res = perform_io(user_process, nbyte, vaddr, found, nfs_buffercache_read_rdcb, true);
-=======
-    sync_bin_sem_wait(nfs_sem);
-    int res = perform_io(user_process, nbyte, vaddr, found, nfs_async_read_cb, true);
->>>>>>> 9eb26ba2359ee842b499d62a8b78c2d22b84ee92
     if (res > 0) {
         found->offset += res;
     }
@@ -397,12 +380,7 @@ void syscall_sos_write(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         seL4_SetMR(0, -1);
         return;
     }
-<<<<<<< HEAD
     int res = perform_io(user_process, nbyte, vaddr, found, nfs_buffercache_read_wrcb, false);
-=======
-    sync_bin_sem_wait(nfs_sem);
-    int res = perform_io(user_process, nbyte, vaddr, found, nfs_async_write_cb, false);
->>>>>>> 9eb26ba2359ee842b499d62a8b78c2d22b84ee92
     if (res > 0) {
         found->offset += res;
         if (found->offset > found->size) {

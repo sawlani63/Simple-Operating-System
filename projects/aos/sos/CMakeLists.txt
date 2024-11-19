@@ -75,12 +75,9 @@ add_executable(
     src/console.c
     src/clock_replacement.c
     src/process.c
-<<<<<<< HEAD
     src/buffercache.c
     src/dentry.c
-=======
     src/boot_driver.c
->>>>>>> 9eb26ba2359ee842b499d62a8b78c2d22b84ee92
 )
 target_include_directories(sos PRIVATE "include")
 target_link_libraries(
