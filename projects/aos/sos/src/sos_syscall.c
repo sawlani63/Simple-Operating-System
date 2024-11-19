@@ -9,6 +9,8 @@
 #include "network.h"
 #include "console.h"
 #include "thread_pool.h"
+#include "buffercache.h"
+#include "dentry.h"
 #include "clock_replacement.h"
 
 #include "boot_driver.h"
@@ -19,6 +21,7 @@ extern user_process_t *user_process_list;
 extern sync_bin_sem_t *process_list_sem;
 sync_bin_sem_t *nfs_sem = NULL;
 bool console_open_for_read = false;
+bool buffercache_enable = true;
 
 sync_bin_sem_t *data_sem = NULL;
 sync_bin_sem_t *file_sem = NULL;
@@ -77,7 +80,7 @@ static inline pt_entry *get_page(addrspace_t *as, seL4_Word vaddr) {
     return &as->page_table[l1_i].l2[l2_i].l3[l3_i].l4[l4_i];
 }
 
-int netcon_send(open_file *file, char *data, UNUSED uint64_t offset, uint64_t len, void *callback, void *args) {
+int netcon_send(UNUSED pid_t pid, open_file *file, char *data, UNUSED uint64_t offset, uint64_t len, void *callback, void *args) {
     int res = network_console_send(file->handle, data, len, callback, args);
     io_args *arg = (io_args *) args;
     struct task task = {len, res, arg->signal_cap};
@@ -86,30 +89,44 @@ int netcon_send(open_file *file, char *data, UNUSED uint64_t offset, uint64_t le
 }
 
 static inline int perform_io_core(user_process_t user_process, uint16_t data_offset, uint64_t file_offset, uintptr_t vaddr,
-                                  open_file *file, void *callback, bool read, uint16_t len) {
+                                  open_file *file, void *callback, bool read, uint16_t len, bool *cached) {
     pt_entry *entry = get_page(user_process.addrspace, vaddr);
     sync_bin_sem_wait(data_sem);
     pin_frame(entry->page.frame_ref);
     char *data = (char *)frame_data(entry->page.frame_ref);
     sync_bin_sem_post(data_sem);
     io_args *args = malloc(sizeof(io_args));
-    *args = (io_args){.err = len, .buff = data + data_offset, .signal_cap = signal_cap, .entry = entry};
+    *args = (io_args){.err = len, .buff = data + data_offset, .signal_cap = signal_cap,
+                      .entry = entry, .cache_frame = NULL_FRAME, .cached = false};
     int res;
     if (read) {
-        res = file->file_read(file, data + data_offset, file_offset, len, callback, args);
+        res = file->file_read(user_process.pid, file, data + data_offset, file_offset, len, callback, args);
     } else {
-        res = file->file_write(file, data + data_offset, file_offset, len, callback, args);
+        res = file->file_write(user_process.pid, file, data + data_offset, file_offset, len, callback, args);
     }
 
-    return res < 0 ? -1 : res;
+    *cached = args->cached;
+    if (*cached) {
+        unpin_frame(entry->page.frame_ref);
+        free(args);
+    }
+    return res;
 }
 
-static inline int cleanup_pending_requests(int outstanding_requests) {
+static inline int cleanup_pending_requests(int outstanding_requests, size_t bytes_received) {
+    bool failed = false;
     while (outstanding_requests > 0) {
         seL4_Recv(signal_cap, 0, reply);
+        int result = seL4_GetMR(1);
+
         outstanding_requests--;
+        bytes_received += result;
+
+        if (result < 0) {
+            failed = true;
+        }
     }
-    return -1;
+    return failed ? -1 : (int)bytes_received;
 }
 
 static int perform_io(user_process_t user_process, size_t nbyte, uintptr_t vaddr, open_file *file, void *callback, bool read) {
@@ -117,6 +134,7 @@ static int perform_io(user_process_t user_process, size_t nbyte, uintptr_t vaddr
     size_t bytes_left = nbyte;
     uint16_t outstanding_requests = 0;
     uint16_t offset = vaddr & (PAGE_SIZE_4K - 1);
+    bool cached;
 
     do {
         /* Start the new batch of I/O requests. */
@@ -128,19 +146,29 @@ static int perform_io(user_process_t user_process, size_t nbyte, uintptr_t vaddr
                 }
                 handle_vm_fault(vaddr, user_process.pid);
             }
-            int res = perform_io_core(user_process, offset, file->offset + (nbyte - bytes_left), vaddr, file, callback, read, len);
+            int res = perform_io_core(user_process, offset, file->offset + (nbyte - bytes_left), vaddr, file, callback, read, len, &cached);
             
-            if (res < 0) {
-                return cleanup_pending_requests(outstanding_requests);
+            if (res == -1) {
+                /* Error occurred */
+                cleanup_pending_requests(outstanding_requests, bytes_received);
+                return -1;
+            } else if (res == -2) {
+                /* Early exit. */
+                return cleanup_pending_requests(outstanding_requests, bytes_received);
             }
             
-            outstanding_requests++;
             bytes_left -= res;
             vaddr += res;
             offset = 0;
             
-            /* If we got partial or non-existent data then exit early (we probably hit the EOF). */
-            if (res != len) {
+            if (cached) {
+                bytes_received += res;
+            } else {
+                outstanding_requests++;
+            }
+
+            if (res < len) {
+                /* If we got partial or non-existent data then exit early (we probably hit the EOF). */
                 break;
             }
         }
@@ -152,15 +180,15 @@ static int perform_io(user_process_t user_process, size_t nbyte, uintptr_t vaddr
             int result = seL4_GetMR(1);
             
             if (result < 0) {
-                return cleanup_pending_requests(outstanding_requests);
+                cleanup_pending_requests(outstanding_requests, bytes_received);
+                return -1;
             }
             
             bytes_received += result;
             outstanding_requests--;
             
             if (target != result) {
-                cleanup_pending_requests(outstanding_requests);
-                return bytes_received;
+                return cleanup_pending_requests(outstanding_requests, bytes_received);
             }
         }
     } while (bytes_left > 0);
@@ -223,14 +251,33 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 
     open_file *file;
     if (strcmp(file_path, "console")) {
-        file = file_create(file_path, mode, nfs_pwrite_file, nfs_pread_file);
-        io_args args = {.signal_cap = nfs_signal};
-        if (nfs_open_file(file, nfs_async_open_cb, &args) < 0) {
-            file_destroy(file);
-            seL4_SetMR(0, -1);
-            return;
+        execute_io nfs_write = buffercache_enable ? buffercache_write : nfs_pwrite_file;
+        execute_io nfs_read = buffercache_enable ? buffercache_read : nfs_pread_file;
+        file = dentry_check(file_path, mode, nfs_write, nfs_read);
+        if (file->handle == NULL) {
+            io_args args = {.signal_cap = nfs_signal};
+            if (nfs_open_file(file, nfs_async_open_cb, &args) < 0) {
+                file_destroy(file);
+                seL4_SetMR(0, -1);
+                return;
+            }
+            file->handle = args.buff;
+
+            sos_stat_t stat;
+            args = (io_args){0, &stat, nfs_signal, NULL, NULL_FRAME, 0};
+            if (nfs_stat_file(file_path, nfs_async_stat_cb, &args)) {
+                seL4_SetMR(0, -1);
+                return;
+            }
+            if (args.err < 0) {
+                seL4_SetMR(0, -1);
+                return;
+            }
+            file->size = stat.st_size;
+
+            int res = dentry_write(file);
+            ZF_LOGE_IF(res == -1, "Failed to add to dentry cache");
         }
-        file->handle = args.buff;
     } else {
         sync_bin_sem_wait(file_sem);
         /* Check if stdin is already open by another process */
@@ -271,11 +318,8 @@ void syscall_sos_close(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         seL4_SetMR(0, -1);
         return;
     } else if (strcmp(found->path, "console")) {
-        io_args args = {.signal_cap = nfs_signal};
-        if (nfs_close_file(found, nfs_async_close_cb, &args) < 0) {
-            seL4_SetMR(0, -1);
-            return;
-        }
+        dentry_mark_closed(found);
+        buffercache_flush(found);
     } else if (found->mode != O_WRONLY) {
         sync_bin_sem_wait(file_sem);
         console_open_for_read = false;
@@ -307,8 +351,7 @@ void syscall_sos_read(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         return;
     }
 
-    sync_bin_sem_wait(nfs_sem);
-    int res = perform_io(user_process, nbyte, vaddr, found, nfs_async_read_cb, true);
+    int res = perform_io(user_process, nbyte, vaddr, found, nfs_buffercache_read_rdcb, true);
     if (res > 0) {
         found->offset += res;
     }
@@ -337,10 +380,12 @@ void syscall_sos_write(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         seL4_SetMR(0, -1);
         return;
     }
-    sync_bin_sem_wait(nfs_sem);
-    int res = perform_io(user_process, nbyte, vaddr, found, nfs_async_write_cb, false);
+    int res = perform_io(user_process, nbyte, vaddr, found, nfs_buffercache_read_wrcb, false);
     if (res > 0) {
         found->offset += res;
+        if (found->offset > found->size) {
+            found->size = found->offset;
+        }
     }
     sync_bin_sem_post(nfs_sem);
     seL4_SetMR(0, res);
@@ -394,7 +439,7 @@ void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 
     sos_stat_t stat = {ST_SPECIAL, 0, 0, 0, 0};
     if (strcmp(file_path, "console")) {
-        io_args args = {0, &stat, nfs_signal, NULL};
+        io_args args = {0, &stat, nfs_signal, NULL, NULL_FRAME, 0};
         if (nfs_stat_file(file_path, nfs_async_stat_cb, &args)) {
             seL4_SetMR(0, -1);
             return;

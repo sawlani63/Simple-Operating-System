@@ -134,7 +134,7 @@ frame_ref_t alloc_frame(void)
     return ref_from_frame(frame);
 }
 
-frame_ref_t clock_alloc_frame(size_t vaddr, pid_t pid, size_t pinned)
+frame_ref_t clock_alloc_frame(size_t vaddr, pid_t pid, size_t pinned, uintptr_t cache_key)
 {
     sync_bin_sem_wait(data_sem);
     frame_ref_t ref = alloc_frame();
@@ -156,8 +156,15 @@ frame_ref_t clock_alloc_frame(size_t vaddr, pid_t pid, size_t pinned)
         }
     }
     frame_t *frame = frame_from_ref(ref);
-    frame->vaddr = vaddr;
-    frame->pid = pid;
+    if (cache_key) {
+        frame->cache = 1;
+        frame->buffer_cache_key = cache_key;
+    } else {
+        frame->cache = 0;
+        frame->user_frame.vaddr = vaddr;
+        frame->user_frame.pid = pid;
+    }
+    
     frame->pinned = pinned;
     frame->referenced = 1;
     sync_bin_sem_post(data_sem);
