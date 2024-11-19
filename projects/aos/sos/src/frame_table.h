@@ -63,16 +63,23 @@ PACKED struct frame {
     frame_ref_t next : 19;
     /* Indicates which list the frame is in. */
     list_id_t list_id : 2;
-    /* Virtual address this frame is referring to. */
-    size_t vaddr : 48;
-    /* Pid of the process holding this frame. */
-    size_t pid : 16;
-    /* Indicates whether the frame is pinned or not. */
+    union {
+        struct {
+            /* Virtual address this frame is referring to. */
+            size_t vaddr : 48;
+            /* Pid of the process holding this frame. */
+            size_t pid : 16;
+        } user_frame;
+        uintptr_t buffer_cache_key : 64;
+    };
+    /* Pinned bit to indicate whether this frame is pinned in memory or not. */
     size_t pinned : 1;
-    /* Reference bit to indicate whether this page was recently referenced. */
+    /* Reference bit to indicate whether this frame was recently referenced. */
     size_t referenced : 1;
-    /* Unused bits */
-    size_t unused : 2;
+    /* Cache bit to indicate whether this frame is part of SOS's buffer cache. */
+    size_t cache : 1;
+    /* Unused bit */
+    size_t unused : 1;
 };
 compile_time_assert("Small CPtr size", 20 >= INITIAL_TASK_CSPACE_BITS);
 
@@ -114,7 +121,7 @@ cspace_t *frame_table_cspace(void);
  */
 frame_ref_t alloc_frame(void);
 
-frame_ref_t clock_alloc_frame(size_t vaddr, pid_t pid, size_t pinned);
+frame_ref_t clock_alloc_frame(size_t vaddr, pid_t pid, size_t pinned, uintptr_t cache_key);
 
 void pin_frame(frame_ref_t frame_ref);
 

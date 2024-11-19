@@ -213,7 +213,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
     uintptr_t local_stack_bottom = SOS_SCRATCH - PAGE_SIZE_4K;
 
     /* Create a stack frame */
-    user_process->stack_frame = clock_alloc_frame(stack_bottom, user_process->pid, 0);
+    user_process->stack_frame = clock_alloc_frame(stack_bottom, user_process->pid, 0, 0);
     if (user_process->stack_frame == NULL_FRAME) {
         ZF_LOGD("Failed to alloc frame");
         return -1;
@@ -301,7 +301,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
     /* Exend the stack with extra pages */
     for (int page = 0; page < INITIAL_PROCESS_EXTRA_STACK_PAGES; page++) {
         stack_bottom -= PAGE_SIZE_4K;
-        frame_ref_t frame = clock_alloc_frame(stack_bottom, user_process->pid, 0);
+        frame_ref_t frame = clock_alloc_frame(stack_bottom, user_process->pid, 0, 0);
         if (frame == NULL_FRAME) {
             ZF_LOGE("Couldn't allocate additional stack frame");
             return -1;
@@ -415,7 +415,7 @@ int start_process(char *app_name, bool timer)
     }
 
     /* Create an IPC buffer */
-    user_process.ipc_buffer_frame = clock_alloc_frame(PROCESS_IPC_BUFFER, user_process.pid, 1);
+    user_process.ipc_buffer_frame = clock_alloc_frame(PROCESS_IPC_BUFFER, user_process.pid, 1, 0);
     if (user_process.ipc_buffer_frame == NULL_FRAME) {
         ZF_LOGE("Failed to alloc ipc buffer ut");
         free_process(user_process, false);

@@ -39,6 +39,8 @@
 #include "drivers/uart.h"
 #include "mapping.h"
 #include "clock_replacement.h"
+#include "buffercache.h"
+#include "dentry.h"
 
 #include "boot_driver.h"
 
@@ -59,7 +61,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "sosh"
+#define APP_NAME             "console_test"
 
 extern char __eh_frame_start[];
 /* provided by gcc */
@@ -114,7 +116,7 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
         as->stack_reg->size = PROCESS_STACK_TOP - ALIGN_DOWN(fault_addr, PAGE_SIZE_4K);
         reg = as->stack_reg;
     } else {
-        mem_region_t tmp = { .base = fault_addr };
+        mem_region_t tmp = { .base = fault_addr + 1 };
         reg = sglib_mem_region_t_find_closest_member(as->region_tree, &tmp);
         if (reg != NULL && fault_addr < reg->base + reg->size && fault_addr >= reg->base) {
             // Check permissions for write faults
@@ -131,7 +133,7 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
     }
 
     /* Allocate a new frame to be mapped by the shadow page table. */
-    frame_ref_t frame_ref = clock_alloc_frame(fault_addr, user_process.pid, 0);
+    frame_ref_t frame_ref = clock_alloc_frame(fault_addr, user_process.pid, 0, 0);
     if (frame_ref == NULL_FRAME) {
         ZF_LOGD("Failed to alloc frame");
         free_process(user_process, true);
@@ -222,7 +224,7 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
 
 NORETURN void syscall_loop(void *arg)
 {
-    pid_t pid = (pid_t) arg;
+    pid_t pid = (pid_t)(size_t)arg;
     sync_bin_sem_wait(process_list_sem);
     user_process_t process = user_process_list[pid];
     sync_bin_sem_post(process_list_sem);
@@ -401,13 +403,17 @@ NORETURN void *main_continued(UNUSED void *arg)
     network_console_register_handler(console, enqueue);
     init_console_sem();
 
+    /* Initialise our swap map and queue for demand paging */
+    buffercache_init();
+    dentry_init();
+
 #ifdef CONFIG_SOS_GDB_ENABLED
     /* Initialize the debugger */
     seL4_Error err = debugger_init(&cspace, seL4_CapIRQControl, gdb_recv_ep);
     ZF_LOGF_IF(err, "Failed to initialize debugger %d", err);
 #endif /* CONFIG_SOS_GDB_ENABLED */
 
-    /* Initialise a temporary irq handling thread that binds the notification object to its TCB and handles irqs until the main thread is done with its tasks */
+    /* Initialise an irq handling thread. */
     printf("\nSOS entering irq loop\n");
     if (!thread_create(irq_loop, (void *)ntfn, 0, true, seL4_MaxPrio, 0, false, "irq")) {
         ZF_LOGE("Could not create irq handler thread\n");
@@ -478,7 +484,7 @@ int main(void)
 
     ut_t *ut = ut_alloc(seL4_NotificationBits, &cspace);
     if (ut == NULL) {
-        ZF_LOGE("No memory for object of size %zu", seL4_NotificationBits);
+        ZF_LOGE("No memory for object of size %u", seL4_NotificationBits);
         return -1;
     }
     seL4_CPtr cspace_sem_cptr = cspace_alloc_slot(&cspace);

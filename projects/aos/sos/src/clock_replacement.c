@@ -2,6 +2,7 @@
 #include "network.h"
 #include "mapping.h"
 #include "nfs.h"
+#include "buffercache.h"
 
 #include <sync/condition_var.h>
 
@@ -116,11 +117,11 @@ static inline uint64_t get_page_file_offset() {
 frame_t *clock_choose_victim(frame_ref_t *clock_hand, frame_ref_t first) {
     assert(clock_hand != NULL && *clock_hand != NULL_FRAME && first != NULL_FRAME);
     frame_t *curr_frame = frame_from_ref(*clock_hand);
-    while (curr_frame->pinned || curr_frame->referenced) {
+    while (curr_frame->pinned || curr_frame->referenced || curr_frame->cache) {
         curr_frame->referenced = 0;
-        if (!curr_frame->pinned) {
-            addrspace_t *as = get_process(curr_frame->pid).addrspace;
-            seL4_ARM_Page_Unmap(GET_PAGE(as->page_table, curr_frame->vaddr).page.frame_cptr);
+        if (!curr_frame->pinned && !curr_frame->cache) {
+            addrspace_t *as = get_process(curr_frame->user_frame.pid).addrspace;
+            seL4_ARM_Page_Unmap(GET_PAGE(as->page_table, curr_frame->user_frame.vaddr).page.frame_cptr);
         }
         *clock_hand = curr_frame->next ? curr_frame->next : first;
         curr_frame = frame_from_ref(*clock_hand);
@@ -130,8 +131,8 @@ frame_t *clock_choose_victim(frame_ref_t *clock_hand, frame_ref_t first) {
 
 int clock_page_out(frame_t *victim) {
     /* Get the address space specific to the process this frame we are paging out belongs to. */
-    addrspace_t *as = get_process(victim->pid).addrspace;
-    seL4_Word vaddr = victim->vaddr;
+    addrspace_t *as = get_process(victim->user_frame.pid).addrspace;
+    seL4_Word vaddr = victim->user_frame.vaddr;
 
     /* Assert that the vaddr we are paging out is actually mapped. Something definitely went wrong if it isn't. */
     assert(vaddr_is_mapped(as, vaddr));
@@ -140,11 +141,11 @@ int clock_page_out(frame_t *victim) {
     pt_entry entry = GET_PAGE(as->page_table, vaddr);
     uint64_t file_offset = get_page_file_offset();
     char *data = (char *)frame_data(entry.page.frame_ref);
-    io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, NULL};
+    io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, NULL, NULL_FRAME, 0};
 
     /* Perform the actual write to the NFS page file. Wait for it to finish and make sure it succeeds. */
     sync_bin_sem_wait(pagefile_sem);
-    int res = nfs_pwrite_file(nfs_pagefile, data, file_offset, PAGE_SIZE_4K, nfs_pagefile_write_cb, &args);
+    int res = nfs_pwrite_file(0, nfs_pagefile, data, file_offset, PAGE_SIZE_4K, nfs_pagefile_write_cb, &args);
     if (res < 0) {
         sync_bin_sem_post(pagefile_sem);
         return -1;
@@ -193,7 +194,7 @@ int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
         assert(!vaddr_is_mapped(as, vaddr));
 
         /* Allocate a new frame to be mapped by the shadow page table. Start the frame off as pinned. */
-        ref = clock_alloc_frame(vaddr, user_process->pid, 1);
+        ref = clock_alloc_frame(vaddr, user_process->pid, 1, 0);
         if (ref == NULL_FRAME) {
             ZF_LOGD("Failed to alloc frame");
             return -1;
@@ -203,9 +204,9 @@ int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
         uint64_t file_offset = entry.swap_map_index * PAGE_SIZE_4K;
         sync_bin_sem_wait(data_sem);
         char *data = (char *)frame_data(ref);
-        io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, NULL};
+        io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, NULL, NULL_FRAME, 0};
         sync_bin_sem_wait(pagefile_sem);
-        int res = nfs_pread_file(nfs_pagefile, NULL, file_offset, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
+        int res = nfs_pread_file(user_process->pid, nfs_pagefile, NULL, file_offset, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
         if (res < (int)PAGE_SIZE_4K) {
             sync_bin_sem_post(pagefile_sem);
             sync_bin_sem_post(data_sem);

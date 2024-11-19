@@ -18,8 +18,9 @@ typedef struct {
    callback to finish and copy any required data to our i/o struct of arguments (private_data). */
 void nfs_async_open_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data);
 void nfs_async_close_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data);
-void nfs_async_read_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data);
-void nfs_async_write_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data);
+void nfs_buffercache_read_rdcb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data);
+void nfs_buffercache_read_wrcb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data);
+void nfs_buffercache_flush_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data);
 void nfs_async_stat_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data);
 void nfs_async_opendir_cb(int err, UNUSED struct nfs_context *nfs, void *data, void *private_data);
 
