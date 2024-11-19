@@ -119,7 +119,7 @@ int test_buffers(int console_fd) {
         sos_usleep(1000000);
         uint64_t next_seconds = sos_time_stamp();
         assert(next_seconds > prev_seconds);
-        printf("Tick\n");
+        printf("Tick %d %d\n", prev_seconds, next_seconds);
     }
 }
 
@@ -214,7 +214,7 @@ int main(void)
     // assert(fail == -1);
     // int res = sos_close(fd);
     // assert(!res);
-    // fd = sos_open("console", O_RDWR);
+    int fd = sos_open("console", O_RDWR);
     // assert(fd == 0);
     // printf("Passed open/close test\n");
 
@@ -225,7 +225,7 @@ int main(void)
     // mmap_test();
     // //test_stack_write(fd);
 
-    // test_buffers(fd);
+    //test_buffers(fd);
     // printf("Passed read/write buffer test\n");
 
     /*for (int i = 0; i < 50; i++) {
@@ -266,6 +266,11 @@ int main(void)
     int pid = sos_process_create("console_test_2");
     sos_process_wait(pid);
     
+    //strncpy(shared_buffer, "CHirag", SHARED_PAGE_SIZE - 1); // if console test 2 declared region as non writeable, this should fault for writing to rdonly page
+    assert(sos_share_vm(shared_buffer, SHARED_PAGE_SIZE, 1) == -1); // test shared region overlap
+    assert(sos_share_vm(0xffff0000, SHARED_PAGE_SIZE, 1) == -1); // test process region overlap with ipc buffer region
+    assert(sos_share_vm(0x1001, SHARED_PAGE_SIZE, 1) == -1); // test non-page aligned base
+    assert(sos_share_vm(shared_buffer, 0x1001, 1) == -1); // test non-page aligned size
     assert(!strcmp(shared_buffer, "Goodbye World!"));
     printf("Passed shared memory test!\n");
 }

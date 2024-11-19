@@ -55,70 +55,89 @@ pt_entry *vaddr_to_page_entry(uintptr_t fault_addr, page_upper_directory *l1_pt)
     return &l4_pt[l4_index];
 }
 
-int make_shared_region(user_process_t process, void *vaddr, size_t len, bool is_writeable) {
-    printf("Got to shared vm, vaddr 0x%lx and len %ld\n", vaddr, len);
+extern user_process_t *user_process_list;
 
-    /* Go by page */
+int add_shared_region(user_process_t process, void *vaddr, size_t len, uint64_t perms) {
     for (seL4_Word curr_addr = vaddr; curr_addr < vaddr + len; curr_addr += 4096) {
         pt_entry *pte;
         if (!vaddr_is_mapped(global_addrspace, curr_addr)) {
             pte = vaddr_to_page_entry(curr_addr, global_addrspace->page_table);
             pte->valid = 1;
             pte->swapped = 0;
-            pte->perms = REGION_RD | REGION_WR;
+            pte->perms = perms;
 
-            frame_ref_t ref = clock_alloc_frame(curr_addr, 0, 0);
+            /* Pin any frames allocated as shared */
+            frame_ref_t ref = clock_alloc_frame(curr_addr, 0, 1);
             if (ref == NULL_FRAME) {
                 ZF_LOGE("Failed to alloc frame");
-                return false;
+                return -1;
             }
 
+            /* Since this frame is shared between processes, the pid field is a map 
+               where each set position indicates a process holding that frame */
+            frame_t *frame = frame_from_ref(ref);
+            frame->shared = 1;
+            frame->pid |= (1 << process.pid);
             pte->page.frame_ref = ref;
             pte->page.frame_cptr = frame_page(ref);
         } else {
             pte = vaddr_to_page_entry(curr_addr, global_addrspace->page_table);
+            frame_t *frame = frame_from_ref(pte->page.frame_ref);
+            frame->pid |= (1 << process.pid);
+
+            /* If the region so far is writeable but a process declares it as read-only, then
+               set the region permissions of the global entry and the processes sharing the page
+               to read-only. We unmap the hardware page table entry so that it errors out on a vm fault
+               if a write is attempted.*/
+            if ((perms == REGION_RD) && (pte->perms == (REGION_RD | REGION_WR))) {
+                pte->perms = REGION_RD;
+                for (int i = 0; i < NUM_PROC; i++) {
+                    if (i == process.pid) {
+                        continue;
+                    }
+                    if (frame->pid & (1 << i)) {
+                        user_process_t user_proc = user_process_list[i];
+                        pt_entry *entry = vaddr_to_page_entry(frame->vaddr, user_proc.addrspace->page_table);
+                        entry->perms = REGION_RD;
+                        seL4_CPtr frame_cptr = entry->page.frame_cptr;
+                        seL4_Error err = seL4_ARM_Page_Unmap(frame_cptr);
+                        if (err) {
+                            return -1;
+                        }
+                        free_untype(&frame_cptr, NULL);
+                        entry->page.frame_cptr = seL4_CapNull;
+
+                        mem_region_t tmp = { .base = vaddr + 1 };
+                        mem_region_t *reg = sglib_mem_region_t_find_closest_member(user_proc.addrspace->region_tree, &tmp);
+                        if (reg != NULL && vaddr < reg->base + reg->size && vaddr >= reg->base) {
+                            reg->perms = REGION_RD;
+                        }
+                    }
+                }
+            }
         }
 
         seL4_Error err = sos_map_frame(&cspace, process.vspace, curr_addr,
-                                    REGION_RD | REGION_WR, pte->page.frame_ref,
-                                    process.addrspace, true);
-    }
-
-    printf("Done\n");
-
-    return 0;
-}
-
-extern user_process_t *user_process_list;
-
-seL4_Error map_shared_region(uintptr_t fault_addr, user_process_t process, mem_region_t *shared_region) {
-    /* If the vaddr is not mapped, map it into the global addrspace with SOS's VSpace. */
-    pt_entry *pte;
-        if (!vaddr_is_mapped(global_addrspace, fault_addr)) {
-            pte = vaddr_to_page_entry(fault_addr, global_addrspace->page_table);
-            pte->valid = 1;
-            pte->swapped = 0;
-            pte->perms = REGION_RD | REGION_WR;
-
-            frame_ref_t ref = clock_alloc_frame(fault_addr, 0, 0);
-            if (ref == NULL_FRAME) {
-                ZF_LOGE("Failed to alloc frame");
-                return false;
-            }
-
-            pte->page.frame_ref = ref;
-            pte->page.frame_cptr = frame_page(ref);
-        } else {
-            pte = vaddr_to_page_entry(fault_addr, global_addrspace->page_table);
+                                        pte->perms, pte->page.frame_ref,
+                                        process.addrspace, true);
+        if (err) {
+            return -1;
         }
-
-        seL4_Error err = sos_map_frame(&cspace, process.vspace, fault_addr,
-                                    REGION_RD | REGION_WR, pte->page.frame_ref,
-                                    process.addrspace, true);
+    }
+    return 0;
 }
 
 mem_region_t *insert_shared_region(addrspace_t *addrspace, size_t base, size_t size, uint64_t perms) {
     /* The convention we choose to follow, is the left-most bit of
      * the perms indicates whether the region is shared or not. */
     return insert_region(addrspace, base, size, perms | BIT(63));
+}
+
+int unmap_global_entry(seL4_Word vaddr) {
+    if (!vaddr_is_mapped(global_addrspace, vaddr)) {
+        return 1;
+    }
+
+    vaddr_to_page_entry(vaddr, global_addrspace->page_table)->valid = 0;
+    return 0;
 }

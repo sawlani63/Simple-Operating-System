@@ -160,6 +160,7 @@ frame_ref_t clock_alloc_frame(size_t vaddr, pid_t pid, size_t pinned)
     frame->pid = pid;
     frame->pinned = pinned;
     frame->referenced = 1;
+    frame->shared = 0;
     sync_bin_sem_post(data_sem);
     return ref;
 }

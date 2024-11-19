@@ -159,3 +159,5 @@ static inline bool vaddr_is_mapped(addrspace_t *addrspace, seL4_Word vaddr) {
 
     return l4_pt[l4_index].valid;
 }
+
+int check_overlap(addrspace_t *addrspace, size_t base, size_t size);

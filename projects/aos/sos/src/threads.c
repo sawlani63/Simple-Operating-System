@@ -48,7 +48,6 @@ NORETURN void become_hitman()
     ut_t *ut = alloc_retype(&dark_web, seL4_EndpointObject, seL4_EndpointBits);
     if (ut == NULL) {
         ZF_LOGE("Failed to create endpoint for the hitman");
-        return;
     }
 
     /* Don the mask and be reborn as new. */

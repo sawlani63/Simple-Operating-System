@@ -36,7 +36,10 @@
 
 /* Endpoint for talking to SOS */
 #define SOS_IPC_EP_CAP     (0x1)
+/* Endpoint for talking to the clock driver */
 #define TIMER_IPC_EP_CAP   (0x2)
+/* Minted notification object for the timer driver
+   to signal for sleep system calls*/
 #define TIMER_NTFN (0x3)
 
 /* Limits */
@@ -72,6 +75,12 @@ typedef struct {
     unsigned  stime;           /* start time in msec since booting */
     char      command[N_NAME]; /* Name of exectuable */
 } sos_process_t;
+
+enum clock_driver_requests {
+    timer_RegisterTimer = 0,
+    timer_MicroTimestamp = 1,
+    timer_MilliTimestamp = 2
+};
 
 /* I/O system calls */
 

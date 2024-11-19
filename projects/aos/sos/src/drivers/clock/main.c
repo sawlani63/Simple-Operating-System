@@ -17,14 +17,13 @@
 #define MICRO_TIMESTAMP 1
 #define MILLI_TIMESTAMP 2
 
-static inline void wakeup(UNUSED uint32_t id, void *data)
+static inline void wakeup(UNUSED uint32_t id, UNUSED void *data)
 {
     seL4_Signal(TIMER_NOTIFICATION);
 }
 
-static inline void handle_operation()
+static inline void handle_operation(seL4_Word op)
 {
-    seL4_Word op = seL4_GetMR(0);
     switch(op) {
         case REGISTER_TIMER:
             register_timer(seL4_GetMR(1), wakeup, NULL);
@@ -60,7 +59,7 @@ static void driver_loop()
             timer_irq(NULL, meson_timeout_irq(MESON_TIMER_B), TIMER_B_IRQ_HANDLER);
             have_reply = false;
         } else {
-            handle_operation();
+            handle_operation(seL4_GetMR(0));
             have_reply = true;
         }
     }

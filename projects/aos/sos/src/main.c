@@ -60,7 +60,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "console_test"
+#define APP_NAME             "sosh"
 
 extern char __eh_frame_start[];
 /* provided by gcc */
@@ -81,7 +81,7 @@ extern seL4_CPtr nfs_signal;
 
 open_file *nfs_pagefile;
 
-seL4_CPtr ipc_ep;
+seL4_CPtr clock_driver_ep;
 
 bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
     sync_bin_sem_wait(process_list_sem);
@@ -93,17 +93,6 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
         ZF_LOGE("Encountered a weird error where one of the given addresses was null");
         free_process(user_process, true);
         return false;
-    }
-
-    /* Try paging in: continue in vm fault if 1 is returned. */
-    int try_page_in_res = clock_try_page_in(&user_process, fault_addr);
-    if (try_page_in_res < 0) {
-        /* Major error */
-        free_process(user_process, true);
-        return false;
-    } else if (!try_page_in_res) {
-        /* Success in paging in */
-        return true;
     }
 
     /* Check if we're faulting in a valid region. */
@@ -126,30 +115,35 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
             }
         } else {
             ZF_LOGE("Could not find a valid region for this address: %p", (void*) fault_addr);
+            print_regions(user_process_list[badge].addrspace);
             free_process(user_process, true);
             return false;
         }
     }
 
-    /* Map the frame into the relevant page tables. If we are a shared region, perform a global mapping. */
-    if (is_shared_region(reg) && map_shared_region(fault_addr, user_process, reg) != seL4_NoError) {
-        ZF_LOGE("Could not map the shared frame into the two page tables");
+    /* Try paging in: continue in vm fault if 1 is returned. */
+    int try_page_in_res = clock_try_page_in(&user_process, fault_addr);
+    if (try_page_in_res < 0) {
+        /* Major error */
         free_process(user_process, true);
         return false;
-    } else {
-        /* Allocate a new frame to be mapped by the shadow page table. */
-        frame_ref_t frame_ref = clock_alloc_frame(fault_addr, user_process.pid, 0);
-        if (frame_ref == NULL_FRAME) {
-            ZF_LOGD("Failed to alloc frame");
-            free_process(user_process, true);
-            return false;
-        }
+    } else if (!try_page_in_res) {
+        /* Success in paging in */
+        return true;
+    }
 
-        if (sos_map_frame(&cspace, user_process.vspace, fault_addr, reg->perms, frame_ref, as, true) != seL4_NoError) {
-            ZF_LOGE("Could not map the frame into the two page tables");
-            free_process(user_process, true);
-            return false;
-        }
+    /* Allocate a new frame to be mapped by the shadow page table. */
+    frame_ref_t frame_ref = clock_alloc_frame(fault_addr, user_process.pid, 0);
+    if (frame_ref == NULL_FRAME) {
+        ZF_LOGD("Failed to alloc frame");
+        free_process(user_process, true);
+        return false;
+    }
+
+    if (sos_map_frame(&cspace, user_process.vspace, fault_addr, reg->perms, frame_ref, as, true) != seL4_NoError) {
+        ZF_LOGE("Could not map the frame into the two page tables");
+        free_process(user_process, true);
+        return false;
     }
     
     user_process.size++;
@@ -186,9 +180,12 @@ seL4_MessageInfo_t handle_syscall(seL4_Word badge)
         syscall_sos_write(&reply_msg, badge);
         break;
     case SYSCALL_SOS_USLEEP:
+        /* With clock driver, this system call operation isn't delegated to sos 
+           i.e. this function shouldn't ever be called */
         syscall_sos_usleep(&reply_msg, badge);
         break;
     case SYSCALL_SOS_TIME_STAMP:
+        /* Same reasoning as the sleep system call for this function too */
         syscall_sos_time_stamp(&reply_msg);
         break;
     case SYSCALL_SYS_BRK:
@@ -253,7 +250,10 @@ NORETURN void syscall_loop(void *arg)
             message = seL4_Recv(ep, &sender, reply);
         }
 
-        sync_bin_sem_wait(process.handler_busy_sem);
+        /* Wait and post the semaphore if the process id isn't 0 aka the clock driver */
+        if (pid) {
+            sync_bin_sem_wait(process.handler_busy_sem);
+        }
         /* Awake! We got a message - check the label and badge to
          * see what the message is about */
         seL4_Word label = seL4_MessageInfo_get_label(message);
@@ -275,7 +275,9 @@ NORETURN void syscall_loop(void *arg)
 
             ZF_LOGF("The SOS skeleton does not know how to handle faults!");
         }
-        sync_bin_sem_post(process.handler_busy_sem);
+        if (pid) {
+            sync_bin_sem_post(process.handler_busy_sem);
+        }
     }
 }
 
@@ -302,14 +304,14 @@ NORETURN void irq_loop(void* arg)
  * Note that these objects will never be freed, so we do not
  * track the allocated ut objects anywhere
  */
-static void sos_ipc_init(seL4_CPtr *ipc_ep, seL4_CPtr *ntfn)
+static void sos_ipc_init(seL4_CPtr *clock_driver_ep, seL4_CPtr *ntfn)
 {
     /* Create an notification object for interrupts */
     ut_t *ut = alloc_retype(ntfn, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(!ut, "No memory for notification object");
 
     /* Create an endpoint for user application IPC */
-    ut = alloc_retype(ipc_ep, seL4_EndpointObject, seL4_EndpointBits);
+    ut = alloc_retype(clock_driver_ep, seL4_EndpointObject, seL4_EndpointBits);
     ZF_LOGF_IF(!ut, "No memory for endpoint");
 }
 
@@ -363,7 +365,7 @@ NORETURN void *main_continued(UNUSED void *arg)
 {
     /* Initialise other system compenents here */
     seL4_CPtr ntfn;
-    sos_ipc_init(&ipc_ep, &ntfn);
+    sos_ipc_init(&clock_driver_ep, &ntfn);
     sos_init_irq_dispatch(
         &cspace,
         seL4_CapIRQControl,
@@ -379,9 +381,9 @@ NORETURN void *main_continued(UNUSED void *arg)
     ut_t *ep_ut = alloc_retype(&gdb_recv_ep, seL4_EndpointObject, seL4_EndpointBits);
     ZF_LOGF_IF(ep_ut == NULL, "Failed to create GDB endpoint");
 
-    init_threads(ipc_ep, gdb_recv_ep, sched_ctrl_start, sched_ctrl_end);
+    init_threads(clock_driver_ep, gdb_recv_ep, sched_ctrl_start, sched_ctrl_end);
 #else
-    init_threads(ipc_ep, ipc_ep, sched_ctrl_start, sched_ctrl_end);
+    init_threads(clock_driver_ep, clock_driver_ep, sched_ctrl_start, sched_ctrl_end);
 #endif /* CONFIG_SOS_GDB_ENABLED */
 
     frame_table_init(&cspace, seL4_CapInitThreadVSpace);
@@ -437,11 +439,14 @@ NORETURN void *main_continued(UNUSED void *arg)
     printf("Timer init\n");
     /* Start the clock driver */
     error = start_process(TIMER_DEVICE, true);
-    ZF_LOGI_IF(error == -1, "Failed to start clock driver");
-    /* Map the timer device to the vspace of the clock driver */
+    ZF_LOGF_IF(error == -1, "Failed to start clock driver");
     user_process_t clock_driver = user_process_list[error];
+    /* Halt the process until the timer device is mapped into its vspace and irqs are set up*/
+    error = seL4_TCB_Suspend(clock_driver.tcb);
+    ZF_LOGF_IF(error != seL4_NoError, "Failed to suspend clock driver tcb");
+    /* Map the timer device to the vspace of the clock driver */
     sos_map_timer(&cspace, clock_driver.vspace, frame, timer_vaddr);
-    /* Sets up the timer irq */
+    /* Sets up the timer irqs */
     seL4_CPtr irq_ntfn;
     ut_t *ut = alloc_retype(&irq_ntfn, seL4_NotificationObject, seL4_NotificationBits);
     ZF_LOGF_IF(ut == NULL, "Failed to alloc irq ntfn");
@@ -452,6 +457,9 @@ NORETURN void *main_continued(UNUSED void *arg)
     /* Bind the notification to the clock driver's tcb to get irqs */
     init_irq_err = seL4_TCB_BindNotification(clock_driver.tcb, irq_ntfn);
     ZF_LOGF_IF(init_irq_err != 0, "Failed to bind irq ntfn");
+    /* Resume the clock driver process */
+    error = seL4_TCB_Resume(clock_driver.tcb);
+    ZF_LOGF_IF(error != seL4_NoError, "Failed to resume clock driver");
 
     /* Start the first user application */
     printf("Start process\n");

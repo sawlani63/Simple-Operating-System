@@ -65,14 +65,16 @@ PACKED struct frame {
     list_id_t list_id : 2;
     /* Virtual address this frame is referring to. */
     size_t vaddr : 48;
-    /* Pid of the process holding this frame. */
+    /* Pid of the process holding this frame (16 bit map if frame is shared). */
     size_t pid : 16;
     /* Indicates whether the frame is pinned or not. */
     size_t pinned : 1;
     /* Reference bit to indicate whether this page was recently referenced. */
     size_t referenced : 1;
+    /* A bit to indicate whether the frame is being shared */
+    size_t shared : 1;
     /* Unused bits */
-    size_t unused : 2;
+    size_t unused : 1;
 };
 compile_time_assert("Small CPtr size", 20 >= INITIAL_TASK_CSPACE_BITS);
 

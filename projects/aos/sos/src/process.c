@@ -36,7 +36,7 @@ int pid_queue_tail = NUM_PROC;
 sync_bin_sem_t *pid_queue_sem = NULL;
 sync_bin_sem_t *process_list_sem = NULL;
 
-extern seL4_CPtr ipc_ep;
+extern seL4_CPtr clock_driver_ep;
 
 NORETURN void syscall_loop(void *arg);
 
@@ -151,7 +151,7 @@ void free_process(user_process_t user_process, bool suicidal)
 
     /* Destroy EVERY region and page including the intermediate structures in the region rb-tree and shadow page table. */
     if (user_process.addrspace->page_table != NULL) {
-        sos_destroy_page_table(user_process.addrspace);
+        sos_destroy_page_table(user_process.addrspace, user_process.pid);
         free_region_tree(user_process.addrspace);
         free(user_process.addrspace);
     }
@@ -332,20 +332,23 @@ int start_process(char *app_name, bool timer)
     }
     user_process.app_name = app_name;
 
-    /* Create our per-process semaphore to ensure the process isn't killed in the middle of a system call */
-    user_process.handler_busy_sem = malloc(sizeof(sync_bin_sem_t));
-    if (user_process.handler_busy_sem == NULL) {
-        ZF_LOGE("No memory for new semaphore object");
-        free_process(user_process, false);
-        return -1;
+    /* Ignore allocating unneeded objects for clock driver */
+    if (!timer) {
+        /* Create our per-process semaphore to ensure the process isn't killed in the middle of a system call */
+        user_process.handler_busy_sem = malloc(sizeof(sync_bin_sem_t));
+        if (user_process.handler_busy_sem == NULL) {
+            ZF_LOGE("No memory for new semaphore object");
+            free_process(user_process, false);
+            return -1;
+        }
+        user_process.handler_busy_ut = alloc_retype(&user_process.handler_busy_cptr, seL4_NotificationObject, seL4_NotificationBits);
+        if (user_process.handler_busy_cptr == seL4_CapNull) {
+            ZF_LOGE("No memory for new notification object");
+            free_process(user_process, false);
+            return -1;
+        }
+        sync_bin_sem_init(user_process.handler_busy_sem, user_process.handler_busy_cptr, 1);
     }
-    user_process.handler_busy_ut = alloc_retype(&user_process.handler_busy_cptr, seL4_NotificationObject, seL4_NotificationBits);
-    if (user_process.handler_busy_cptr == seL4_CapNull) {
-        ZF_LOGE("No memory for new notification object");
-        free_process(user_process, false);
-        return -1;
-    }
-    sync_bin_sem_init(user_process.handler_busy_sem, user_process.handler_busy_cptr, 1);
 
     /* Create our per-process endpoint */
     user_process.ep_ut = alloc_retype(&user_process.ep, seL4_EndpointObject, seL4_EndpointBits);
@@ -380,12 +383,14 @@ int start_process(char *app_name, bool timer)
         return -1;
     }
 
-    /* Create our per-process notification for wait system calls */
-    user_process.wake_ut = alloc_retype(&user_process.wake, seL4_NotificationObject, seL4_NotificationBits);
-    if (user_process.wake_ut == NULL) {
-        ZF_LOGE("Failed to create notification object");
-        free_process(user_process, false);
-        return -1;
+    if (!timer) {
+        /* Create our per-process notification for wait system calls */
+        user_process.wake_ut = alloc_retype(&user_process.wake, seL4_NotificationObject, seL4_NotificationBits);
+        if (user_process.wake_ut == NULL) {
+            ZF_LOGE("Failed to create notification object");
+            free_process(user_process, false);
+            return -1;
+        }
     }
 
     /* Create a simple 1 level CSpace */
@@ -448,7 +453,7 @@ int start_process(char *app_name, bool timer)
         return -1;
     }
 
-    err = cspace_mint(&user_process.cspace, user_process.timer_slot, &cspace, ipc_ep, seL4_AllRights, (seL4_Word) user_process.pid);
+    err = cspace_mint(&user_process.cspace, user_process.timer_slot, &cspace, clock_driver_ep, seL4_AllRights, (seL4_Word) user_process.pid);
     if (err) {
         ZF_LOGE("Failed to mint user ep");
         free_process(user_process, false);
@@ -456,9 +461,11 @@ int start_process(char *app_name, bool timer)
     }
 
     if (timer) {
+        /* Don't keep track of any allocated objects here since the clock driver is never deleted */
         seL4_CPtr reply;
         alloc_retype(&reply, seL4_ReplyObject, seL4_ReplyBits);
         seL4_CPtr slot = cspace_alloc_slot(&user_process.cspace);
+        /* Mint the clock driver reply object */
         err = cspace_mint(&user_process.cspace, slot, &cspace, reply, seL4_AllRights, (seL4_Word) user_process.pid);
         if (err) {
             ZF_LOGE("Failed to mint user ep");
@@ -472,6 +479,7 @@ int start_process(char *app_name, bool timer)
             return -1;
         }
         seL4_CPtr slot2 = cspace_alloc_slot(&user_process.cspace);
+        /* Mint the notification for the clock driver to signal for sleep syscalls */
         err = cspace_mint(&user_process.cspace, slot2, &cspace, user_process.timer, seL4_AllRights, (seL4_Word) user_process.pid);
         if (err) {
             ZF_LOGE("Failed to mint user ep");
@@ -480,6 +488,7 @@ int start_process(char *app_name, bool timer)
         }
     } else {
         user_process.ntfn_slot = cspace_alloc_slot(&user_process.cspace);
+        /* Mint the notification for the clock driver to signal for sleep syscalls */
         err = cspace_mint(&user_process.cspace, user_process.ntfn_slot, &cspace, user_process_list[0].timer, seL4_AllRights, (seL4_Word) user_process.pid);
         if (err) {
             ZF_LOGE("Failed to mint user ep");
@@ -611,28 +620,30 @@ int start_process(char *app_name, bool timer)
         return -1;
     }
 
-    /* Initialise the per-process file descriptor table */
-    char error;
-    user_process.fdt = fdt_create(&error);
-    if (error) {
-        ZF_LOGE("Failed to initialise the file descriptor table");
-        free_process(user_process, false);
-        return -1;
-    }
+    if (!timer) {
+        /* Initialise the per-process file descriptor table */
+        char error;
+        user_process.fdt = fdt_create(&error);
+        if (error) {
+            ZF_LOGE("Failed to initialise the file descriptor table");
+            free_process(user_process, false);
+            return -1;
+        }
 
-    open_file *file = file_create("console", O_WRONLY, netcon_send, deque);
-    uint32_t fd;
-    err = fdt_put(user_process.fdt, file, &fd); // initialise stdout
-    if (err) {
-        ZF_LOGE("Failed to initialise stdout");
-        free_process(user_process, false);
-        return -1;
-    }
-    err = fdt_put(user_process.fdt, file, &fd); // initialise stderr
-    if (err) {
-        ZF_LOGE("Failed to initialise stderr");
-        free_process(user_process, false);
-        return -1;
+        open_file *file = file_create("console", O_WRONLY, netcon_send, deque);
+        uint32_t fd;
+        err = fdt_put(user_process.fdt, file, &fd); // initialise stdout
+        if (err) {
+            ZF_LOGE("Failed to initialise stdout");
+            free_process(user_process, false);
+            return -1;
+        }
+        err = fdt_put(user_process.fdt, file, &fd); // initialise stderr
+        if (err) {
+            ZF_LOGE("Failed to initialise stderr");
+            free_process(user_process, false);
+            return -1;
+        }
     }
 
     /* Start the new process */
@@ -653,7 +664,7 @@ int start_process(char *app_name, bool timer)
     /* Send a request to the clock driver to get the timestamp in milliseconds */
     if (!timer) {
         seL4_SetMR(0, timer_MilliTimestamp);
-        seL4_Call(ipc_ep, seL4_MessageInfo_new(0, 0, 0, 1));
+        seL4_Call(clock_driver_ep, seL4_MessageInfo_new(0, 0, 0, 1));
         user_process.stime = seL4_GetMR(0);
     }
 

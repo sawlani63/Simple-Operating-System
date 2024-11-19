@@ -97,8 +97,9 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, si
  * all the pages and page tables mapped in our vspace.
  * 
  * @param as The address space of the process being deleted
+ * @param pid The process id of the process being deleted
  */
-void sos_destroy_page_table(addrspace_t *as);
+void sos_destroy_page_table(addrspace_t *as, pid_t pid);
 
 /*
  * Map a device and return the virtual address it is mapped to.
@@ -110,4 +111,12 @@ void sos_destroy_page_table(addrspace_t *as);
  * */
 void *sos_map_device(cspace_t *cspace, uintptr_t addr, size_t size, seL4_CPtr frame_cap, bool timer);
 
+/**
+ * Map the timer device into the clock driver's vspace at the given vaddr
+ * @param cspace the root cspace
+ * @param vspace the clock driver's vspace
+ * @param frame the copy of the frame cap used to map the timer device into the SOS vspace
+ * @param timer_vaddr the virtual address of the timer device in the SOS vspace
+ * 
+ */
 void sos_map_timer(cspace_t *cspace, seL4_CPtr vspace, seL4_CPtr frame, void *timer_vaddr);
