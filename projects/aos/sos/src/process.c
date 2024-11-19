@@ -222,7 +222,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
 
     /* Map in the stack frame for the user app */
     seL4_Error err = sos_map_frame(cspace, user_process->vspace, stack_bottom, REGION_RD | REGION_WR,
-                                   user_process->stack_frame, as, true);
+                                   user_process->stack_frame, as);
     if (err != 0) {
         ZF_LOGE("Unable to map stack for user app");
         return -1;
@@ -308,7 +308,7 @@ static uintptr_t init_process_stack(user_process_t *user_process, cspace_t *cspa
         }
 
         err = sos_map_frame(cspace, user_process->vspace, stack_bottom,
-                            REGION_RD | REGION_WR, frame, as, true);
+                            REGION_RD | REGION_WR, frame, as);
         if (err != 0) {
             ZF_LOGE("Unable to map stack for user app");
             return -1;
@@ -585,7 +585,7 @@ int start_process(char *app_name, bool timer)
 
     /* Map in the IPC buffer for the thread */
     err = sos_map_frame(&cspace, user_process.vspace, PROCESS_IPC_BUFFER, REGION_RD | REGION_WR,
-                        user_process.ipc_buffer_frame, user_process.addrspace, true);
+                        user_process.ipc_buffer_frame, user_process.addrspace);
     if (err != 0) {
         ZF_LOGE("Unable to map IPC buffer for user app");
         free_process(user_process, false);

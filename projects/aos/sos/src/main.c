@@ -60,7 +60,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "sosh"
+#define APP_NAME             "console_test"
 
 extern char __eh_frame_start[];
 /* provided by gcc */
@@ -140,7 +140,7 @@ bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge) {
         return false;
     }
 
-    if (sos_map_frame(&cspace, user_process.vspace, fault_addr, reg->perms, frame_ref, as, true) != seL4_NoError) {
+    if (sos_map_frame(&cspace, user_process.vspace, fault_addr, reg->perms, frame_ref, as) != seL4_NoError) {
         ZF_LOGE("Could not map the frame into the two page tables");
         free_process(user_process, true);
         return false;

@@ -28,7 +28,7 @@ pt_entry *vaddr_to_page_entry(uintptr_t fault_addr, page_upper_directory *l1_pt)
     page_directory *l2_pt = l1_pt[l1_index].l2;
     if (l2_pt == NULL) {
         ZF_LOGE("Failed to allocate level 2 page table");
-        return seL4_NotEnoughMemory;
+        return NULL;
     }
 
     if (l2_pt[l2_index].l3 == NULL) {
@@ -38,7 +38,7 @@ pt_entry *vaddr_to_page_entry(uintptr_t fault_addr, page_upper_directory *l1_pt)
     if (l3_pt == NULL) {
         ZF_LOGE("Failed to allocate level 3 page table");
         free(l2_pt);
-        return seL4_NotEnoughMemory;
+        return NULL;
     }
 
     if (l3_pt[l3_index].l4 == NULL) {
@@ -49,7 +49,7 @@ pt_entry *vaddr_to_page_entry(uintptr_t fault_addr, page_upper_directory *l1_pt)
         ZF_LOGE("Failed to allocate level 4 page table");
         free(l3_pt);
         free(l2_pt);
-        return seL4_NotEnoughMemory;
+        return NULL;
     }
 
     return &l4_pt[l4_index];
@@ -119,7 +119,7 @@ int add_shared_region(user_process_t process, void *vaddr, size_t len, uint64_t 
 
         seL4_Error err = sos_map_frame(&cspace, process.vspace, curr_addr,
                                         pte->perms, pte->page.frame_ref,
-                                        process.addrspace, true);
+                                        process.addrspace);
         if (err) {
             return -1;
         }

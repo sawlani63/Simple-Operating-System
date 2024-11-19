@@ -235,7 +235,7 @@ int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
 
     /* Assert the frame we got is not null as a sanity check, and map the new frame into the process's vspace. */
     assert(frame_from_ref(ref) != NULL);
-    if (sos_map_frame(&cspace, user_process->vspace, vaddr, entry.perms, ref, as, true) != 0) {
+    if (sos_map_frame(&cspace, user_process->vspace, vaddr, entry.perms, ref, as) != 0) {
         ZF_LOGE("Could not map the frame into the two page tables");
         return -1;
     }
