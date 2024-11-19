@@ -118,13 +118,10 @@ static int buffercache_readahead(int pid, struct file *file, char *data, uint64_
 }
 
 static int buffercache_writethrough(int pid, struct file *file, char *data, uint64_t offset, void *cb, void *args, cache_key_t key) {
-    sync_bin_sem_wait(data_sem);
-    frame_ref_t ref = alloc_frame();
+    frame_ref_t ref = clock_alloc_frame(0, pid, 1, 0);
     if (ref == NULL_FRAME) {
-        sync_bin_sem_post(data_sem);
         return -1;
     }
-    sync_bin_sem_post(data_sem);
     int err;
     khiter_t iter = kh_put(cache, cache_map, key, &err);
     if (err == -1) {
