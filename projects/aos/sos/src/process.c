@@ -151,7 +151,7 @@ void free_process(user_process_t user_process, bool suicidal)
 
     /* Destroy EVERY region and page including the intermediate structures in the region rb-tree and shadow page table. */
     if (user_process.addrspace->page_table != NULL) {
-        sos_destroy_page_table(user_process.addrspace, user_process.pid);
+        sos_destroy_page_table(user_process.addrspace);
         free_region_tree(user_process.addrspace);
         free(user_process.addrspace);
     }

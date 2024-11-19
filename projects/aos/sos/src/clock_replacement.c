@@ -2,7 +2,6 @@
 #include "network.h"
 #include "mapping.h"
 #include "nfs.h"
-#include "sharedvm.h"
 
 #include <sync/condition_var.h>
 
@@ -130,17 +129,8 @@ frame_t *clock_choose_victim(frame_ref_t *clock_hand, frame_ref_t first) {
 }
 
 int clock_page_out(frame_t *victim) {
-    addrspace_t *as;
-    if (victim->shared) {
-        int res = page_out_shared(victim);
-        if (res < 0) {
-            return -1;
-        }
-        as = get_global_addrspace();
-    } else {
-        /* Get the address space specific to the process this frame we are paging out belongs to. */
-        as = get_process(victim->pid).addrspace;
-    }
+    /* Get the address space specific to the process this frame we are paging out belongs to. */
+    addrspace_t *as = get_process(victim->pid).addrspace;
     seL4_Word vaddr = victim->vaddr;
 
     /* Assert that the vaddr we are paging out is actually mapped. Something definitely went wrong if it isn't. */
@@ -172,8 +162,6 @@ int clock_page_out(frame_t *victim) {
         return -1;
     }
     free_untype(&frame_cptr, NULL);
-    victim->shared = 0;
-    victim->pid = 0;
     free_frame(entry.page.frame_ref);
 
     /* Update our shadow page table mapping to mark it as invalid, swapped and store its index in the page file. */
@@ -210,9 +198,6 @@ int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
             ZF_LOGD("Failed to alloc frame");
             return -1;
         }
-        if (frame_from_ref(ref)->shared) {
-            entry = GET_PAGE(get_global_addrspace(), vaddr);
-        }
 
         /* Grab the offset into the swap file and load PAGE_SIZE_4K bytes into the newly alloc'd frame. */
         uint64_t file_offset = entry.swap_map_index * PAGE_SIZE_4K;
@@ -238,13 +223,6 @@ int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
 
         /* Update our swap manager bitmap and queue to cache the newly unused file offset. */
         mark_block_free(entry.swap_map_index);
-        if (frame_from_ref(ref)->shared) {
-            int res = page_in_shared(ref, vaddr);
-            if (res < 0) {
-                return -1;
-            }
-            return 0;
-        }
     } else {
         ZF_LOGV("Unexpected case in clock_try_page_in! Continuing to vm fault.");
         return 1;
