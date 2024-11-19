@@ -40,7 +40,7 @@ void enqueue(UNUSED struct network_console *network_console, char c) {
     sync_cv_signal(signal_cv_console);
 }
 
-int deque(UNUSED open_file *file, UNUSED char *data, UNUSED uint64_t offset, uint64_t count, UNUSED void *cb, void *args) {
+int deque(UNUSED int pid, UNUSED open_file *file, UNUSED char *data, UNUSED uint64_t offset, uint64_t count, UNUSED void *cb, void *args) {
     io_args *arg = (io_args *) args;
     char *buff = (char *) arg->buff;
     sync_bin_sem_wait(queue_sem);

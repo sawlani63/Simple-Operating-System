@@ -124,11 +124,8 @@ int test_buffers(int console_fd) {
 }
 
 int test_nfs() {
-    /* IMPORTANT: NEED TO CHANGE FILE EVERY TIME
-     * WE RERUN TEST SINCE NFS IS PERSISTENT STORAGE*/
     char *file = "Pikachu10.txt";
 
-    printf("%d", sos_time_stamp());
     int fd = sos_open(file, O_RDWR);
     assert(fd > 2);
 
@@ -136,30 +133,38 @@ int test_nfs() {
     sos_stat(file, &stat);
     printf("From stat - type: %d, mode: %d, size: %u, atime: %ld, ctime: %ld\n",
            stat.st_type, stat.st_fmode, stat.st_size, stat.st_atime, stat.st_ctime);
-    printf("%d", sos_time_stamp());
 
-    char *buffer = calloc(81, sizeof(char));
-
-    /* should be garbage / nothing */
-    // int result = sos_read(fd, buffer, MEDIUM_BUF_SZ);
-    // assert(!result);
-    // printf("Garbage Buffer: %s\n", buffer);
-
-    /* test a small string from the code segment */
+    char *buffer = malloc(80 * sizeof(char));
+    
+    /**
+     * 1. Write a fairly large string of 80 bytes into the previously opened file.
+     * 2. Close the file, re-open it and read the full file into a buffer, checking the read output and buffer contents.
+     * 3. Close the file, re-open it and overwrite the first 20 bytes with a different string, checking write output.
+     * 4. Close the file, re-open it and read an overly large amount into a buffer, checking the read output and buffer contents.
+     */
     int result = sos_write(fd, "WritingASomewhatLongerStringToTestI/OOverlappingActuallyWorksAsIntendedForOnce\n", 80);
     assert(result == 80);
-    
-    /* Close and reopen the file so we reset the offset. */
     int res = sos_close(fd);
     assert(!res);
     fd = sos_open(file, O_RDWR);
     assert(fd > 2);
-
-    /* test reading to a small buffer */
     result = sos_read(fd, buffer, 80);
     assert(result == 80);
+    assert(!memcmp(buffer, "WritingASomewhatLongerStringToTestI/OOverlappingActuallyWorksAsIntendedForOnce\n", 80));
+    res = sos_close(fd);
+    assert(!res);
+    fd = sos_open(file, O_RDWR);
+    assert(fd > 2);
+    result = sos_write(fd, "OverwritingMwahaha-", 20);
+    assert(result == 20);
+    res = sos_close(fd);
+    assert(!res);
+    fd = sos_open(file, O_RDWR);
+    assert(fd > 2);
+    result = sos_read(fd, buffer, 200);
+    assert(result == 80);
     printf("\nbuffer: %s\n", buffer);
-    assert(!strcmp(buffer, "WritingASomewhatLongerStringToTestI/OOverlappingActuallyWorksAsIntendedForOnce\n"));
+    assert(!memcmp(buffer, "OverwritingMwahaha-\0erStringToTestI/OOverlappingActuallyWorksAsIntendedForOnce\n", 80));
 
     sos_stat(file, &stat);
     printf("From stat - type: %d, mode: %d, size: %u, atime: %ld, ctime: %ld\n",
