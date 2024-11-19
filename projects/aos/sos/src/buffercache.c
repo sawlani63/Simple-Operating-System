@@ -10,6 +10,10 @@
 #include <clock/clock.h>
 
 #define CACHE_MAP_SIZE (1 << 18) // Half the total number of frames in the system (2^18)
+#define MAX_READ_AHEAD 16
+
+long prev_blocks[3] = {-1, -1, -1};
+uint8_t num_blocks_reading = 1;
 
 seL4_CPtr cache_ep;
 seL4_CPtr cache_reply;
@@ -62,20 +66,75 @@ int buffercache_init() {
 }
 
 static int buffercache_readahead(int pid, struct file *file, char *data, uint64_t offset, void *cb, void *args, cache_key_t key) {
+    /* Shift previous blocks history. */
+    prev_blocks[0] = prev_blocks[1];
+    prev_blocks[1] = prev_blocks[2];
+    prev_blocks[2] = key.block_num;
+
+    /* Update the num_blocks_reading based on access pattern */
+    if (prev_blocks[0] != -1 && 
+        prev_blocks[1] == prev_blocks[0] + 1 && 
+        prev_blocks[2] == prev_blocks[1] + 1) {
+        num_blocks_reading = MIN(num_blocks_reading * 2, MAX_READ_AHEAD);
+    } else if (prev_blocks[1] != prev_blocks[2] - 1) {
+        num_blocks_reading = 1;
+    }
+
+    /* Allocate frames for read-ahead blocks and map them into the hash map. */
+    frame_ref_t *refs = calloc(MAX_READ_AHEAD, sizeof(frame_ref_t));
+    size_t frames_allocated = 0;
+    for (uint8_t i = 0; i < num_blocks_reading; i++) {
+        cache_key_t ahead_key = {.handle = key.handle, .block_num = key.block_num + i};
+        
+        /* Check for EOF. */
+        if (ahead_key.block_num * NFS_BLKSIZE >= file->size) {
+            break;
+        }
+
+        int err = 0;
+        khiter_t iter = kh_put(cache, cache_map, ahead_key, &err);
+        if (err == -1) {
+            break;
+        }
+
+        refs[i] = clock_alloc_frame(0, pid, 1, 0);
+        if (refs[i] == NULL_FRAME) {
+            break;
+        } else if (!err) {
+            continue;
+        }
+        
+        kh_value(cache_map, iter) = refs[i];
+        frames_allocated++;
+
+        /* Mark the frame allocated as dirty. */
+        mark_block_dirty(file, iter);
+    }
+
+    /* Pass all the frames to nfs_pread_file at once, and have that read the data into the frames. */
+    ((io_args *)args)->cache_frames = refs;
+    ((io_args *)args)->num_frames = frames_allocated;
+    return MIN(nfs_pread_file(0, file, data, ALIGN_DOWN(offset, NFS_BLKSIZE), frames_allocated * NFS_BLKSIZE, cb, args), NFS_BLKSIZE);
+}
+
+static int buffercache_writethrough(int pid, struct file *file, char *data, uint64_t offset, void *cb, void *args, cache_key_t key) {
+    sync_bin_sem_wait(data_sem);
+    frame_ref_t ref = alloc_frame();
+    if (ref == NULL_FRAME) {
+        sync_bin_sem_post(data_sem);
+        return -1;
+    }
+    sync_bin_sem_post(data_sem);
     int err;
     khiter_t iter = kh_put(cache, cache_map, key, &err);
     if (err == -1) {
         printf("Error adding to buffer cache map\n");
         return -1;
     }
-    frame_ref_t ref = clock_alloc_frame(0, pid, 1, (uintptr_t)&kh_key(cache_map, iter));
-    if (ref == NULL_FRAME) {
-        return -1;
-    }
     kh_value(cache_map, iter) = ref;
 
-    ((io_args *) args)->cache_frame = ref;
-    mark_block_dirty(file, iter); // TODO: CHANGE THIS BECAUSE WE ARE ASSUMING NFS_PREAD_FILE PASSES
+    ((io_args *) args)->cache_frames = &kh_value(cache_map, iter);
+    mark_block_dirty(file, iter);
     return nfs_pread_file(0, file, data, ALIGN_DOWN(offset, NFS_BLKSIZE), NFS_BLKSIZE, cb, args);
 }
 
@@ -96,7 +155,7 @@ int buffercache_write(int pid, struct file *file, char *data, uint64_t offset, u
         if (iter == kh_end(cache_map)) {
             sync_bin_sem_post(data_sem);
             if (bytes_left < NFS_BLKSIZE && offset < ALIGN_UP(file->size, NFS_BLKSIZE)) {
-                int res = buffercache_readahead(pid, file, data, offset, cb, args, key);
+                int res = buffercache_writethrough(pid, file, data, offset, cb, args, key);
                 sync_bin_sem_post(cache_sem);
                 return res < (int)NFS_BLKSIZE ? -1 : (int)len;
             }
@@ -170,7 +229,7 @@ int buffercache_read(int pid, struct file *file, char *data, uint64_t offset, ui
 
 static inline int buffercache_flush_entry(open_file *file, cache_key_t key, frame_ref_t ref, uint64_t count) {
     io_args *args = malloc(sizeof(io_args));
-    *args = (io_args){NFS_BLKSIZE, NULL, cache_ep, NULL, NULL_FRAME, false};
+    *args = (io_args){NFS_BLKSIZE, NULL, cache_ep, NULL, NULL, 0, false};
     int res = nfs_pwrite_file(0, file, (char *) frame_data(ref), key.block_num * NFS_BLKSIZE,
                               count, nfs_buffercache_flush_cb, args);
     return res < (int)count ? -1 : (int)count;
@@ -194,7 +253,7 @@ static inline int cleanup_bitmap_and_pending_requests(open_file *file, int outst
 
 int buffercache_clean_frame(cache_key_t key, frame_ref_t ref) {
     io_args *args = malloc(sizeof(io_args));
-    *args = (io_args){NFS_BLKSIZE, NULL, cache_ep, NULL, NULL_FRAME, false};
+    *args = (io_args){NFS_BLKSIZE, NULL, cache_ep, NULL, NULL, 0, false};
     int res = nfs_pwrite_handle(key.handle, (char *) frame_data(ref), key.block_num * NFS_BLKSIZE,
                                 NFS_BLKSIZE, nfs_buffercache_flush_cb, args);
     if (res < (int)NFS_BLKSIZE) {

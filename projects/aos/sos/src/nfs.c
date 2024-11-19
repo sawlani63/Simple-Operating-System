@@ -34,9 +34,12 @@ void nfs_buffercache_read_rdcb(int err, UNUSED struct nfs_context *nfs, void *da
     } else {
         sync_bin_sem_wait(data_sem);
         memcpy(args->buff, data, err);
-        if (args->cache_frame != NULL_FRAME) {
-            memcpy(frame_data(args->cache_frame), data, err);
+        if (args->num_frames > 0) {
+            for (int i = 0; i < args->num_frames; i++) {
+                memcpy(frame_data(args->cache_frames[i]), data, NFS_BLKSIZE);
+            }
             err = args->err;
+            free(args->cache_frames);
         }
         unpin_frame(args->entry->page.frame_ref);
         sync_bin_sem_post(data_sem);
@@ -52,13 +55,15 @@ void nfs_buffercache_read_wrcb(int err, UNUSED struct nfs_context *nfs, void *da
     if (err < 0) {
         ZF_LOGE("NFS: Error in reading file with wrcb, %s\n", (char*) data);
     } else {
+        printf("Start\n");
         sync_bin_sem_wait(data_sem);
-        if (args->cache_frame != NULL_FRAME) {
-            memcpy(frame_data(args->cache_frame), args->buff, args->err);
+        if (*(args->cache_frames) != NULL_FRAME) {
+            memcpy(frame_data(*(args->cache_frames)), args->buff, args->err);
             err = args->err;
         }
         unpin_frame(args->entry->page.frame_ref);
         sync_bin_sem_post(data_sem);
+        printf("end\n");
     }
     seL4_SetMR(0, args->err);
     seL4_SetMR(1, err);
