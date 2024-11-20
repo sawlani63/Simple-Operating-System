@@ -1,8 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <utils/util.h>
+#include <stdbool.h>
 #include <clock/clock.h>
-#include <clock/watchdog.h>
 #include <clock/timestamp.h>
 #include <clock/device.h>
 
@@ -17,7 +16,7 @@
 #define MICRO_TIMESTAMP 1
 #define MILLI_TIMESTAMP 2
 
-static inline void wakeup(UNUSED uint32_t id, UNUSED void *data)
+static inline void wakeup(uint32_t id, void *data)
 {
     seL4_Signal(TIMER_NOTIFICATION);
 }
@@ -64,7 +63,6 @@ static void driver_loop()
         }
     }
 }
-
 
 int main(void)
 {

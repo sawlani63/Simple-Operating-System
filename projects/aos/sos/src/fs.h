@@ -17,11 +17,15 @@ typedef struct {
     uint32_t free_count;    // Number of free slots available
 } fdt;
 
-typedef struct io_args {
+typedef struct {
     int err;
     void *buff;
     seL4_CPtr signal_cap;
     pt_entry *entry;
+    
+    frame_ref_t *cache_frames;
+    int num_frames;
+    bool cached;
 } io_args;
 
 /**

@@ -65,7 +65,9 @@ int nfs_close_file(open_file *file, nfs_cb cb, void *private_data);
  * 
  * @return number of bytes told to read on success
  */
-int nfs_pread_file(open_file *file, UNUSED char *data, uint64_t offset, uint64_t count, void *cb, void *private_data);
+int nfs_pread_file(UNUSED int pid, open_file *file, UNUSED char *data, uint64_t offset, uint64_t count, void *cb, void *private_data);
+
+int nfs_pwrite_handle(void *handle, char *buf, uint64_t offset, uint64_t count, void *cb, void *private_data);
 
 /**
  * Wrapper around the asynchronous nfs pwrite function. Does not wait for the callback to finish.
@@ -78,7 +80,7 @@ int nfs_pread_file(open_file *file, UNUSED char *data, uint64_t offset, uint64_t
  * 
  * @return number of bytes told to write on success
  */
-int nfs_pwrite_file(open_file *file, char *buf, uint64_t offset, uint64_t count, void *cb, void *private_data);
+int nfs_pwrite_file(UNUSED int pid, open_file *file, char *buf, uint64_t offset, uint64_t count, void *cb, void *private_data);
 
 /**
  * Wrapper around the asynchronous nfs stat function. Waits for the callback to finish.

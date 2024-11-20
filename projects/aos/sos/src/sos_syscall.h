@@ -43,5 +43,5 @@ void syscall_sys_munmap(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number);
 
 void init_semaphores(void);
-int netcon_send(open_file *file, char *data, UNUSED uint64_t offset, uint64_t len, void *callback, void *args);
+int netcon_send(UNUSED pid_t pid, open_file *file, char *data, UNUSED uint64_t offset, uint64_t len, void *callback, void *args);
 int perform_cpy(user_process_t user_process, size_t nbyte, uintptr_t vaddr, bool data_to_buff, void *buff);

@@ -39,7 +39,7 @@ static seL4_CPtr fault_ep;
 sos_thread_t *hitman = NULL;
 seL4_CPtr dark_web;
 
-void thread_destroy();
+NORETURN void thread_destroy();
 
 /* Initialize our hitman to kill other threads appropriately */
 NORETURN void become_hitman()
@@ -113,7 +113,7 @@ int thread_resume(sos_thread_t *thread)
 }
 
 /* trampoline code for newly started thread */
-static void thread_trampoline(sos_thread_t *thread, thread_main_f *function, void *arg, bool debugger_add)
+static void thread_trampoline(sos_thread_t *thread, thread_main_f *function, void *arg, UNUSED bool debugger_add)
 {
     sel4runtime_set_tls_base(thread->tls_base);
     seL4_SetIPCBuffer((seL4_IPCBuffer *) thread->ipc_buffer_vaddr);
@@ -409,8 +409,8 @@ void kill_thread(sos_thread_t *thread)
     free_untype(&thread->fault_ep, NULL);
     free_untype(&thread->user_ep, NULL);
     /* Free the tls_base, ipc buffer and the thread */
-    if (thread->tls_base != NULL) {
-        free(thread->tls_base);
+    if (thread->tls_base) {
+        free((void *)thread->tls_base);
     }
     free_untype(&thread->ipc_buffer, thread->ipc_buffer_ut);
     free(thread);
@@ -419,7 +419,7 @@ void kill_thread(sos_thread_t *thread)
 /* 
 * Function run by the hitman thread
 */
-void thread_destroy()
+NORETURN void thread_destroy()
 {
     seL4_CPtr hitman_reply;
     ut_t *ut = alloc_retype(&hitman_reply, seL4_ReplyObject, seL4_ReplyBits);

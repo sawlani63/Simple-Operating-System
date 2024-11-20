@@ -75,6 +75,8 @@ add_executable(
     src/console.c
     src/clock_replacement.c
     src/process.c
+    src/buffercache.c
+    src/dentry.c
     src/boot_driver.c
     src/sharedvm.c
 )
@@ -88,7 +90,7 @@ target_link_libraries(
     elf
     cpio
     networkconsole
-    clock
+    #clock
     sel4cspace
     aos
     utils
@@ -107,24 +109,8 @@ add_executable(
 target_include_directories(clock_driver PRIVATE "include")
 target_link_libraries(
     clock_driver
-    sel4_autoconf
     sosapi
-    sel4runtime
-    muslc
-    sel4
-    elf
-    cpio
-    networkconsole
     clock
-    sel4cspace
-    aos
-    utils
-    picotcp
-    picotcp_bsd
-    nfs
-    ethernet
-    sos_Config
-    sel4sync
 )
 add_app(clock_driver)
 

@@ -70,6 +70,8 @@
         "watchdog.h": "c",
         "sharedvm.h": "c",
         "page.h": "c",
-        "mman.h": "c"
+        "mman.h": "c",
+        "device.h": "c",
+        "timestamp.h": "c"
     }
 }
