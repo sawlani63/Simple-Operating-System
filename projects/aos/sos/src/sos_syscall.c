@@ -17,17 +17,16 @@
 #include "sharedvm.h"
 
 #define MAX_BATCH_SIZE 3
-
-extern user_process_t *user_process_list;
-extern sync_bin_sem_t *process_list_sem;
-sync_bin_sem_t *nfs_sem = NULL;
-bool console_open_for_read = false;
-
 #ifdef CONFIG_SOS_FRAME_LIMIT
     bool buffercache_enable = CONFIG_SOS_FRAME_LIMIT != 0ul ? false : true;
 #else
     bool buffercache_enable = true;
 #endif
+
+extern user_process_t *user_process_list;
+extern sync_bin_sem_t *process_list_sem;
+sync_bin_sem_t *nfs_sem = NULL;
+bool console_open_for_read = false;
 
 sync_bin_sem_t *data_sem = NULL;
 sync_bin_sem_t *file_sem = NULL;
@@ -357,6 +356,7 @@ void syscall_sos_read(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         return;
     }
 
+    sync_bin_sem_wait(nfs_sem);
     int res = perform_io(user_process, nbyte, vaddr, found, nfs_buffercache_read_rdcb, true);
     if (res > 0) {
         found->offset += res;
@@ -386,6 +386,8 @@ void syscall_sos_write(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
         seL4_SetMR(0, -1);
         return;
     }
+
+    sync_bin_sem_wait(nfs_sem);
     int res = perform_io(user_process, nbyte, vaddr, found, nfs_buffercache_read_wrcb, false);
     if (res > 0) {
         found->offset += res;
