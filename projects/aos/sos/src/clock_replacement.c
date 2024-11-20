@@ -127,7 +127,6 @@ frame_t *clock_choose_victim(frame_ref_t *clock_hand, frame_ref_t first) {
                 return NULL;
             }
             free_untype(&frame_cptr, NULL);
-            GET_PAGE(as->page_table, curr_frame->user_frame.vaddr).page.frame_cptr = seL4_CapNull;
         }
         *clock_hand = curr_frame->next ? curr_frame->next : first;
         curr_frame = frame_from_ref(*clock_hand);
@@ -163,14 +162,7 @@ int clock_page_out(frame_t *victim) {
     }
     sync_bin_sem_post(pagefile_sem);
 
-    /* Unmap the entry from the process's vspace and free the frame and its capability. */
-    seL4_CPtr frame_cptr = entry.page.frame_cptr;
-    if (frame_cptr != seL4_CapNull) {
-        if (seL4_ARM_Page_Unmap(frame_cptr) != seL4_NoError) {
-            return -1;
-        }
-        free_untype(&frame_cptr, NULL);
-    }
+    /* Free the frame. */
     free_frame(entry.page.frame_ref);
 
     /* Update our shadow page table mapping to mark it as invalid, swapped and store its index in the page file. */

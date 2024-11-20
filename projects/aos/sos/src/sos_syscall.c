@@ -22,7 +22,12 @@ extern user_process_t *user_process_list;
 extern sync_bin_sem_t *process_list_sem;
 sync_bin_sem_t *nfs_sem = NULL;
 bool console_open_for_read = false;
-bool buffercache_enable = true;
+
+#ifdef CONFIG_SOS_FRAME_LIMIT
+    bool buffercache_enable = CONFIG_SOS_FRAME_LIMIT != 0ul ? false : true;
+#else
+    bool buffercache_enable = true;
+#endif
 
 sync_bin_sem_t *data_sem = NULL;
 sync_bin_sem_t *file_sem = NULL;

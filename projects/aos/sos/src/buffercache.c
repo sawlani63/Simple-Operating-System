@@ -95,7 +95,7 @@ static int buffercache_readahead(int pid, struct file *file, char *data, uint64_
             break;
         }
 
-        refs[i] = clock_alloc_frame(0, pid, 1, 0);
+        refs[i] = clock_alloc_frame(0, pid, 1, 1);
         if (refs[i] == NULL_FRAME) {
             break;
         } else if (!err) {
@@ -116,7 +116,7 @@ static int buffercache_readahead(int pid, struct file *file, char *data, uint64_
 }
 
 static int buffercache_writethrough(int pid, struct file *file, char *data, uint64_t offset, void *cb, void *args, cache_key_t key) {
-    frame_ref_t ref = clock_alloc_frame(0, pid, 1, 0);
+    frame_ref_t ref = clock_alloc_frame(0, pid, 1, 1);
     if (ref == NULL_FRAME) {
         return -1;
     }
@@ -160,7 +160,7 @@ int buffercache_write(int pid, struct file *file, char *data, uint64_t offset, u
                 printf("Error adding to buffer cache map\n");
                 return -1;
             }
-            cache = clock_alloc_frame(0, pid, 1, 0);
+            cache = clock_alloc_frame(0, pid, 1, 1);
             kh_value(cache_map, iter) = cache;
         } else {
             cache = kh_value(cache_map, iter);
