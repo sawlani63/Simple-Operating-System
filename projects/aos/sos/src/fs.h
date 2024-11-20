@@ -23,7 +23,8 @@ typedef struct {
     seL4_CPtr signal_cap;
     pt_entry *entry;
     
-    frame_ref_t cache_frame;
+    frame_ref_t *cache_frames;
+    int num_frames;
     bool cached;
 } io_args;
 

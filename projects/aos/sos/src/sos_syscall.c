@@ -97,7 +97,7 @@ static inline int perform_io_core(user_process_t user_process, uint16_t data_off
     sync_bin_sem_post(data_sem);
     io_args *args = malloc(sizeof(io_args));
     *args = (io_args){.err = len, .buff = data + data_offset, .signal_cap = signal_cap,
-                      .entry = entry, .cache_frame = NULL_FRAME, .cached = false};
+                      .entry = entry, .cache_frames = NULL, .num_frames = 0, .cached = false};
     int res;
     if (read) {
         res = file->file_read(user_process.pid, file, data + data_offset, file_offset, len, callback, args);
@@ -264,7 +264,7 @@ void syscall_sos_open(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
             file->handle = args.buff;
 
             sos_stat_t stat;
-            args = (io_args){0, &stat, nfs_signal, NULL, NULL_FRAME, 0};
+            args = (io_args){0, &stat, nfs_signal, NULL, NULL, 0, 0};
             if (nfs_stat_file(file_path, nfs_async_stat_cb, &args)) {
                 seL4_SetMR(0, -1);
                 return;
@@ -439,7 +439,7 @@ void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
 
     sos_stat_t stat = {ST_SPECIAL, 0, 0, 0, 0};
     if (strcmp(file_path, "console")) {
-        io_args args = {0, &stat, nfs_signal, NULL, NULL_FRAME, 0};
+        io_args args = {0, &stat, nfs_signal, NULL, NULL, 0, 0};
         if (nfs_stat_file(file_path, nfs_async_stat_cb, &args)) {
             seL4_SetMR(0, -1);
             return;
