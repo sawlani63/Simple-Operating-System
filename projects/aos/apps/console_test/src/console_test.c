@@ -211,40 +211,29 @@ int mmap_test() {
 
 int main(void)
 {
-    // int fd = sos_open("console", O_RDWR);
-    // assert(fd == 0);
-    // int fail = sos_open("console", O_RDONLY);
-    // assert(fail == -1);
-    // fail = sos_open("console", O_RDWR);
-    // assert(fail == -1);
-    // int res = sos_close(fd);
-    // assert(!res);
     int fd = sos_open("console", O_RDWR);
-    // assert(fd == 0);
-    // printf("Passed open/close test\n");
+    assert(fd == 0);
+    int fail = sos_open("console", O_RDONLY);
+    assert(fail == -1);
+    fail = sos_open("console", O_RDWR);
+    assert(fail == -1);
+    int res = sos_close(fd);
+    assert(!res);
+    fd = sos_open("console", O_RDWR);
+    assert(fd == 0);
+    printf("Passed open/close test\n");
 
-    // test_nfs();
-    // printf("Passed nfs test\n");
+    test_nfs();
+    printf("Passed nfs test\n");
     
-    // pt_test();
-    // mmap_test();
+    pt_test();
+    mmap_test();
     // //test_stack_write(fd);
 
     //test_buffers(fd);
     // printf("Passed read/write buffer test\n");
 
-    /*for (int i = 0; i < 50; i++) {
-        int pid = sos_process_create("console_test_2");
-        if (pid == -1) {
-            break;
-        }
-        int res = sos_process_delete(pid);
-        assert(res == 0);
-        printf("Passed %d\n", i + 1);
-    }
-    printf("Passed process delete test\n");
-
-    int pid = sos_process_create("console_test_2");
+    /*int pid = sos_process_create("console_test_2");
     int pid2 = sos_my_id();
     assert(pid2 == 0);
     printf("Current pid %d\n", pid2);
@@ -263,7 +252,7 @@ int main(void)
     #define SHARED_PAGE_SIZE 0x1000
     char *shared_buffer = (char *) 0x1000;
 
-    int res = sos_share_vm(shared_buffer, SHARED_PAGE_SIZE, 1);
+    res = sos_share_vm(shared_buffer, SHARED_PAGE_SIZE, 1);
     memset(shared_buffer, 0, SHARED_PAGE_SIZE);
     strncpy(shared_buffer, "Hello World!", SHARED_PAGE_SIZE - 1);
     assert(!strcmp(shared_buffer, "Hello World!"));
