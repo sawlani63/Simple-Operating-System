@@ -147,7 +147,7 @@ int clock_page_out(frame_t *victim) {
     pt_entry entry = GET_PAGE(as->page_table, vaddr);
     uint64_t file_offset = get_page_file_offset();
     char *data = (char *)frame_data(entry.page.frame_ref);
-    io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, NULL, NULL_FRAME, 0};
+    io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, NULL, NULL, 0, 0};
 
     /* Perform the actual write to the NFS page file. Wait for it to finish and make sure it succeeds. */
     sync_bin_sem_wait(pagefile_sem);
@@ -212,7 +212,7 @@ int clock_try_page_in(user_process_t *user_process, seL4_Word vaddr) {
         uint64_t file_offset = entry.swap_map_index * PAGE_SIZE_4K;
         sync_bin_sem_wait(data_sem);
         char *data = (char *)frame_data(ref);
-        io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, NULL, NULL_FRAME, 0};
+        io_args args = {PAGE_SIZE_4K, data, swap_manager.page_notif, NULL, NULL, 0, 0};
         sync_bin_sem_wait(pagefile_sem);
         int res = nfs_pread_file(user_process->pid, nfs_pagefile, NULL, file_offset, PAGE_SIZE_4K, nfs_pagefile_read_cb, &args);
         if (res < (int)PAGE_SIZE_4K) {

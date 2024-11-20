@@ -31,7 +31,7 @@ static inline bool is_shared_region(mem_region_t *region) {
  * 
  * @return 0 on success
  */
-int add_shared_region(user_process_t process, void *vaddr, size_t len, uint64_t perms);
+int add_shared_region(user_process_t process, seL4_Word vaddr, size_t len, uint64_t perms);
 
 /**
  * Unmap the page table entry at the given vaddr

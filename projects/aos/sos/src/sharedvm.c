@@ -57,7 +57,7 @@ pt_entry *vaddr_to_page_entry(uintptr_t fault_addr, page_upper_directory *l1_pt)
 
 extern user_process_t *user_process_list;
 
-int add_shared_region(user_process_t process, void *vaddr, size_t len, uint64_t perms) {
+int add_shared_region(user_process_t process, seL4_Word vaddr, size_t len, uint64_t perms) {
     for (seL4_Word curr_addr = vaddr; curr_addr < vaddr + len; curr_addr += 4096) {
         pt_entry *pte;
         if (!vaddr_is_mapped(global_addrspace, curr_addr)) {
