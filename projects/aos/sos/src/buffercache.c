@@ -23,7 +23,6 @@ seL4_CPtr cache_sem_cptr;
 extern sync_bin_sem_t *data_sem;
 
 /* FNV-1a hash function */
-/* Not a huge fan of this. Could be slightly slower for long file paths. */
 static inline khint64_t hash_key(cache_key_t key) {
     const uint64_t fnv_prime = 1099511628211;
     uint64_t hash = 14695981039346656037ULL;
@@ -34,7 +33,6 @@ static inline khint64_t hash_key(cache_key_t key) {
     return hash;
 }
 
-/* Not a huge fan of this. Could be slightly slower for long file paths. */
 static inline int keys_equal(cache_key_t a, cache_key_t b) {
     return a.handle == b.handle && a.block_num == b.block_num;
 }
@@ -81,7 +79,7 @@ static int buffercache_readahead(int pid, struct file *file, char *data, uint64_
     }
 
     /* Allocate frames for read-ahead blocks and map them into the hash map. */
-    frame_ref_t *refs = calloc(MAX_READ_AHEAD, sizeof(frame_ref_t));
+    frame_ref_t *refs = malloc(MAX_READ_AHEAD * sizeof(frame_ref_t));
     size_t frames_allocated = 0;
     for (uint8_t i = 0; i < num_blocks_reading; i++) {
         cache_key_t ahead_key = {.handle = key.handle, .block_num = key.block_num + i};
@@ -162,7 +160,7 @@ int buffercache_write(int pid, struct file *file, char *data, uint64_t offset, u
                 printf("Error adding to buffer cache map\n");
                 return -1;
             }
-            cache = clock_alloc_frame(0, pid, 1, (uintptr_t) &kh_key(cache_map, iter));
+            cache = clock_alloc_frame(0, pid, 1, 0);
             kh_value(cache_map, iter) = cache;
         } else {
             cache = kh_value(cache_map, iter);
@@ -229,7 +227,11 @@ static inline int buffercache_flush_entry(open_file *file, cache_key_t key, fram
     *args = (io_args){NFS_BLKSIZE, NULL, cache_ep, NULL, NULL, 0, false};
     int res = nfs_pwrite_file(0, file, (char *) frame_data(ref), key.block_num * NFS_BLKSIZE,
                               count, nfs_buffercache_flush_cb, args);
-    return res < (int)count ? -1 : (int)count;
+    if (res < (int)count) {
+        free(args);
+        return -1;
+    }
+    return (int)count;
 }
 
 static inline int cleanup_bitmap_and_pending_requests(open_file *file, int outstanding_requests) {
@@ -254,6 +256,7 @@ int buffercache_clean_frame(cache_key_t key, frame_ref_t ref) {
     int res = nfs_pwrite_handle(key.handle, (char *) frame_data(ref), key.block_num * NFS_BLKSIZE,
                                 NFS_BLKSIZE, nfs_buffercache_flush_cb, args);
     if (res < (int)NFS_BLKSIZE) {
+        free(args);
         return -1;
     }
     seL4_Recv(cache_ep, 0, cache_reply);
