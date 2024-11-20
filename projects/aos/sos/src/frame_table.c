@@ -143,6 +143,10 @@ frame_ref_t clock_alloc_frame(size_t vaddr, pid_t pid, size_t pinned, uintptr_t 
             clock_hand = frame_table.allocated.first;
         }
         frame_t *victim = clock_choose_victim(&clock_hand, frame_table.allocated.first);
+        if (victim == NULL) {
+            ZF_LOGE("Failed to choose victim frame!");
+            return NULL_FRAME;
+        }
         if (clock_page_out(victim) < 0) {
             sync_bin_sem_post(data_sem);
             ZF_LOGE("Failed to page out a frame!");
@@ -167,6 +171,7 @@ frame_ref_t clock_alloc_frame(size_t vaddr, pid_t pid, size_t pinned, uintptr_t 
     
     frame->pinned = pinned;
     frame->referenced = 1;
+    frame->shared = 0;
     sync_bin_sem_post(data_sem);
     return ref;
 }

@@ -75,7 +75,6 @@ static char nfs_dir_buf[PATH_MAX];
 static uint8_t ip_octet;
 
 extern sync_bin_sem_t *nfs_sem;
-extern seL4_CPtr ipc_ep;
 
 static void nfs_mount_cb(int status, struct nfs_context *nfs, void *data, void *private_data);
 

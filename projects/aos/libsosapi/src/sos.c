@@ -157,21 +157,33 @@ pid_t sos_process_wait(pid_t pid)
 
 void sos_usleep(int msec)
 {
-    /* Set the first message register to the sos_usleep syscall number */
-    seL4_SetMR(0, 0);
-    /* Set the second message register to the amount of time to sleep for */
+    /* Request the timer driver to register a timer with msec delay */
+    seL4_SetMR(0, timer_RegisterTimer);
     seL4_SetMR(1, msec);
-    /* Invokes the SOS endpoint to request a response (SOS only responds after the given delay has passed so thread remains blocked for that time) */
     seL4_Send(TIMER_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 2));
+    /* Wait on the timer driver to signal the notification to wake up */
     seL4_Wait(TIMER_NTFN, 0);
 }
 
 int64_t sos_time_stamp(void)
 {
-    /* Set the first message register to the sos_time_stamp syscall number */
-    seL4_SetMR(0, 1);
-    /* Invokes the SOS endpoint for the IPC protocol to request a response and block until one is received */
+    seL4_SetMR(0, timer_MicroTimestamp);
     seL4_Call(TIMER_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 1));
-    /* Return the response received from SOS */
+    return seL4_GetMR(0);
+}
+
+/*************************************************************************/
+/*                                   */
+/* Optional (bonus) system calls                     */
+/*                                   */
+/*************************************************************************/
+
+int sos_share_vm(void *adr, size_t size, int writable) 
+{
+    seL4_SetMR(0, SYSCALL_SOS_SHARE_VM);
+    seL4_SetMR(1, (seL4_Word) adr);
+    seL4_SetMR(2, (seL4_Word) size);
+    seL4_SetMR(3, (seL4_Word) writable);
+    seL4_Call(SOS_IPC_EP_CAP, seL4_MessageInfo_new(0, 0, 0, 4));
     return seL4_GetMR(0);
 }

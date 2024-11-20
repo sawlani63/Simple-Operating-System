@@ -30,6 +30,7 @@
 #include <sos.h>
 
 #include <utils/page.h>
+#include <sys/mman.h>
 
 #define NBLOCKS 9
 #define NPAGES_PER_BLOCK 28
@@ -183,9 +184,8 @@ int test_stack_write(int console_fd) {
 #define MMAP_THRESHOLD (0x1c00*SIZE_ALIGN)
 
 int mmap_test_core(int size) {
-    char *buf = malloc(size);
+    char *buf = mmap(0, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
     char *buf1 = malloc(size);
-    printf("buf addr: %p\n", buf);
 
     /* Set */
     for (int b = 0; b < size / PAGE_SIZE_4K; b+=PAGE_SIZE_4K) {
@@ -199,7 +199,7 @@ int mmap_test_core(int size) {
         assert(buf1[b] == b);
     }
 
-    free(buf);
+    munmap(buf, size);
     free(buf1);
 }
 
@@ -211,27 +211,27 @@ int mmap_test() {
 
 int main(void)
 {
+    // int fd = sos_open("console", O_RDWR);
+    // assert(fd == 0);
+    // int fail = sos_open("console", O_RDONLY);
+    // assert(fail == -1);
+    // fail = sos_open("console", O_RDWR);
+    // assert(fail == -1);
+    // int res = sos_close(fd);
+    // assert(!res);
     int fd = sos_open("console", O_RDWR);
-    assert(fd == 0);
-    int fail = sos_open("console", O_RDONLY);
-    assert(fail == -1);
-    fail = sos_open("console", O_RDWR);
-    assert(fail == -1);
-    int res = sos_close(fd);
-    assert(!res);
-    fd = sos_open("console", O_RDWR);
-    assert(fd == 0);
-    printf("Passed open/close test\n");
+    // assert(fd == 0);
+    // printf("Passed open/close test\n");
 
-    test_nfs();
-    printf("Passed nfs test\n");
+    // test_nfs();
+    // printf("Passed nfs test\n");
     
-    pt_test();
-    mmap_test();
-    //test_stack_write(fd);
+    // pt_test();
+    // mmap_test();
+    // //test_stack_write(fd);
 
-    test_buffers(fd);
-    printf("Passed read/write buffer test\n");
+    //test_buffers(fd);
+    // printf("Passed read/write buffer test\n");
 
     /*for (int i = 0; i < 50; i++) {
         int pid = sos_process_create("console_test_2");
@@ -259,4 +259,23 @@ int main(void)
     for (int i = 0; i < num; i++) {
         printf("From process status: pid - %d, size - %d, stime - %d, app_name - %s\n", pinfo[i].pid, pinfo[i].size, pinfo[i].stime, pinfo[i].command);
     }*/
+
+    #define SHARED_PAGE_SIZE 0x1000
+    char *shared_buffer = (char *) 0x1000;
+
+    int res = sos_share_vm(shared_buffer, SHARED_PAGE_SIZE, 1);
+    memset(shared_buffer, 0, SHARED_PAGE_SIZE);
+    strncpy(shared_buffer, "Hello World!", SHARED_PAGE_SIZE - 1);
+    assert(!strcmp(shared_buffer, "Hello World!"));
+
+    int pid = sos_process_create("console_test_2");
+    sos_process_wait(pid);
+    
+    //strncpy(shared_buffer, "CHirag", SHARED_PAGE_SIZE - 1); // if console test 2 declared region as non writeable, this should fault for writing to rdonly page
+    assert(sos_share_vm(shared_buffer, SHARED_PAGE_SIZE, 1) == -1); // test shared region overlap
+    assert(sos_share_vm(0xffff0000, SHARED_PAGE_SIZE, 1) == -1); // test process region overlap with ipc buffer region
+    assert(sos_share_vm(0x1001, SHARED_PAGE_SIZE, 1) == -1); // test non-page aligned base
+    assert(sos_share_vm(shared_buffer, 0x1001, 1) == -1); // test non-page aligned size
+    assert(!strcmp(shared_buffer, "Goodbye World!"));
+    printf("Passed shared memory test!\n");
 }

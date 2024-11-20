@@ -121,7 +121,13 @@ frame_t *clock_choose_victim(frame_ref_t *clock_hand, frame_ref_t first) {
         curr_frame->referenced = 0;
         if (!curr_frame->pinned && !curr_frame->cache) {
             addrspace_t *as = get_process(curr_frame->user_frame.pid).addrspace;
-            seL4_ARM_Page_Unmap(GET_PAGE(as->page_table, curr_frame->user_frame.vaddr).page.frame_cptr);
+            seL4_CPtr frame_cptr = GET_PAGE(as->page_table, curr_frame->user_frame.vaddr).page.frame_cptr;
+            if (seL4_ARM_Page_Unmap(frame_cptr)) {
+                ZF_LOGE("Failed to unmap");
+                return NULL;
+            }
+            free_untype(&frame_cptr, NULL);
+            GET_PAGE(as->page_table, curr_frame->user_frame.vaddr).page.frame_cptr = seL4_CapNull;
         }
         *clock_hand = curr_frame->next ? curr_frame->next : first;
         curr_frame = frame_from_ref(*clock_hand);
@@ -159,10 +165,12 @@ int clock_page_out(frame_t *victim) {
 
     /* Unmap the entry from the process's vspace and free the frame and its capability. */
     seL4_CPtr frame_cptr = entry.page.frame_cptr;
-    if (seL4_ARM_Page_Unmap(frame_cptr) != seL4_NoError) {
-        return -1;
+    if (frame_cptr != seL4_CapNull) {
+        if (seL4_ARM_Page_Unmap(frame_cptr) != seL4_NoError) {
+            return -1;
+        }
+        free_untype(&frame_cptr, NULL);
     }
-    free_untype(&frame_cptr, NULL);
     free_frame(entry.page.frame_ref);
 
     /* Update our shadow page table mapping to mark it as invalid, swapped and store its index in the page file. */

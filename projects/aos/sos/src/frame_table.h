@@ -67,7 +67,7 @@ PACKED struct frame {
         struct {
             /* Virtual address this frame is referring to. */
             size_t vaddr : 48;
-            /* Pid of the process holding this frame. */
+            /* Pid of the process holding this frame (16 bit map if frame is shared). */
             size_t pid : 16;
         } user_frame;
         uintptr_t buffer_cache_key : 64;
@@ -76,10 +76,10 @@ PACKED struct frame {
     size_t pinned : 1;
     /* Reference bit to indicate whether this frame was recently referenced. */
     size_t referenced : 1;
+    /* A bit to indicate whether the frame is being shared */
+    size_t shared : 1;
     /* Cache bit to indicate whether this frame is part of SOS's buffer cache. */
     size_t cache : 1;
-    /* Unused bit */
-    size_t unused : 1;
 };
 compile_time_assert("Small CPtr size", 20 >= INITIAL_TASK_CSPACE_BITS);
 

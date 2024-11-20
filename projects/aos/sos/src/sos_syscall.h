@@ -18,6 +18,7 @@
 #define SYSCALL_SOS_TIME_STAMP SYS_clock_gettime
 #define SYSCALL_SOS_GETDIRENT SYS_getdents64
 #define SYSCALL_SOS_STAT SYS_statfs
+#define SYSCALL_SOS_SHARE_VM 1
 
 #define SYSCALL_SYS_BRK SYS_brk
 #define SYSCALL_SYS_MMAP SYS_mmap
@@ -32,6 +33,7 @@ void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg, UNUSED seL4_Word badge);
 void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg);
 void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 void syscall_sos_stat(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
+void syscall_sos_share_vm(seL4_MessageInfo_t *reply_msg, seL4_Word badge);
 
 /* SYS system calls */
 void syscall_sys_brk(seL4_MessageInfo_t *reply_msg, seL4_Word badge);

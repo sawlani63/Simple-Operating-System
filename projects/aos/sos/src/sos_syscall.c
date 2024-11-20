@@ -14,6 +14,7 @@
 #include "clock_replacement.h"
 
 #include "boot_driver.h"
+#include "sharedvm.h"
 
 #define MAX_BATCH_SIZE 3
 
@@ -31,7 +32,7 @@ seL4_CPtr nfs_signal;
 seL4_CPtr signal_cap;
 seL4_CPtr reply;
 
-extern seL4_CPtr ipc_ep;
+extern seL4_CPtr clock_driver_ep;
 
 bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge);
 
@@ -401,7 +402,7 @@ void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg, UNUSED seL4_Word badge)
     seL4_SetMR(0, timer_RegisterTimer);
     uint64_t delay = seL4_GetMR(1);
     seL4_SetMR(1, delay);
-    seL4_Send(ipc_ep, seL4_MessageInfo_new(0, 0, 0, 2));
+    seL4_Send(clock_driver_ep, seL4_MessageInfo_new(0, 0, 0, 2));
     seL4_Wait(clock_driver.timer, 0);
 }
 
@@ -412,7 +413,7 @@ inline void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)
     *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
     /* Set the reply message to be the timestamp since booting in microseconds */
     seL4_SetMR(0, timer_MicroTimestamp);
-    seL4_Call(ipc_ep, seL4_MessageInfo_new(0, 0, 0, 1));
+    seL4_Call(clock_driver_ep, seL4_MessageInfo_new(0, 0, 0, 1));
     seL4_SetMR(0, seL4_GetMR(0));
 }
 
@@ -504,6 +505,42 @@ void syscall_sos_getdirent(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     nfs_close_dir(args.buff);
     
     seL4_SetMR(0, res);
+}
+
+void syscall_sos_share_vm(seL4_MessageInfo_t *reply_msg, seL4_Word badge) {
+    ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_SHARE_VM);
+    *reply_msg = seL4_MessageInfo_new(0, 0, 0, 1);
+    seL4_Word adr = seL4_GetMR(1);
+    size_t size = seL4_GetMR(2);
+    int writable = seL4_GetMR(3);
+
+    if ((adr % PAGE_SIZE_4K) || (size % PAGE_SIZE_4K)) {
+        seL4_SetMR(0, -1);
+        return;
+    } else if (vaddr_is_mapped(user_process_list[badge].addrspace, adr)) {
+        seL4_SetMR(0, -1);
+        return;
+    } else if (check_overlap(user_process_list[badge].addrspace, adr, size)) {
+        seL4_SetMR(0, -1);
+        return;
+    }
+
+    uint64_t perms = REGION_RD;
+    if (writable) {
+        perms |= REGION_WR;
+    }
+
+    sync_bin_sem_wait(process_list_sem);
+    user_process_t user_process = user_process_list[badge];
+    sync_bin_sem_post(process_list_sem);
+
+    mem_region_t *reg = insert_shared_region(user_process.addrspace, (size_t) adr, size, perms);
+    if (reg == NULL) {
+        seL4_SetMR(0, -1);
+        return;
+    }
+
+    seL4_SetMR(0, add_shared_region(user_process, adr, size, perms));
 }
 
 void syscall_unknown_syscall(seL4_MessageInfo_t *reply_msg, seL4_Word syscall_number)

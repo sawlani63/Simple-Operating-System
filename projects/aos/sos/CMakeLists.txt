@@ -78,6 +78,7 @@ add_executable(
     src/buffercache.c
     src/dentry.c
     src/boot_driver.c
+    src/sharedvm.c
 )
 target_include_directories(sos PRIVATE "include")
 target_link_libraries(

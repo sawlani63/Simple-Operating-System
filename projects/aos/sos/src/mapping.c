@@ -17,6 +17,7 @@
 #include "vmem_layout.h"
 #include "frame_table.h"
 #include "clock_replacement.h"
+#include "sharedvm.h"
 
 /**
  * Retypes and maps a page table into the root servers page global directory
@@ -173,8 +174,8 @@ seL4_Error sos_map_frame_cspace(cspace_t *cspace, seL4_CPtr frame_cap, seL4_CPtr
     return map_frame_impl(cspace, frame_cap, vspace, vaddr, rights, attr, free_slots, used, page_table);
 }
 
-seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
-                         size_t perms, frame_ref_t frame_ref, addrspace_t *as)
+seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr, size_t perms,
+                         frame_ref_t frame_ref, addrspace_t *as)
 {
     /* We assume SOS provided us with a valid, unmapped vaddr and isn't confusing any permissions. */
 
@@ -219,9 +220,10 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
         return seL4_NotEnoughMemory;
     }
 
+    seL4_CPtr frame_cap = frame_page(frame_ref);
     /* create slot for the frame to load the data into */
     sync_bin_sem_wait(cspace_sem);
-    seL4_CPtr frame_cap = cspace_alloc_slot(cspace);
+    frame_cap = cspace_alloc_slot(cspace);
     if (frame_cap == seL4_CapNull) {
         ZF_LOGD("Failed to alloc slot");
         sync_bin_sem_post(cspace_sem);
@@ -269,7 +271,7 @@ seL4_Error sos_map_frame(cspace_t *cspace, seL4_CPtr vspace, seL4_Word vaddr,
 }
 
 extern sync_bin_sem_t *data_sem;
-void sos_destroy_page_table(addrspace_t *as)
+void sos_destroy_page_table(addrspace_t *as, pid_t pid)
 {
     page_upper_directory *l1_pt = as->page_table;
     for (size_t i = 0; i < PAGE_TABLE_ENTRIES; i++) {
@@ -296,14 +298,31 @@ void sos_destroy_page_table(addrspace_t *as)
                         continue;
                     }
                     seL4_CPtr frame_cptr = entry.page.frame_cptr;
-                    seL4_Error err = seL4_ARM_Page_Unmap(frame_cptr);
-                    if (err != seL4_NoError) {
-                        ZF_LOGE("Failed to unmap");
-                        return;
+                    if (frame_cptr != seL4_CapNull) {
+                        seL4_Error err = seL4_ARM_Page_Unmap(frame_cptr);
+                        if (err != seL4_NoError) {
+                            ZF_LOGE("Failed to unmap");
+                            return;
+                        }
+                        free_untype(&frame_cptr, NULL);
                     }
-                    free_untype(&frame_cptr, NULL);
                     sync_bin_sem_wait(data_sem);
-                    free_frame(entry.page.frame_ref);
+                    frame_t *frame = frame_from_ref(entry.page.frame_ref);
+                    /* Unset the bit at position pid in the pid map if the frame is shared */
+                    if (frame->shared) {
+                        frame->user_frame.pid &= ~(1 << pid);
+                        /* Free the shared frame if all the pid bits are unset (frame isn't held by any process)*/
+                        if (frame->user_frame.pid == 0) {
+                            /* Unmap the entry with the corresponding frame in the global address space */
+                            if (unmap_global_entry(frame->user_frame.vaddr)) {
+                                ZF_LOGE("Failed to unmap global entry");
+                                return;
+                            }
+                            free_frame(entry.page.frame_ref);
+                        }
+                    } else {
+                        free_frame(entry.page.frame_ref);
+                    }
                     sync_bin_sem_post(data_sem);
                     l4_pt[m] = (pt_entry){0};
                 }
@@ -412,7 +431,7 @@ void sos_map_timer(cspace_t *cspace, seL4_CPtr vspace, seL4_CPtr frame, void *ti
     assert(cspace != NULL);
 
     /* map */
-    seL4_Error err = map_frame(cspace, frame, vspace, timer_vaddr, seL4_AllRights, false);
+    seL4_Error err = map_frame(cspace, frame, vspace, (seL4_Word) timer_vaddr, seL4_AllRights, false);
     if (err != seL4_NoError) {
         ZF_LOGE("Failed to map device frame at %p", (void *) timer_vaddr);
         cspace_delete(cspace, frame);
