@@ -17,5 +17,5 @@
 #include <elf.h>
 #include "sos_syscall.h"
 
-int elf_load(cspace_t *cspace, elf_t *elf_file, open_file *file, addrspace_t *as, seL4_CPtr vspace, unsigned *size, pid_t pid);
+int elf_load(cspace_t *cspace, elf_t *elf_file, open_file *file, addrspace_t *as, seL4_CPtr vspace, unsigned *size, pid_t pid, bool timer);
 char *elf_load_header(open_file *file, unsigned long *elf_size);

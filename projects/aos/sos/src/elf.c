@@ -66,7 +66,7 @@ static inline seL4_CapRights_t get_sel4_rights_from_elf(unsigned long permission
  *
  */
 static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const char *src, size_t segment_size,
-                                    size_t file_size, uintptr_t dst, seL4_Word flags, addrspace_t *as, unsigned *size, pid_t pid)
+                                    size_t file_size, uintptr_t dst, seL4_Word flags, addrspace_t *as, unsigned *size, pid_t pid, bool timer)
 {
     assert(file_size <= segment_size);
 
@@ -127,7 +127,9 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
         }
 
         /* Unpin the frame */
-        unpin_frame(frame);
+        if (!timer) {
+            unpin_frame(frame);
+        }
 
         dst += segment_bytes;
         pos += segment_bytes;
@@ -136,7 +138,7 @@ static int load_segment_into_vspace(cspace_t *cspace, seL4_CPtr loadee, const ch
     return 0;
 }
 
-int elf_load(cspace_t *cspace, elf_t *elf_file, open_file *file, addrspace_t *as, seL4_CPtr vspace, unsigned *size, pid_t pid)
+int elf_load(cspace_t *cspace, elf_t *elf_file, open_file *file, addrspace_t *as, seL4_CPtr vspace, unsigned *size, pid_t pid, bool timer)
 {
     int num_headers = elf_getNumProgramHeaders(elf_file);
     for (int i = 0; i < num_headers; i++) {
@@ -175,7 +177,7 @@ int elf_load(cspace_t *cspace, elf_t *elf_file, open_file *file, addrspace_t *as
         /* Copy it across into the vspace. */
         ZF_LOGD(" * Loading segment %p-->%p\n", (void *) vaddr, (void *)(vaddr + segment_size));
         err = load_segment_into_vspace(cspace, vspace, src, segment_size, file_size, vaddr,
-                                           reg_flags, as, size, pid);
+                                           reg_flags, as, size, pid, timer);
         if (err < 0) {
             ZF_LOGE("Elf loading failed!");
             return 1;

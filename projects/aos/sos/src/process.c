@@ -594,7 +594,7 @@ int start_process(char *app_name, bool timer)
     user_process.size++;
 
     /* load the elf image from nfs */
-    err = elf_load(&cspace, &elf_file, elf, user_process.addrspace, user_process.vspace, &user_process.size, user_process.pid);
+    err = elf_load(&cspace, &elf_file, elf, user_process.addrspace, user_process.vspace, &user_process.size, user_process.pid, timer);
     if (err) {
         ZF_LOGE("Failed to load elf image");
         free_process(user_process, false);
