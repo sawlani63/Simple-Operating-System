@@ -55,7 +55,6 @@ void nfs_buffercache_read_wrcb(int err, UNUSED struct nfs_context *nfs, void *da
     if (err < 0) {
         ZF_LOGE("NFS: Error in reading file with wrcb, %s\n", (char*) data);
     } else {
-        printf("Start\n");
         sync_bin_sem_wait(data_sem);
         if (*(args->cache_frames) != NULL_FRAME) {
             memcpy(frame_data(*(args->cache_frames)), args->buff, args->err);
@@ -63,7 +62,6 @@ void nfs_buffercache_read_wrcb(int err, UNUSED struct nfs_context *nfs, void *da
         }
         unpin_frame(args->entry->page.frame_ref);
         sync_bin_sem_post(data_sem);
-        printf("end\n");
     }
     seL4_SetMR(0, args->err);
     seL4_SetMR(1, err);
