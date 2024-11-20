@@ -122,7 +122,10 @@ frame_t *clock_choose_victim(frame_ref_t *clock_hand, frame_ref_t first) {
         if (!curr_frame->pinned && !curr_frame->cache) {
             addrspace_t *as = get_process(curr_frame->user_frame.pid).addrspace;
             seL4_CPtr frame_cptr = GET_PAGE(as->page_table, curr_frame->user_frame.vaddr).page.frame_cptr;
-            seL4_ARM_Page_Unmap(frame_cptr);
+            if (seL4_ARM_Page_Unmap(frame_cptr)) {
+                ZF_LOGE("Failed to unmap");
+                return NULL;
+            }
             free_untype(&frame_cptr, NULL);
             GET_PAGE(as->page_table, curr_frame->user_frame.vaddr).page.frame_cptr = seL4_CapNull;
         }
