@@ -67,7 +67,7 @@ int add_shared_region(user_process_t process, void *vaddr, size_t len, uint64_t 
             pte->perms = perms;
 
             /* Pin any frames allocated as shared */
-            frame_ref_t ref = clock_alloc_frame(curr_addr, 0, 1);
+            frame_ref_t ref = clock_alloc_frame(curr_addr, 0, 1, 0);
             if (ref == NULL_FRAME) {
                 ZF_LOGE("Failed to alloc frame");
                 return -1;
@@ -77,13 +77,13 @@ int add_shared_region(user_process_t process, void *vaddr, size_t len, uint64_t 
                where each set position indicates a process holding that frame */
             frame_t *frame = frame_from_ref(ref);
             frame->shared = 1;
-            frame->pid |= (1 << process.pid);
+            frame->user_frame.pid |= (1 << process.pid);
             pte->page.frame_ref = ref;
             pte->page.frame_cptr = frame_page(ref);
         } else {
             pte = vaddr_to_page_entry(curr_addr, global_addrspace->page_table);
             frame_t *frame = frame_from_ref(pte->page.frame_ref);
-            frame->pid |= (1 << process.pid);
+            frame->user_frame.pid |= (1 << process.pid);
 
             /* If the region so far is writeable but a process declares it as read-only, then
                set the region permissions of the global entry and the processes sharing the page
@@ -95,9 +95,9 @@ int add_shared_region(user_process_t process, void *vaddr, size_t len, uint64_t 
                     if (i == process.pid) {
                         continue;
                     }
-                    if (frame->pid & (1 << i)) {
+                    if (frame->user_frame.pid & (1 << i)) {
                         user_process_t user_proc = user_process_list[i];
-                        pt_entry *entry = vaddr_to_page_entry(frame->vaddr, user_proc.addrspace->page_table);
+                        pt_entry *entry = vaddr_to_page_entry(frame->user_frame.vaddr, user_proc.addrspace->page_table);
                         entry->perms = REGION_RD;
                         seL4_CPtr frame_cptr = entry->page.frame_cptr;
                         seL4_Error err = seL4_ARM_Page_Unmap(frame_cptr);

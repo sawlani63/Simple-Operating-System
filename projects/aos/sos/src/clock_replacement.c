@@ -121,10 +121,10 @@ frame_t *clock_choose_victim(frame_ref_t *clock_hand, frame_ref_t first) {
         curr_frame->referenced = 0;
         if (!curr_frame->pinned && !curr_frame->cache) {
             addrspace_t *as = get_process(curr_frame->user_frame.pid).addrspace;
-            seL4_CPtr frame_cptr = GET_PAGE(as->page_table, curr_frame->vaddr).page.frame_cptr;
+            seL4_CPtr frame_cptr = GET_PAGE(as->page_table, curr_frame->user_frame.vaddr).page.frame_cptr;
             seL4_ARM_Page_Unmap(frame_cptr);
             free_untype(&frame_cptr, NULL);
-            GET_PAGE(as->page_table, curr_frame->vaddr).page.frame_cptr = seL4_CapNull;
+            GET_PAGE(as->page_table, curr_frame->user_frame.vaddr).page.frame_cptr = seL4_CapNull;
         }
         *clock_hand = curr_frame->next ? curr_frame->next : first;
         curr_frame = frame_from_ref(*clock_hand);

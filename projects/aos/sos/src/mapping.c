@@ -310,11 +310,11 @@ void sos_destroy_page_table(addrspace_t *as, pid_t pid)
                     frame_t *frame = frame_from_ref(entry.page.frame_ref);
                     /* Unset the bit at position pid in the pid map if the frame is shared */
                     if (frame->shared) {
-                        frame->pid &= ~(1 << pid);
+                        frame->user_frame.pid &= ~(1 << pid);
                         /* Free the shared frame if all the pid bits are unset (frame isn't held by any process)*/
-                        if (frame->pid == 0) {
+                        if (frame->user_frame.pid == 0) {
                             /* Unmap the entry with the corresponding frame in the global address space */
-                            if (unmap_global_entry(frame->vaddr)) {
+                            if (unmap_global_entry(frame->user_frame.vaddr)) {
                                 ZF_LOGE("Failed to unmap global entry");
                                 return;
                             }
