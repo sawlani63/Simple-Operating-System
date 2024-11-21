@@ -200,6 +200,7 @@ int buffercache_read(int pid, struct file *file, char *data, uint64_t offset, ui
         sync_bin_sem_wait(data_sem);
         khiter_t iter = kh_get(cache, cache_map, key);
         if (iter == kh_end(cache_map)) {
+            ((io_args *) args)->err = bytes_left;
             sync_bin_sem_post(data_sem);
             int res = buffercache_readahead(pid, file, data, offset, cb, args, key);
             sync_bin_sem_post(cache_sem);
