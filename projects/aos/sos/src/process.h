@@ -42,8 +42,6 @@ typedef struct {
     ut_t *reply_ut;
     seL4_CPtr wake;
     ut_t *wake_ut;
-    seL4_CPtr timer;
-    ut_t *timer_ut;
 
     seL4_CPtr ep_slot;
     ut_t *tcb_ut;

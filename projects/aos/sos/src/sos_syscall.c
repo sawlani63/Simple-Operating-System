@@ -392,6 +392,8 @@ void syscall_sos_write(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     seL4_SetMR(0, res);
 }
 
+extern seL4_CPtr sleep_signal;
+
 void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg, UNUSED seL4_Word badge)
 {
     ZF_LOGV("syscall: some thread made syscall %d!\n", SYSCALL_SOS_USLEEP);
@@ -403,7 +405,7 @@ void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg, UNUSED seL4_Word badge)
     uint64_t delay = seL4_GetMR(1);
     seL4_SetMR(1, delay);
     seL4_Send(clock_driver_ep, seL4_MessageInfo_new(0, 0, 0, 2));
-    seL4_Wait(clock_driver.timer, 0);
+    seL4_Wait(sleep_signal, 0);
 }
 
 inline void syscall_sos_time_stamp(seL4_MessageInfo_t *reply_msg)

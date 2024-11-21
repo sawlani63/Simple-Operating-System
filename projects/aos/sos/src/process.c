@@ -37,11 +37,17 @@ sync_bin_sem_t *pid_queue_sem = NULL;
 sync_bin_sem_t *process_list_sem = NULL;
 
 extern seL4_CPtr clock_driver_ep;
+seL4_CPtr sleep_signal;
 
 NORETURN void syscall_loop(void *arg);
 
 int init_proc()
 {
+    ut_t *ut = alloc_retype(&sleep_signal, seL4_NotificationObject, seL4_NotificationBits);
+    if (sleep_signal == seL4_CapNull || ut == NULL) {
+        ZF_LOGE("No memory for notifications");
+        return 1;
+    }
     user_process_list = calloc(NUM_PROC, sizeof(user_process_t));
     if (user_process_list == NULL) {
         return 1;
@@ -52,7 +58,7 @@ int init_proc()
         return 1;
     }
     /* Never freed so we don't keep track */
-    ut_t *ut = alloc_retype(&proc_signal, seL4_EndpointObject, seL4_EndpointBits);
+    ut = alloc_retype(&proc_signal, seL4_EndpointObject, seL4_EndpointBits);
     if (proc_signal == seL4_CapNull || ut == NULL) {
         ZF_LOGE("No memory for notifications");
         free(pid_queue);
@@ -175,7 +181,6 @@ void free_process(user_process_t user_process, bool suicidal)
     free_pid(user_process.pid);
 
     /* Free the remainder of the untyped memory and caps for the process, including the VSpace and other ntfn/ep objects. */
-    free_untype(&user_process.timer, user_process.timer_ut);
     free_untype(&user_process.wake, user_process.wake_ut);
     free_untype(&user_process.reply, user_process.reply_ut);
     free_untype(&user_process.ep, user_process.ep_ut);
@@ -472,15 +477,9 @@ int start_process(char *app_name, bool timer)
             free_process(user_process, false);
             return -1;
         }
-        user_process.timer_ut = alloc_retype(&user_process.timer, seL4_NotificationObject, seL4_NotificationBits);
-        if (user_process.timer_ut == NULL) {
-            ZF_LOGE("Failed to create notification object");
-            free_process(user_process, false);
-            return -1;
-        }
         seL4_CPtr slot2 = cspace_alloc_slot(&user_process.cspace);
         /* Mint the notification for the clock driver to signal for sleep syscalls */
-        err = cspace_mint(&user_process.cspace, slot2, &cspace, user_process.timer, seL4_AllRights, (seL4_Word) user_process.pid);
+        err = cspace_mint(&user_process.cspace, slot2, &cspace, sleep_signal, seL4_AllRights, (seL4_Word) user_process.pid);
         if (err) {
             ZF_LOGE("Failed to mint user ep");
             free_process(user_process, false);
@@ -489,7 +488,7 @@ int start_process(char *app_name, bool timer)
     } else {
         user_process.ntfn_slot = cspace_alloc_slot(&user_process.cspace);
         /* Mint the notification for the clock driver to signal for sleep syscalls */
-        err = cspace_mint(&user_process.cspace, user_process.ntfn_slot, &cspace, user_process_list[0].timer, seL4_AllRights, (seL4_Word) user_process.pid);
+        err = cspace_mint(&user_process.cspace, user_process.ntfn_slot, &cspace, sleep_signal, seL4_AllRights, (seL4_Word) user_process.pid);
         if (err) {
             ZF_LOGE("Failed to mint user ep");
             free_process(user_process, false);
@@ -641,6 +640,14 @@ int start_process(char *app_name, bool timer)
         err = fdt_put(user_process.fdt, file, &fd); // initialise stderr
         if (err) {
             ZF_LOGE("Failed to initialise stderr");
+            free_process(user_process, false);
+            return -1;
+        }
+    } else {
+        /* Halt the clock driver process so that the timer device can be mapped to its vspace after creation and irqs are set up */
+        seL4_Error error = seL4_TCB_Suspend(user_process.tcb);
+        if (error) {
+            ZF_LOGE("Failed to suspend clock driver tcb");
             free_process(user_process, false);
             return -1;
         }

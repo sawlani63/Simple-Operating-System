@@ -62,7 +62,7 @@
 #define IRQ_EP_BADGE         BIT(seL4_BadgeBits - 1ul)
 #define IRQ_IDENT_BADGE_BITS MASK(seL4_BadgeBits - 1ul)
 
-#define APP_NAME             "sosh"
+#define APP_NAME             "console_test"
 
 extern char __eh_frame_start[];
 /* provided by gcc */
@@ -447,9 +447,6 @@ NORETURN void *main_continued(UNUSED void *arg)
     error = start_process(TIMER_DEVICE, true);
     ZF_LOGF_IF(error == -1, "Failed to start clock driver");
     user_process_t clock_driver = user_process_list[error];
-    /* Halt the process until the timer device is mapped into its vspace and irqs are set up*/
-    error = seL4_TCB_Suspend(clock_driver.tcb);
-    ZF_LOGF_IF(error != seL4_NoError, "Failed to suspend clock driver tcb");
     /* Map the timer device to the vspace of the clock driver */
     sos_map_timer(&cspace, clock_driver.vspace, frame, timer_vaddr);
     /* Sets up the timer irqs */

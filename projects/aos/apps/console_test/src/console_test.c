@@ -228,10 +228,10 @@ int main(void)
     
     pt_test();
     mmap_test();
-    // //test_stack_write(fd);
+    test_stack_write(fd);
 
-    //test_buffers(fd);
-    // printf("Passed read/write buffer test\n");
+    test_buffers(fd);
+    printf("Passed read/write buffer test\n");
 
     /*int pid = sos_process_create("console_test_2");
     int pid2 = sos_my_id();
@@ -248,6 +248,11 @@ int main(void)
     for (int i = 0; i < num; i++) {
         printf("From process status: pid - %d, size - %d, stime - %d, app_name - %s\n", pinfo[i].pid, pinfo[i].size, pinfo[i].stime, pinfo[i].command);
     }*/
+
+    for (int i = 0; i < 642; i++) {
+        int pid = sos_process_create("console_test_2");
+        sos_process_delete(pid);
+    }
 
     #define SHARED_PAGE_SIZE 0x1000
     char *shared_buffer = (char *) 0x1000;
