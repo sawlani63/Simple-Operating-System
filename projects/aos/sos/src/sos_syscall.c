@@ -37,6 +37,7 @@ seL4_CPtr signal_cap;
 seL4_CPtr reply;
 
 extern seL4_CPtr clock_driver_ep;
+extern seL4_CPtr sleep_signal;
 
 bool handle_vm_fault(seL4_Word fault_addr, seL4_Word badge);
 
@@ -398,8 +399,6 @@ void syscall_sos_write(seL4_MessageInfo_t *reply_msg, seL4_Word badge)
     sync_bin_sem_post(nfs_sem);
     seL4_SetMR(0, res);
 }
-
-extern seL4_CPtr sleep_signal;
 
 void syscall_sos_usleep(seL4_MessageInfo_t *reply_msg, UNUSED seL4_Word badge)
 {
