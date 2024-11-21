@@ -66,7 +66,7 @@ static void driver_loop()
 
 int main(void)
 {
-    int res = start_timer(TIMER_VADDR);
+    int res = start_timer((void *) TIMER_VADDR);
     if (res < 0) {
         return 1;
     }

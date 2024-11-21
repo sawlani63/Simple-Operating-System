@@ -112,6 +112,7 @@ static int buffercache_readahead(int pid, struct file *file, char *data, uint64_
     /* Pass all the frames to nfs_pread_file at once, and have that read the data into the frames. */
     ((io_args *)args)->cache_frames = refs;
     ((io_args *)args)->num_frames = frames_allocated;
+    ZF_LOGE("E %d %d", offset, file->size);
     return MIN(nfs_pread_file(0, file, data, ALIGN_DOWN(offset, NFS_BLKSIZE), frames_allocated * NFS_BLKSIZE, cb, args), NFS_BLKSIZE);
 }
 
@@ -188,6 +189,7 @@ int buffercache_read(int pid, struct file *file, char *data, uint64_t offset, ui
     if (len > NFS_BLKSIZE || file->handle == NULL) {
         return -1; // error
     } else if (offset >= file->size) {
+        ZF_LOGE("YUCKY B len %d offset %d file->size %d", len, offset, file->size); 
         return -2; // exit early
     }
 
@@ -201,6 +203,7 @@ int buffercache_read(int pid, struct file *file, char *data, uint64_t offset, ui
         khiter_t iter = kh_get(cache, cache_map, key);
         if (iter == kh_end(cache_map)) {
             sync_bin_sem_post(data_sem);
+            ZF_LOGE("LEN %d", len);
             int res = buffercache_readahead(pid, file, data, offset, cb, args, key);
             sync_bin_sem_post(cache_sem);
             return res < (int)NFS_BLKSIZE ? -1 : (int)len;

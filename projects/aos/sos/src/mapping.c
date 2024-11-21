@@ -345,7 +345,6 @@ void sos_destroy_page_table(addrspace_t *as, pid_t pid)
                 if (l3_pt[k].slot != seL4_CapNull) {
                     seL4_Error err = seL4_ARM_PageTable_Unmap(l3_pt[k].slot);
                     if (err != seL4_NoError) {
-                        ZF_LOGE("Failed to unmap");
                         return;
                     }
                 }
@@ -354,7 +353,6 @@ void sos_destroy_page_table(addrspace_t *as, pid_t pid)
             if (l2_pt[j].slot != seL4_CapNull) {
                 seL4_Error err = seL4_ARM_PageTable_Unmap(l2_pt[j].slot);
                 if (err != seL4_NoError) {
-                    ZF_LOGE("Failed to unmap");
                     return;
                 }
             }
@@ -364,7 +362,6 @@ void sos_destroy_page_table(addrspace_t *as, pid_t pid)
         if (l1_pt[i].slot != seL4_CapNull) {
             seL4_Error err = seL4_ARM_PageTable_Unmap(l1_pt[i].slot);
             if (err != seL4_NoError) {
-                ZF_LOGE("Failed to unmap");
                 return;
             }
         }

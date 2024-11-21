@@ -157,6 +157,9 @@ pid_t sos_process_wait(pid_t pid)
 
 void sos_usleep(int msec)
 {
+    if (msec < 0) {
+        return;
+    }
     /* Request the timer driver to register a timer with msec delay */
     seL4_SetMR(0, timer_RegisterTimer);
     seL4_SetMR(1, msec);

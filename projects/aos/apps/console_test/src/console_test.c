@@ -249,9 +249,10 @@ int main(void)
         printf("From process status: pid - %d, size - %d, stime - %d, app_name - %s\n", pinfo[i].pid, pinfo[i].size, pinfo[i].stime, pinfo[i].command);
     }*/
 
-    for (int i = 0; i < 642; i++) {
+    for (int i = 0; i < 641; i++) {
         int pid = sos_process_create("console_test_2");
         sos_process_delete(pid);
+        printf("Created and killed %d\n", i);
     }
 
     #define SHARED_PAGE_SIZE 0x1000

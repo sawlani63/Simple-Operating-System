@@ -69,7 +69,7 @@ static bool alloc_stack(thread_frame *head, seL4_Word *sp)
     // Skip guard page
     curr_stack += PAGE_SIZE_4K;
     thread_frame *curr = head;
-    thread_frame *prev;
+    thread_frame *prev = curr;
     for (int i = 0; i < SOS_STACK_PAGES; i++) {
         seL4_CPtr frame_cap;
         ut_t *frame = alloc_retype(&frame_cap, seL4_ARM_SmallPageObject, seL4_PageBits);

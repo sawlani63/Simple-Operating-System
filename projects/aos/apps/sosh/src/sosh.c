@@ -99,6 +99,7 @@ static int cp(int argc, char **argv)
     assert(fd >= 0);
 
     while ((num_read = read(fd, buf, BUF_SIZ)) > 0) {
+        printf("amount read %d\n", num_read);
         num_written = write(fd_out, buf, num_read);
     }
 
